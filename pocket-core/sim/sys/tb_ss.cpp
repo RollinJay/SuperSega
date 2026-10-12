@@ -141,6 +141,9 @@ int main(int argc, char** argv) {
                 pr.cyc = t->dbg_cycles; pr.line = t->dbg_line;
             }
             if (t->dbg_fetch && pend) {
+                // SP is taken here, not at T1: tv80 writes the high byte of a
+                // 16-bit SP load during the next instruction's T1.
+                pr.sp = t->dbg_sp;
                 uint8_t op = t->dbg_op;
                 bool halted = false;
                 bool start = (pstate == 0) || (pstate == 1 && (op == 0xDD || op == 0xFD));

@@ -70,7 +70,7 @@ Copy `build/dist/*` to the SD card, put `bitstream.rbf_r` in `Cores/SuperSega.Su
 
 ## Licences
 
-- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80). One line changed, documented.
+- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80). Two lines changed, documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`.
 - agg23 analogue-pocket-utils: MIT (Adam Gastineau).
 - APF framework files: Analogue's licence; fetched by `setup.sh`, not included.
 - Gearsystem (GPL-3): used only as a test oracle through `sim/ref`; nothing from it is in the core.

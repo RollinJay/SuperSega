@@ -397,7 +397,10 @@ module tv80_core (/*AUTOARG*/
           `ifdef TV80_REFRESH
           R <= `TV80DELAY 0;
           `endif
-          SP <= `TV80DELAY 16'hFFFF;
+          // Super Sega local change: the machine hands software the CPU with
+          // SP = $DFF0, where the Master System BIOS leaves it (machine profile
+          // cpu.reset_state). tv80 resets SP to $FFFF.
+          SP <= `TV80DELAY 16'hDFF0;
           Alternate <= `TV80DELAY 1'b0;
 
           Read_To_Reg_r <= `TV80DELAY 5'b00000;

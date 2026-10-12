@@ -348,7 +348,9 @@ module ss_vdp (
                     if (ln <= height) begin
                         if (line_ctr == 8'd0) begin
                             line_ctr <= r10;
-                            line_irq <= 1'b1;
+                            // As stock only Mode 4 (R0 bit 2) raises it: the TMS9918
+                            // has none. Super Sega mode in the TMS modes: open, Q15.
+                            if (r0[2] || ss_mode) line_irq <= 1'b1;
                         end else line_ctr <= line_ctr - 8'd1;
                     end else line_ctr <= r10;
                 end

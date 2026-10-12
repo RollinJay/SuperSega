@@ -727,7 +727,7 @@ class Z80{
     this.R=new Uint8Array(12);            // B C D E H L F A IXH IXL IYH IYL
     this.S=new Uint8Array(8);             // shadow B C D E H L F A
     this.PC=0; this.SP=0xDFF0; this.I=0; this.Rr=0;
-    this.IFF1=0; this.IFF2=0; this.IM=1; this.halt=0; this.tc=0;
+    this.IFF1=0; this.IFF2=0; this.IM=0; this.halt=0; this.tc=0;   // IM 0 as after a Z80 reset; software sets IM 1
     this.R[7]=0xFF; this.R[6]=0xFF; this.eiPend=0;
   }
   // 16-bit pair helpers
@@ -1432,7 +1432,10 @@ class VDP{
     const h=this.height();
     if(this.line<h && !this.m.noRender) this.renderLine(this.line);
     if(this.line<=h){
-      if(this.lineCtr===0){ this.lineCtr=this.reg[10]; this.irqLine=1; }
+      /* As stock, only Mode 4 raises the line interrupt: the TMS9918 has none.
+         Whether Super Sega software gets it in the TMS modes is open (Q15); the
+         emulator keeps raising it there. */
+      if(this.lineCtr===0){ this.lineCtr=this.reg[10]; if(this.vmode()===4||this.ss()) this.irqLine=1; }
       else this.lineCtr--;
     } else this.lineCtr=this.reg[10];
     if(this.line===h){ this.status|=0x80; }
@@ -1926,7 +1929,8 @@ class Machine{
       if(p!==0x00) this.ggReg[p]=v;   /* $00 is read-only */
       return;
     }
-    if((this.mode==='sg'||this.mode==='sc'||this.mode==='sf')&&p<=0x06) return;
+    /* The SG-1000, SC-3000 and SF-7000 have no $3E/$3F registers: nothing below $40 answers. */
+    if((this.mode==='sg'||this.mode==='sc'||this.mode==='sf')&&p<0x40) return;
     if(this.mode==='ss'){
       switch(p){
         case 0x07: if(this.pcm.fifo.length<64) this.pcm.fifo.push(v); return;
