@@ -1,6 +1,6 @@
 # Super Sega ROM Hack Maker — Framework Specification
 
-*Draft 1 · 5 October 2026. This document defines the mod-making system inside the Super Sega emulator, the plugin model that adds games to it, and the launch roster. Related document: the Golden Axe Super Sega conversion plan (`claude/golden-axe-super-sega-conversion.md`), which covers converting Golden Axe Warrior and Ax Battler to Super Sega hardware features.*
+*Draft 1 · 5 October 2026. This document defines the mod-making system inside the Super Sega emulator, the plugin model that adds games to it, and the launch roster. Related document: the Golden Axe Super Sega conversion plan (`golden-axe-super-sega-conversion.md`), which covers converting Golden Axe Warrior and Ax Battler to Super Sega hardware features.*
 
 ---
 
@@ -197,7 +197,7 @@ Anything copied from a ROM: graphics, text, maps, music or code. A plugin descri
 
 The test step runs every build under its target's own profile, where Super Sega extensions do not exist, so a Master System or Game Gear mod that accidentally depends on one fails visibly before the patch is made.
 
-The Super Sega machine also has an Analogue Pocket implementation (`claude/SuperSega_Pocket_Core_Design.md`). Its first milestone, so far checked in simulation only, runs Master System and Game Gear software, but it does not yet draw every Super Sega extension or have the FM unit (Technical Reference v3, §19). The emulator's Super Sega profile therefore stays the reference for testing Super Sega mods (section 5, step 4).
+The Super Sega machine also has an Analogue Pocket implementation (`../pocket-core/docs/SuperSega_Pocket_Core_Design.md`). Its first milestone, so far checked in simulation only, runs Master System and Game Gear software, but it does not yet draw every Super Sega extension or have the FM unit (Technical Reference v3, §19). The emulator's Super Sega profile therefore stays the reference for testing Super Sega mods (section 5, step 4).
 
 ---
 

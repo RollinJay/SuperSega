@@ -1,6 +1,6 @@
 # Super Sega — v7 Reconciliation: Machine vs Emulator
 
-October 2026. Companion to `super_sega_machine_v7.json` and `SuperSega_Technical_Reference_v3.md`. Paths below are relative to the top of the package (`machine/`, `emulator/`, `pocket-core/`).
+October 2026. Companion to `super_sega_machine_v7.json` and `SuperSega_Technical_Reference_v3.md`. Paths below are relative to the top of the repository (`machine/`, `emulator/`, `pocket-core/`).
 
 **Terms used below.** *Feature Enable A, B, C* are the three registers through which new software opts into Super Sega features (VDP bank 0 R15, bank 1 R2 and R7; "bank1 R3" is register 3 of the extension register bank 1). The *enhancement layer* (AEL) is the set of optional boosts for unmodified software, all off by default. The *bus synchroniser* holds the CPU when turbo runs it faster than the video chip can accept data. The Technical Reference explains each in full.
 
@@ -100,7 +100,7 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 
 | Check | Result |
 |---|---|
-| Behavioural probes (`emulator/tools/probes_v7.js`) for 41 behaviours, each citing its hardware source. Two fixes have no probe of their own: M13 (cartridge wait states lengthen the access) and M17 (T-states lost during ED/CB instructions) are only exercised by the bus-synchroniser probe and the Gearsystem comparisons | 41 of 41 pass on the fixed page, 0 of 41 on the original |
+| Behavioural probes (`emulator/tools/probes_v7.js`) for 41 behaviours, each citing its hardware source. The probes are named after the patch's MODEL fixes (M1–M37 in `emulator/fix_emulator_v7.py`); four fixes have no probe of their own. M11 (Game Gear `$01`–`$06` power-on values) shows only in the I/O test ROM comparison below, in Game Gear mode. M13 (cartridge wait states lengthen the access) is exercised by no check: headless runs use the emulator's default ROM access, a copy in fast RAM, and even with its other setting, cartridge timing, a wait state arises only at the 200 % turbo step. M15 (SG-1000/SC-3000/SF-7000 writes to `$00`–`$06` do nothing) is exercised by no check. M17 (T-states lost during ED/CB instructions) is caught by the bus-synchroniser probe (M12) | 41 of 41 pass on the fixed page, 0 of 41 on the original |
 | The page's own self-test, run headless | 29 of 29 |
 | Gearsystem as an independent oracle: Batman Returns SMS (PAL) frames 30, 60, 120, 200, 500, 900, 1500 and GG frames 200, 500, 900, 1500 | identical (GG within Gearsystem's colour rounding: it expands channel value 5 to 86, not 85) |
 | `emulator/tools/profile_crosscheck.py` (an earlier chat's check that the emulator implements what the profile claims; its height check updated to the v7 rule) | 47 of 47 claims on the fixed page; the original page fails the height rule |
@@ -118,7 +118,7 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 
 ## 6. Project documents checked against v7
 
-The four documents that were already in the claude.ai project were read against profile v7 and this reconciliation. The two with machine statements to correct were updated in the project.
+The four documents that were already in the claude.ai project were read against profile v7 and this reconciliation. The two with machine statements to correct were updated, and are in `project-docs/`; the other two (the Super Mario Land DX port design and the Super Mario Bros. Deluxe options) are not in this repository.
 
 | Document | Result |
 |---|---|
@@ -127,4 +127,4 @@ The four documents that were already in the claude.ai project were read against 
 | Super Mario Land DX port design | No conflict. Its second-emulator validator (`ssemu.js`) needs the CPU and VDP fixes it lists, and those are in the v7 patch (M1–M9; the document describes the HALT fault correctly). Its figures were produced on an earlier fixed page, and v7 changes more (sprite priority, PSG, Game Gear colour, low-port reads), so its lockstep runs are worth repeating on the v7 page |
 | Super Mario Bros. Deluxe options | No machine statements |
 
-The enhancement-layer design (`SuperSega_AutoEnhancement_Layer.md`, from an earlier chat, written against v5, not in the project) lists two items that have no switch in v7: VRAM write reliability, which both implementations always provide, and region speed correction, which is the 50/60 Hz video setting. The Technical Reference (§15) and the profile now say so.
+The enhancement-layer design (`SuperSega_AutoEnhancement_Layer.md`, from an earlier chat, written against v5, not in this repository) lists two items that have no switch in v7: VRAM write reliability, which both implementations always provide, and region speed correction, which is the 50/60 Hz video setting. The Technical Reference (§15) and the profile now say so.

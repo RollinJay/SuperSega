@@ -2,7 +2,7 @@
 // T-states per instruction as the expected result.
 const fs = require('fs');
 const path = require('path');
-// emuload.js: the emulator's headless loader (EMULOAD overrides the package location)
+// emuload.js: the emulator's headless loader (EMULOAD overrides the default, ../../../emulator/tools/emuload)
 const { loadEmu } = require(process.env.EMULOAD || path.join(__dirname, '../../../emulator/tools/emuload'));
 const X = loadEmu(process.argv[2], { quiet: true });
 const prog = [

@@ -1,5 +1,5 @@
 'use strict';
-// JS emulator instruction trace in the same record format as ref/gstrace.cpp.
+// JS emulator instruction trace in the same record format as pocket-core/sim/ref/gstrace.cpp.
 const fs = require('fs');
 const { loadEmu, newMachine } = require('./emuload');
 const [,, html, rom, mode, n, out] = process.argv;

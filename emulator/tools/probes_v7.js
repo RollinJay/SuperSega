@@ -399,3 +399,4 @@ probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-la
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);
+process.exitCode = pass === results.length ? 0 : 1;

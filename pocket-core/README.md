@@ -23,6 +23,7 @@ pocket/               Analogue Pocket platform layer
   setup.sh            fetches the APF framework and assembles a Quartus project
   tools/reverse_rbf.py
 sim/
+  check.sh            the regression checks run on every push (see below)
   z80/                Z80 wrapper timing test (iverilog)
   sys/                machine simulation (Verilator): frames, traces, audio capture
   pocket/             platform simulation: APF bridge model, PSRAM model, saves
@@ -34,15 +35,20 @@ roms/                 the generated test ROMs (homebrew, made by tools/mk_testro
 
 ## Running the simulations
 
-Requires Verilator 5, iverilog, Python 3 with numpy and Pillow.
+Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check.sh` run the emulator in `../emulator/`), Python 3 with numpy and Pillow, and Yosys 0.33 for the resource estimate.
+
+`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
 
 ```sh
 python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, ssfeat, ports test ROMs
+(cd sim/z80 && ./run.sh)                     # Z80 wrapper timing against the emulator's Z80
+(cd syn && yosys -q -l synth.log synth.ys)   # resource estimate; rewrites syn/synth.log
 cd sim/sys && ./build.sh && mkdir -p out
 ./obj/tb_ss ../../roms/vdp224.sms sms 40 out/v224 10 37        # frames 10 and 37 as PPM
 ./obj/tb_ss game.sms sms 600 out/g -pal 200 500                 # PAL
 ./obj/tb_ss game.gg gg 600 out/gg 200 500                       # Game Gear
-#   boosts: -spr16 -ovf -turbo N -vboost -afire -pstereo ; hold C: -holdc ; audio: -wav file.wav
+#   boosts: -spr16 -ovf -turbo N (N = 1-4: 125/150/175/200 %; sms/gg only) -vboost -afire -pstereo
+#   hold C: -holdc ; audio: -wav file.wav
 ./obj/tb_ss ../../roms/ports.sms ss 11 out/io 10                # I/O decode test; decode with:
 python3 ../../tools/read_ports_ppm.py out/io_10.ppm [other.ppm]
 cd ../pocket && ./build.sh && mkdir -p out

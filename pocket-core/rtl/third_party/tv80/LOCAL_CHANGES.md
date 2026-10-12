@@ -10,5 +10,5 @@ is vendored here unchanged except for one line in `tv80_core.v`, marked
   I/O cycle in T2, tv80's form made `Auto_Wait_t1` toggle, so the cycle did not
   continue on the first enable after WAIT rose. The machine's I/O strobe is
   taken at that enable, so the access happened while the CPU stayed in T2 and
-  was repeated. Found with the turbo bus synchroniser (sim/sys, `-turbo 4`).
-  Instruction timings without WAIT are unchanged (sim/z80/tb_z80.v).
+  was repeated. Found with the turbo bus synchroniser (pocket-core/sim/sys, `-turbo 4`).
+  Instruction timings without WAIT are unchanged (pocket-core/sim/z80/tb_z80.v).

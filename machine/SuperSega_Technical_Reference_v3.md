@@ -457,7 +457,7 @@ Explicit software intent always wins: every boost acts only on software running 
 | Game Gear uncrop | show the full 256 × 192 picture the Game Gear VDP draws, instead of the 160 × 144 window |
 | True TMS colours | SG-1000/SC-3000 picture modes use the TMS9918's own colours instead of the Master System's approximation |
 
-The FM unit being present is inherent to the machine, not a switch. Two items of the enhancement-layer design have no switch of their own: *VRAM write reliability* (the emulator and the Pocket core never drop a VDP write, so it is always in effect) and *region speed correction*, which is the machine's 50/60 Hz video setting. Tiers, risks and the per-game override database are in `SuperSega_AutoEnhancement_Layer.md` (written against profile v5; where it differs, this section and profile v7 apply).
+The FM unit being present is inherent to the machine, not a switch. Two items of the enhancement-layer design have no switch of their own: *VRAM write reliability* (the emulator and the Pocket core never drop a VDP write, so it is always in effect) and *region speed correction*, which is the machine's 50/60 Hz video setting. Tiers, risks and the per-game override database are in `SuperSega_AutoEnhancement_Layer.md`, an earlier design document that is not in this repository (written against profile v5; where it differs, this section and profile v7 apply).
 
 ---
 
@@ -551,6 +551,6 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | YM2413 FM | yes (approximate synthesis) | not yet; the core reports no FM unit so software uses its PSG music |
 | PCM, wavetable, DMA engine | yes | not yet |
 | SF-7000, floppy, debug unit | yes | not yet |
-| Enhancement layer | all | all except true TMS colours, which come with the TMS9918 modes |
+| Enhancement layer | all | all except true TMS colours and the legacy-mode sprite limit, which come with the TMS9918 modes |
 
 **Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a Super Sega feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and Super Sega modes and gets the same values on both, apart from the two differences the implementations are meant to have: the core has no FM unit yet (`$F2`), and no debug host is attached to it (`$FC`/`$FD` bit 7). Nothing has run on a Pocket yet.

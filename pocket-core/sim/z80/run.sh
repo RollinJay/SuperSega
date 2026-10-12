@@ -2,7 +2,7 @@
 # Z80 wrapper timing test (iverilog): the start cycle of every instruction of a
 # short program covering the timing classes (IX/IY, DDCB, block I/O, IN/OUT,
 # CALL/RET) on the RTL CPU wrapper, against the emulator's Z80.
-# usage: ./run.sh [emulator page]   (default: the package's emulator)
+# usage: ./run.sh [emulator page]   (default: ../../../emulator/supersega-emulator.html)
 set -e
 R=../../rtl
 PAGE=${1:-../../../emulator/supersega-emulator.html}

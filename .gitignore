@@ -1,0 +1,37 @@
+# Simulation and tool outputs
+pocket-core/sim/*/obj/
+pocket-core/sim/*/out/
+pocket-core/sim/z80/tb_z80
+pocket-core/sim/z80/prog.hex
+pocket-core/sim/z80/z80_js.log
+pocket-core/sim/z80/z80_rtl.log
+emulator/tools/out/
+__pycache__/
+
+# Quartus project assembled by pocket-core/pocket/setup.sh. It holds Analogue's
+# APF framework and Intel files, which are under their own licences and must not
+# be committed. Bitstreams are build outputs.
+pocket-core/pocket/build/
+*.rbf
+*.rbf_r
+
+# Gearsystem checkout and runner binaries (GPL-3, not distributed; see
+# pocket-core/sim/ref/README.md)
+pocket-core/sim/ref/Gearsystem/
+pocket-core/sim/ref/gsrun
+pocket-core/sim/ref/gstrace
+pocket-core/sim/ref/*.o
+
+# Game and system ROMs, saves and audio captures. Only the generated test ROMs
+# in pocket-core/roms/ are tracked.
+*.sms
+*.gg
+*.sg
+*.sc
+*.sf7
+*.bin
+*.rom
+*.sav
+*.wav
+!pocket-core/roms/*.sms
+!pocket-core/roms/*.sav

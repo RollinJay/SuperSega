@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Build small Master System test ROMs that exercise the extra-height modes.
+"""Build the small test ROMs in roms/ that the simulations and the emulator checks use.
 
 usage: mk_testrom.py outdir
 
-Writes vdp192.sms, vdp224.sms and vdp240.sms. Each sets Mode 4 with M2 set,
+Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
+tone.sms, ssfeat.sms and ports.sms. The VDP ROMs are described here; each of the
+other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
 32x32 name table at $3700 (tall modes) / 32x28 at $3800 (192), places sprites
 near the bottom of the screen, one at Y=$D0 (a terminator only in 192-line

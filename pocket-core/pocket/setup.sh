@@ -4,7 +4,8 @@
 # The Analogue Pocket framework files (apf/, core_bridge_cmd.v, the project
 # settings with the Pocket's pin assignments) are under Analogue's licence and
 # are not kept in this repository. This script fetches them from the official
-# template, github.com/open-fpga/core-template, and lays out a build tree:
+# template, github.com/open-fpga/core-template, at the tag core_top.v was
+# written against (TEMPLATE_TAG below), and lays out a build tree:
 #
 #   build/src/fpga/ap_core.qpf, ap_core.qsf    project (template settings + ours)
 #   build/src/fpga/apf/                        framework (fetched)
@@ -21,7 +22,14 @@ OUT=${1:-$HERE/build}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-git clone --depth 1 https://github.com/open-fpga/core-template "$TMP/core-template"
+# core_top.v's port list matches this template release
+TEMPLATE_TAG=v1.3.0
+TEMPLATE_COMMIT=da3a021b1eaf742604d86d8dc9b33a6666263e6a
+git clone --depth 1 --branch "$TEMPLATE_TAG" https://github.com/open-fpga/core-template "$TMP/core-template"
+if [ "$(git -C "$TMP/core-template" rev-parse HEAD)" != "$TEMPLATE_COMMIT" ]; then
+  echo "core-template $TEMPLATE_TAG is not commit $TEMPLATE_COMMIT; check the template before using it" >&2
+  exit 1
+fi
 T="$TMP/core-template/src/fpga"
 
 mkdir -p "$OUT/src/fpga/core"
@@ -41,6 +49,8 @@ cp -r "$HERE/../rtl/." "$OUT/src/fpga/core/rtl/"
 sed -e '/core\/core_top.v/d' -e '/core\/core_bridge_cmd.v/d' -e '/core\/core_constraints.sdc/d' \
     -e '/mf_pllbase/d' -e '/stp1/d' -e '/ENABLE_SIGNALTAP/d' \
     "$T/ap_core.qsf" > "$OUT/src/fpga/ap_core.qsf"
+# start a new line if the template's last kept line has no line end
+if [ -n "$(tail -c 1 "$OUT/src/fpga/ap_core.qsf")" ]; then echo >> "$OUT/src/fpga/ap_core.qsf"; fi
 echo 'set_global_assignment -name QIP_FILE core/ss_core.qip' >> "$OUT/src/fpga/ap_core.qsf"
 
 cp -r "$HERE/dist" "$OUT/"

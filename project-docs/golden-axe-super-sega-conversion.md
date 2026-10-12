@@ -2,9 +2,9 @@
 
 Covers Golden Axe Warrior (SMS) and Ax Battler: A Legend of Golden Axe (Game Gear), retargeted from stock hardware to the Super Sega profile.
 
-Feature references follow the Super Sega machine profile v7 (`claude/super_sega_machine_v7.json`) and Technical Reference v3 (`claude/SuperSega_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q14).
+Feature references follow the Super Sega machine profile v7 (`../machine/super_sega_machine_v7.json`) and Technical Reference v3 (`../machine/SuperSega_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q14).
 
-Related: the ROM hack maker framework specification (`claude/super-sega-rom-hack-maker.md`), which covers how mods for these and the other roster titles are made, tested and distributed.
+Related: the ROM hack maker framework specification (`super-sega-rom-hack-maker.md`), which covers how mods for these and the other roster titles are made, tested and distributed.
 
 ---
 

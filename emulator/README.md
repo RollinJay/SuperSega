@@ -1,6 +1,6 @@
 # Super Sega emulator — v7 fixes
 
-`supersega-emulator.html` is the emulator with every v7 fix applied. `fix_emulator_v7.py` is the same change as one patch, for applying to the original page:
+`supersega-emulator.html` is the emulator with every v7 fix applied. `fix_emulator_v7.py` is the same change as one patch, for applying to the original (pre-v7) page, `supersega-emulator.orig.html`, which is not included in this repository:
 
 ```sh
 python3 fix_emulator_v7.py supersega-emulator.orig.html supersega-emulator.html
@@ -11,7 +11,7 @@ The patch has 108 edits. Each is labelled **MODEL** (the emulator's model of the
 ## Checks (Node.js 18 or later, Python 3)
 
 ```sh
-cd tools
+cd tools && mkdir -p out
 node probes_v7.js ../supersega-emulator.html          # 41 behavioural probes, each with its hardware source
 node selftest.js ../supersega-emulator.html           # the page's own Debug-tab self-test, headless (29 checks)
 python3 profile_crosscheck.py ../supersega-emulator.html ../../machine/super_sega_machine_v7.json
@@ -21,6 +21,8 @@ PAL=1 node js_dump.js ../supersega-emulator.html game.sms sms out/g 200 500   # 
 node cmp_gs.js ../supersega-emulator.html game.sms sms gsPrefix 200 500       # against Gearsystem frames
 ```
 
+The probes, the self-test, the profile cross-check and the wiring audit exit with status 1 when a check fails; GitHub runs them on every push. Paths from here on are relative to `tools/`, like the commands. `cmp_gs.js` reads `gsPrefix_N.ppm` and `gsPrefix_N.ram` as written by the Gearsystem runner `gsrun`, which is built from a local Gearsystem checkout as `../../pocket-core/sim/ref/README.md` describes. Prefix `PAL=1` for 50 Hz titles, as for `js_dump.js`.
+
 `emuload.js` runs the page's script headless; the other tools build on it. `jstrace.js` writes an instruction trace that `../../pocket-core/tools/cmp_trace.py` compares with Gearsystem's (`../../pocket-core/sim/ref/gstrace.cpp`). `shots.js` and `smoke.js` are quick render and smoke tests.
 
-The probes run against the original page too, where they should fail: 0 of 41 pass there.
+The probes also run against the original page (not included), where they should fail: 0 of 41 pass there.

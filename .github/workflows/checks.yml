@@ -1,0 +1,48 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    name: Emulator
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: emulator/tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Machine profile is valid JSON
+        run: python3 -m json.tool ../../machine/super_sega_machine_v7.json > /dev/null
+      - name: Behavioural probes
+        run: node probes_v7.js ../supersega-emulator.html
+      - name: Self-test
+        run: node selftest.js ../supersega-emulator.html
+      - name: Profile cross-check
+        run: python3 profile_crosscheck.py ../supersega-emulator.html ../../machine/super_sega_machine_v7.json
+      - name: Wiring audit
+        run: python3 wiring_audit.py ../supersega-emulator.html
+
+  pocket-core:
+    name: Pocket core simulations
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Verilator, Icarus Verilog, numpy and Pillow
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends verilator iverilog python3-numpy python3-pil
+          verilator --version
+      - name: Test ROMs, Z80 timing, machine and Pocket simulations
+        run: pocket-core/sim/check.sh "$RUNNER_TEMP/check"

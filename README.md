@@ -1,28 +1,30 @@
-# Super Sega — machine v7, emulator fixes and Analogue Pocket core (October 2026)
+# Super Sega
 
-This package brings together the changes made to the Super Sega 8-bit machine across the project's chats, fixes the emulator to match, and starts the machine's FPGA implementation for the Analogue Pocket.
+Super Sega is a design for an 8-bit games console in the family of Sega's SG-1000 (and the SC-3000, its home-computer version), Master System and Game Gear. It runs their software unmodified, and adds new hardware features that new software can opt into.
+
+This repository holds the console's specification, an emulator that runs in a web browser, and an FPGA implementation of the console (a *core*) for the Analogue Pocket, a handheld that loads hardware designs through its openFPGA platform. It describes machine version 7 (October 2026).
 
 ## Three things, kept apart
 
 **The machine** is the console itself: its chips, its registers, what software sees. It is defined by two documents in `machine/`: the machine profile (`super_sega_machine_v7.json`, machine-readable) and the Technical Reference (`SuperSega_Technical_Reference_v3.md`, the same for people). Where the two disagree, one of them has a bug.
 
-**The emulator** (`emulator/`) is an application. Part of it models the machine; the rest is tooling that no console has — the ROM hack maker, the MSX porting tools, the Lab, the Debug tab, display filters, save states. That tooling never goes into the machine documents or the Pocket core.
+**The emulator** (`emulator/`) is an application. Part of it models the machine; the rest is tooling that no console has — the ROM hack maker, the MSX porting tools, the Super Sega Lab (which compares two builds of one game), the Debug tab, display filters, save states. That tooling never goes into the machine documents or the Pocket core.
 
 **The Pocket core** (`pocket-core/`) is a second implementation of the machine, in Verilog, for the Analogue Pocket's openFPGA platform. It contains none of the emulator's tooling.
 
-When the emulator and the machine documents disagree, the documents win and the emulator is fixed. When the documents turn out to be wrong about the original hardware, both are corrected and the change is recorded in the profile's `v7_changes`. `machine/SuperSega_v7_Reconciliation.md` sorts every change made this round into machine and emulator, and lists how each was checked.
+When the emulator and the machine documents disagree, the documents win and the emulator is fixed. When the documents turn out to be wrong about the original hardware, both are corrected and the change is recorded in the profile's `v7_changes`. `machine/SuperSega_v7_Reconciliation.md` sorts every change made in v7 into machine and emulator, and lists how each was checked.
 
 ## What is where
 
 ```
 machine/
-  super_sega_machine_v7.json            machine profile v7 (20 recorded changes, open questions Q1-Q14)
+  super_sega_machine_v7.json            machine profile v7 (20 recorded changes; questions Q1-Q14, ten still open)
   SuperSega_Technical_Reference_v3.md   the machine for readers; supersedes v2
   SuperSega_v7_Reconciliation.md        machine vs emulator: what changed, where, how it was checked
-  tools/make_profile_v7.py              builds the v7 profile from v6 (super_sega_machine_v6.json)
+  tools/make_profile_v7.py              builds the v7 profile from v6 (super_sega_machine_v6.json, not included)
 emulator/
   supersega-emulator.html               the emulator with every v7 fix applied
-  fix_emulator_v7.py                    the one patch: original page -> fixed page (108 labelled edits)
+  fix_emulator_v7.py                    the one patch: original page (not included) -> fixed page (108 labelled edits)
   tools/                                headless checks: behavioural probes, self-test, Gearsystem comparison,
                                         profile cross-check, wiring audit, SC-3000 typing
 pocket-core/
@@ -30,18 +32,30 @@ pocket-core/
   docs/SuperSega_Pocket_Core_Design.md  design, status, verification, decisions needed
   rtl/  pocket/  sim/  syn/  tools/  roms/
 project-docs/                           the two project documents corrected against v7 (Golden Axe
-                                        conversion plan, ROM hack maker); also updated in the project
+                                        conversion plan, ROM hack maker)
+.github/workflows/checks.yml            the checks run on every push (see Checks below)
 ```
 
 ## Status
 
-- **Machine:** profile v7 and Technical Reference v3 are complete for everything decided so far. Fourteen open questions remain; the ones that block later work are the math unit's divide (Q7), the port mirror range (Q1) and the TMS-colour boost (Q11).
-- **Emulator:** 108 edits (75 to its model of the machine, 33 to the application). 41 behavioural probes pass on the fixed page and none on the original; the page's own self-test passes; Batman Returns on the Master System and the Game Gear matches Gearsystem frame for frame.
-- **Pocket core, milestone 1:** runs Master System and Game Gear software in simulation, frame-identical to Gearsystem on the frames compared, and Super Sega software up to the features listed in its design document. The enhancement-layer boosts for Master System, Game Gear, SG-1000 and SC-3000 software are in its settings menu, all off by default. **It has not been compiled in Quartus or run on a Pocket yet.** No FM sound, no TMS9918 picture modes yet.
+Two terms used below. **Gearsystem** is an independent Master System and Game Gear emulator, used only as a reference to test against. The **enhancement layer** is a set of optional boosts for unmodified software, such as removing sprite flicker; every boost is off by default.
+
+- **Machine:** profile v7 and Technical Reference v3 are complete for everything decided so far. Ten of the fourteen numbered questions (Q1–Q14) are still open (Q4–Q6 are resolved, and Q10 is an emulator workflow rather than a machine question). The ones that block later work are the math unit's divide (Q7; the math unit is the console's hardware multiplier and divider), the port mirror range (Q1; whether some new I/O registers must move to other port addresses) and whether the boost that shows SG-1000 and SC-3000 graphics in their original colours should default off like every other boost (Q11).
+- **Emulator:** 108 edits (75 to its model of the machine, 33 to the application). 41 behavioural probes pass on the fixed page and none on the original; the page's own self-test passes. Batman Returns matches Gearsystem on every frame compared: on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500; on the Game Gear, frames 200, 500, 900 and 1500, within Gearsystem's colour rounding.
+- **Pocket core, milestone 1:** runs Master System and Game Gear software in simulation, identical to Gearsystem on the frames compared (Game Gear within Gearsystem's colour rounding), and Super Sega software up to the features listed in its design document. Every enhancement-layer boost is in its settings menu, off by default, except the two that belong to the TMS9918 picture modes (the SG-1000 and SC-3000 graphics): true TMS colours and the legacy-mode sprite limit. The boosts act only on Master System, Game Gear, SG-1000 and SC-3000 software. **It has not been compiled with Quartus (Altera's FPGA tools) or run on a Pocket yet.** No FM sound, no TMS9918 picture modes yet.
+
+## Checks
+
+Every push and pull request runs the checks in `.github/workflows/checks.yml` on GitHub Actions:
+
+- **Emulator:** the machine profile must be valid JSON; the 41 behavioural probes, the page's self-test, the profile cross-check and the wiring audit must pass.
+- **Pocket core** (`pocket-core/sim/check.sh`): the test ROMs must regenerate byte for byte; the core's Z80 processor must start each instruction of a timing test program on the same cycle as the emulator's; the machine simulation must draw the same frames as the emulator for the video, sprite, Super Sega feature and I/O test ROMs; and the Pocket platform simulation must draw the same frames as the machine simulation, read the Pocket's B button as button 1 in Super Sega mode, and read the save slot back byte-exact.
+
+The same commands, and the checks that need commercial ROMs or a local Gearsystem build, are in `emulator/README.md` and `pocket-core/README.md`.
 
 ## Licences
 
-- The Super Sega RTL has no licence yet; choosing one is the first decision in `pocket-core/docs/SuperSega_Pocket_Core_Design.md` §16, because it decides which FM core can be used.
+- The Super Sega files have no licence yet. Until one is chosen, normal copyright applies: people can view and fork the repository on GitHub, but have no permission to reuse, change or distribute its files. Choosing a licence for the RTL (the core's hardware description) is the first decision in `pocket-core/docs/SuperSega_Pocket_Core_Design.md` §16, because it decides which FM core can be used.
 - Third-party code in the core: tv80 (MIT, one line changed and documented) and agg23's analogue-pocket-utils (MIT). Analogue's framework files are fetched by `pocket-core/pocket/setup.sh` and are not included.
 - Gearsystem (GPL-3) was used only as an independent test oracle. Nothing from it is included; `pocket-core/sim/ref/` holds the two small runner programs that were linked to a local copy.
 - No commercial ROMs are included. The test ROMs in `pocket-core/roms/` are generated by `pocket-core/tools/mk_testrom.py`.

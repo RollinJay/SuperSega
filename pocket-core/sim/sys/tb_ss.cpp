@@ -3,12 +3,13 @@
 // Runs a ROM on the RTL machine with the same scripted input as the reference
 // tools (button 1 at frames 90-95 of every 120; Start at 60-65 in GG mode),
 // captures frames, and optionally writes an instruction trace in the record
-// format of ref/gstrace.cpp so the CPU/VDP timing can be compared with
+// format of ../ref/gstrace.cpp so the CPU/VDP timing can be compared with
 // Gearsystem cycle for cycle.
 //
 // usage: tb_ss rom mode(sms|gg|ss) frames outprefix [options] [dumpframes...]
 //   options: -pal  -gg1 (315-5535 timing; default for all modes)  -sms2 (SMS2 timing)
 //            enhancement layer: -spr16 -ovf -turbo N -vboost -afire -pstereo
+//                            (-turbo N: N = 1-4 for 125/150/175/200 %; sms/gg only)
 //            -holdc          hold C throughout (auto-fire checks)
 //            -wav FILE       48 kHz stereo capture of the audio output
 //            -trace N file   write the first N instruction starts

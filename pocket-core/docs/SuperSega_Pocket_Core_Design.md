@@ -73,7 +73,7 @@ The machine reads ROM over a request/acknowledge bus; the platform serves it fro
 Data slot 1 (`Save`, nonvolatile, `.sav`, up to 32 KB) maps to the machine's cartridge RAM:
 
 - **Load**: at start the APF writes the file over the bridge at `$2000_0000`; it goes into the cartridge RAM's second port.
-- **Write back**: on quit or power-off the APF reads `$2000_0000`–`$2000_7FFF`. A small read-out block (`ss_save_unload.v`) fetches the four bytes of each word in the machine clock domain and hands the word back in one step. (agg23's `data_unloader` was tried first; it assumes the memory side is much faster than the bridge, and with this design it returned the fourth byte of every word four times.)
+- **Write back**: on quit or power-off the APF reads `$2000_0000`–`$2000_7FFF`. A small read-out block (`pocket/ss_save_unload.v`) fetches the four bytes of each word in the machine clock domain and hands the word back in one step. (agg23's `data_unloader` was tried first; it assumes the memory side is much faster than the bridge, and with this design it returned the fourth byte of every word four times.)
 - **Size**: the save size in the APF's data-slot table is 32 KB once there is something to keep — a save file was loaded, or the game has written its cartridge RAM — and 0 otherwise, so games without saves leave no file. The flag survives a core reset; a zero size would truncate an existing save.
 
 SG-1000/SC-3000 cartridge RAM is not battery-backed and is not saved.
@@ -158,7 +158,7 @@ The APF shows at most 16 entries; 14 are used. The two left are for the true-TMS
 
 ## 11. Machine RTL notes
 
-- **CPU**: tv80 (MIT, a Verilog translation of T80) behind a wrapper that runs it on clock enables and reports the exact enable at which an I/O access happens. One line of tv80 is changed (documented in `LOCAL_CHANGES.md`): with an external WAIT on an I/O cycle, tv80 lingered in T2 after WAIT was released, so the wrapper saw the access twice. Found when the turbo bus synchroniser hung the CPU; instruction timing without WAIT is unchanged.
+- **CPU**: tv80 (MIT, a Verilog translation of T80) behind a wrapper that runs it on clock enables and reports the exact enable at which an I/O access happens. One line of tv80 is changed (documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`): with an external WAIT on an I/O cycle, tv80 lingered in T2 after WAIT was released, so the wrapper saw the access twice. Found when the turbo bus synchroniser hung the CPU; instruction timing without WAIT is unchanged.
 - **VDP timing** follows Gearsystem's per-cycle event table (315-5535 column, §16 of the Technical Reference). The renderer draws a line at its render event: next line's sprites first (so overflow and collision flags are ready on time), then this line's background, then the composite through CRAM into the output ring. All line buffers are block RAM with one write and one registered read port; the only flip-flop array is the 512 sprite-present bits used for collisions.
 - **Enhancement layer** inputs on `ss_top`: `ael_sprlimit`, `ael_ovf_stock`, `ael_startpause`, `ael_turbo`, `ael_vramboost`, `ael_autofire`, `ael_pstereo`; Game Gear uncrop is the `gg_crop` input. Every boost is ignored in Super Sega mode, where software sets those features itself.
 - **Debug unit**: not in this milestone. Its control port `$FB` is written in every mode and reads back in Super Sega mode; `$FC`/`$FD` read the status of a unit with no debug host attached (`$40`). In the stock modes `$FB`–`$FF` read as the controller mirror, as on the stock machine.
@@ -199,7 +199,7 @@ Everything below is simulation (Verilator 5.020, iverilog). Gearsystem is used o
 | I/O test ROM (`roms/ports.sms`): 18 ports read in Master System, Game Gear and Super Sega modes, idle and with button 1 held | RTL = emulator, except `$F2` (no FM unit in the core) and `$FC`/`$FD` bit 7 in Super Sega mode (no debug host) |
 | Auto-fire with C held (`-afire -holdc`) | button 2 toggles every two frames in Master System mode; no effect in Super Sega mode |
 | Pocket buttons B, A and Y held, Master System and Super Sega modes (`tb_pocket -hold`) | B reads as button 1 and A as button 2 in both modes; Y is C (stock) or A (Super Sega) |
-| Verilator lint of `core_top` with the APF's `core_bridge_cmd` (project tree from `setup.sh`) | elaborates; only style warnings, the substantive ones in the template's own code |
+| Verilator lint of `core_top` with the APF's `core_bridge_cmd` (project tree from `pocket/setup.sh`) | elaborates; only style warnings, the substantive ones in the template's own code |
 | Identifiers used before their declaration (Quartus rejects these under `default_nettype none`) | none after fixes in `ss_top`, `ss_save_unload` and `core_top` |
 
 Not yet done: a Quartus build (timing closure, real resource use), and anything on hardware.
