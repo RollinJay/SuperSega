@@ -9,9 +9,10 @@ yet, and there is no FM sound yet.
 
 ROMs go in /Assets/supersega/common/. Pocket B = button 1, A = button 2,
 Y = auto-fire for button 2 (with that boost on), Select = Pause. In Super
-Sega mode the pad is a Mega Drive pad: B = B, A = C, Y = A, Start = Start,
-so buttons 1 and 2 stay on B and A. A docked USB keyboard is the SC-3000
-SK-1100 keyboard.
+Sega (SS) mode the pad is a Mega Drive pad: B = B, A = C, Y = A, Start =
+Start, so buttons 1 and 2 stay on B and A. To move any of these to other
+buttons, use Core Settings > Controls. A docked USB keyboard is the
+SC-3000 SK-1100 keyboard.
 
 Boost options in the core settings are the machine's enhancement layer. All
 are off by default, which is stock behaviour, and they act only on Master

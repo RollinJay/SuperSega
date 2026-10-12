@@ -193,7 +193,7 @@
         "value": 1
       },
       {
-        "name": "Boost: Auto-fire (Y)",
+        "name": "Boost: Auto-fire",
         "id": 24,
         "type": "check",
         "enabled": true,
