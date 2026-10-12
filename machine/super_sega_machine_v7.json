@@ -1,0 +1,973 @@
+{
+ "$schema": "super-sega-machine-block/v7",
+ "supersedes": "super_sega_machine_v6.json",
+ "scope": "This file defines the machine: the console hardware, the jobs its FPGA performs and the behaviour its BIOS exposes. Implementations of the machine are the physical console, the HTML5 emulator's machine model and the Analogue Pocket core. Emulator-only features (ROM hack maker, MSX porting tools, Lab composite, merge report, the app's Debug tab, filters, FM dual-run capture, save states) are not part of the machine and are listed separately in SuperSega_v7_Reconciliation.md.",
+ "glossary": {
+  "register_banks": "The VDP register-write command byte is 10bbnnnn. \"bank1 R3\" means register 3 of bank 1, written with bb = 01. Banks 1-3 are reachable only while XRB is set.",
+  "XRB": "Extended Register Banks: Feature Enable A (bank 0 R15) bit 5. While it is clear, bits 5-4 of a register-write command are ignored as on stock hardware, and the bank 1-3 registers keep their values but have no effect (Feature Enable B and C read as 0 to the hardware).",
+  "Feature_Enable_A_B_C": "The three opt-in registers: A = bank 0 R15, B = bank 1 R2, C = bank 1 R7. All 0 at reset.",
+  "TH_TR": "Controller-port pins: TR is button 2; TH is the light-gun / multiplexing line. Both can be outputs, set through port $3F.",
+  "ESAT": "Extended Sprite Attribute Table: per-sprite flip, priority, size, magnification, early clock and palette.",
+  "unique_cell": "A mode with 1024 tiles, so every cell of the 32x24 screen can have its own tile.",
+  "AEL": "Auto-Enhancement Layer: the optional boosts for stock software (see enhancement_layer).",
+  "bus_synchroniser": "FPGA logic that holds the CPU (Z80 WAIT) until the VDP can accept an access, needed when turbo runs the CPU faster than the VDP.",
+  "SDSC": "A debug-console convention used by Master System homebrew (ports $FC/$FD)."
+ },
+ "v7_changes": [
+  "Port $00 is decoded in Super Sega mode as well as Game Gear mode. v6 said GG mode only, but the Golden Axe conversion plan reverts Ax Battler's GG2SMS Start patch and relies on the stock $00 read, and the emulator already decoded it in both modes. Format corrected: bits 5-0 read 0 (the emulator returned 1s, so bit 5 reported PAL).",
+  "Ports $01-$05 (Game Gear serial/EXT link) listed explicitly for GG and Super Sega modes; v6 named the serial link under input.multiplayer but gave no ports.",
+  "$3E bit 2 scope specified: controller decode only; not on Game Gear; not $F2 or Super Sega's $F0-$FF.",
+  "Read values of the Super Sega registers inside $07-$16 and $F0-$FA specified. The emulator answered every read in $07-$16 from the controller mirror, so the math result, slot readback and multitap detection could not be read.",
+  "Debug unit port reads: in the stock modes $FB-$FF read as on the stock machine (the controller mirror; $FF on the Game Gear), and the debug unit answers reads only in Super Sega mode, which therefore decodes $F0-$FF fully. Writes reach the debug unit in every mode, as before. The emulator answered $FB-$FD reads in every mode, so stock software reading its pads at those mirror addresses saw the debug status instead.",
+  "Native 12-bit CRAM write order specified as the Game Gear byte-latch scheme. The emulator indexed entries by byte address while advancing the address per byte, so sequential writes filled every other entry; and in Game Gear mode it treated each byte as an SMS 6-bit colour, which gave every GG title wrong colours.",
+  "$F2 readback specified, including that it works with the I/O chip disabled. The emulator returned $FF in that state, so the standard FM detection failed.",
+  "stock_behaviour section added: the CPU and VDP behaviour the emulator was corrected to follow, from the Super Mario Land DX port work (October 2026). These are the stock parts, not changes to the machine, but every implementation must follow them.",
+  "VRAM expansion control corrected: v6 gave \"bank1 R3 bit 0\" in memory.vram but \"bank1 R2 bit 4\" in video.unique_cell_mode. R2 bit 4 enables, R3 bit 0 selects.",
+  "Math unit register layout written down from the emulator; the divide operation is flagged as under-specified with a proposal.",
+  "Cartridge reach and save-RAM size recorded as open, with the facts that bound them.",
+  "Software detection of the machine recorded as an open question (from the SML DX port).",
+  "Modding boundary recorded: patch application while writing a card is a machine (computer mode) feature; making mods is emulator-only.",
+  "Extra-height mode bits corrected (v6 error, also in Technical Reference v2): M2 enables the extra heights; M1 then selects 224 lines and M3 selects 240. v6 had M2 and M3 swapped. Found while testing the Pocket RTL against Gearsystem and MAME. Emulator and RTL fixed.",
+  "Codemasters registers are at exactly $0000, $4000 and $8000, and the Korean register at exactly $A000 (Gearsystem, MAME). v6 said any address in the slot; the emulator also powered Codemasters up with banks 0,1,2 instead of the profile's 0,1,0. Both fixed.",
+  "8255 behaviour specified for both PPIs: reset state (all inputs, row 7 selected by the pull-ups), a mode word clearing port C, and bit set/reset on the keyboard PPI. The emulator selected keyboard row 0 at reset, so SG-1000 titles could not read their pads.",
+  "Stock behaviour extended: sprite Y wrap rule (Gearsystem/MAME), 224/240-line name table, per-line VDP event timing, PSG noise rate and 2 dB volume steps, low-port reads, TR readback and Game Gear port decoding. The emulator had the noise an octave high, a linear volume curve, the controller mirror answering $00-$3F, and no TR readback.",
+  "Review fixes: Feature Enable A bit 6 (turbo) added to the register table and its write-enable meaning stated; XRB semantics and the Feature Enable B height encoding written down; \"debug unit\" added to the FPGA job list (27 jobs, as the Technical Reference says); the keyboard is also live in SG-1000 mode; a glossary added for terms used throughout.",
+  "enhancement_layer section added: the boosts for stock software, all off by default, with their exact behaviour (pseudo-stereo panning, auto-fire rate), and every boost limited to software in the stock modes. The emulator's pseudo-stereo silenced PSG tones 1 and 2 ($06 = $99); it now uses $DE. Its auto-fire overwrote the pad state, which left button 2 held when C was released mid-toggle.",
+  "open_questions section added, consolidating questions from the Golden Axe conversion plan, the ROM hack maker spec and the SML DX port, with the ones v6 already answers marked resolved."
+ ],
+ "v5_changes": [
+  "SG-series capability recovery: features the TMS9918 had and the SMS/GG Mode 4 VDP dropped are restored.",
+  "Enhanced legacy modes - TMS modes 0-3 may draw from 12-bit CRAM instead of the fixed TMS palette, with the sprite-per-line limit raised and line interrupts available.",
+  "16x16 sprites RE-ATTRIBUTED to the TMS9918/SG-1000, which had them before the Master System removed them. 32x32 via magnification added.",
+  "Per-sprite early clock and per-sprite magnification added (SG had per-sprite early clock; the SMS has only a global 8-pixel shift).",
+  "Extended Sprite Attribute Table widened to 2 bytes per sprite to carry the new flags.",
+  "Text window: the window layer may render as a 40-column, 6-pixel-wide text plane, bringing SC-3000 text density into Mode 4.",
+  "1024-tile unique-cell mode, recovering the Graphics II pseudo-bitmap capability at Mode 4 colour depth.",
+  "SC-3000 keyboard support through the expansion port.",
+  "New Feature Enable C register at bank 1 R7."
+ ],
+ "sg_capability_analysis": {
+  "premise": "The Mode 4 VDP is not a strict superset of the TMS9918. The Master System added Mode 4 and kept the legacy modes for compatibility, but several TMS capabilities have no Mode 4 equivalent.",
+  "lost_and_recovered": [
+   {
+    "capability": "16x16 sprites",
+    "tms": "8x8 or 16x16",
+    "mode4": "8x8 or 8x16 only",
+    "recovered": true
+   },
+   {
+    "capability": "32x32 sprites via magnification",
+    "tms": "16x16 magnified 2x",
+    "mode4": "8x16 zoomed = 16x32 max",
+    "recovered": true
+   },
+   {
+    "capability": "Per-sprite early clock",
+    "tms": "SAT attribute bit 7 shifts that sprite 32 px left",
+    "mode4": "reg0 bit 3 shifts ALL sprites 8 px",
+    "recovered": true
+   },
+   {
+    "capability": "40-column text",
+    "tms": "Mode 1: 40 columns of 6-pixel characters",
+    "mode4": "32 columns of 8 pixels",
+    "recovered": "as a window-layer mode"
+   },
+   {
+    "capability": "Unique cell per screen position",
+    "tms": "Mode 2: 768 patterns = every one of 32x24 cells unique (pseudo-bitmap)",
+    "mode4": "512 tiles max, so cells must be reused",
+    "recovered": "as 1024-tile mode with VRAM expansion"
+   },
+   {
+    "capability": "4x4 block colour freedom",
+    "tms": "Mode 3 Multicolor: 64x48 blocks",
+    "mode4": "no equivalent without spending tiles",
+    "recovered": "legacy mode 3 retained and CRAM-enhanced"
+   },
+   {
+    "capability": "SC-3000 keyboard",
+    "tms": "SC-3000 was a computer with a full keyboard",
+    "mode4": "SMS/GG have no keyboard",
+    "recovered": true
+   }
+  ],
+  "deliberately_not_taken": [
+   {
+    "capability": "4 sprites per scanline",
+    "reason": "Mode 4 already allows 8, and Super Sega allows 16. The TMS limit is strictly worse."
+   },
+   {
+    "capability": "Monochrome sprites",
+    "reason": "TMS sprites carry one colour each; Mode 4 sprites are 15-colour. Per-sprite colour selection is instead provided by the ESAT palette index, which gives both."
+   },
+   {
+    "capability": "Fixed 16-colour palette",
+    "reason": "Replaced by 12-bit CRAM. The enhanced legacy modes keep the TMS structure but draw programmable colours."
+   }
+  ]
+ },
+ "machine": {
+  "id": "SUPER_SEGA",
+  "variants": [
+   "console",
+   "handheld"
+  ],
+  "lineage": [
+   "SG-1000",
+   "SC-3000",
+   "SMS",
+   "GAME_GEAR"
+  ],
+  "detection": {
+   "header_magic": "TMR SEGA",
+   "header_offsets": [
+    "0x7FF0",
+    "0x3FF0",
+    "0x1FF0"
+   ],
+   "offset_note": "The BIOS checks all three in turn; 8 KB and 16 KB ROMs carry the header lower down. v5 listed only 0x7FF0, under which every small ROM reads as headerless.",
+   "layout": {
+    "+0..+7": "TMR SEGA",
+    "+8..+9": "reserved word, often 0x0000 / 0x2020 / 0xFFFF",
+    "+10..+11": "16-bit checksum, little-endian, excluding itself",
+    "+12..+13": "product code, BCD, last four digits, high pair in the second byte",
+    "+14": "high nibble any remaining product digits, low nibble version",
+    "+15": "high nibble region, low nibble checksum range (commonly called the ROM size code)"
+   },
+   "region_codes": {
+    "3": "SMS Japan",
+    "4": "SMS Export",
+    "5": "GG Japan",
+    "6": "GG Export",
+    "7": "GG International",
+    "8": "Super Sega"
+   },
+   "region_code_nibble": 8,
+   "export_bios_note": "An export SMS BIOS rejects any cartridge whose region nibble is not 4 with a software error. Region 8 software therefore will not boot on stock export hardware."
+  },
+  "feature_tiers": {
+   "tier_1": "Cheap 1995 silicon. Estimated +$3.60-$5.30 BOM.",
+   "tier_2": "8-bit-parity set. Estimated +$4.60-$6.40 BOM."
+  }
+ },
+ "cpu": {
+  "type": "Z80 (CMOS, fully static)",
+  "base_clock_hz": 3579545,
+  "turbo": {
+   "implemented": true,
+   "tier": 1,
+   "steps_percent": [
+    100,
+    125,
+    150,
+    175,
+    200
+   ],
+   "control_port": "0xF3",
+   "control_field": "bits 2-0, step 0-4",
+   "principle": "extra CPU cycles per frame; VDP/PSG/FM stay at 1x",
+   "clock_generation": "FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz; VDP, PSG and FM stay at 1x",
+   "frame_rate_governance": "the game's existing VBlank wait",
+   "enable": "Feature Enable A bit 6 - off at reset. A write to $F3 takes effect only while it is set, so unmodified SMS/GG software can never change the clock; the step stays in force until $F3 is written again.",
+   "v5_error": "v5 placed this on port 0x3F bits 6-4, which are the TR output levels for controller ports A and B. Any title driving TR would have changed the clock."
+  },
+  "bus_synchroniser": {
+   "purpose": "Holds the CPU until the VDP reaches a safe access point, since the CPU clock is decoupled from the VDP under turbo.",
+   "cadence_tstates": {
+    "vblank": 16,
+    "active_video": 29
+   },
+   "source": "Official Sega Mark III software reference manual",
+   "consequence": "An OUTI loop of 16 T-states is free in VBLANK at any turbo step. During active video every access waits; at 200% the steady-state penalty is 42 CPU cycles per access.",
+   "owner": "FPGA"
+  }
+ },
+ "video": {
+  "mode4": {
+   "resolution": {
+    "width": 256,
+    "heights": [
+     192,
+     224,
+     240
+    ]
+   },
+   "height_selection": {
+    "standard": "M2 (R0 bit 1) enables the extra heights. With M4 and M2 set, M1 (R1 bit 4) gives 224 lines and M3 (R1 bit 3) gives 240; with M2 clear, Mode 4 is 192 lines whatever M1 and M3 say. M4 is R0 bit 2.",
+    "super_sega": "additionally selectable through Feature Enable B bits 7-6",
+    "note": "Extra height modes are SMS2 features; they do not work on an SMS1. The name table becomes 32x32 rather than 32x28, and 0xD0 stops acting as a sprite-list terminator.",
+    "source": "MAME sega315_5246 select_extended_res_mode4; Gearsystem",
+    "v6_error": "v6 gave 224 = M4 M3 M1 with M2 clear and 240 = M4 M3 M2 with M1 clear, swapping the roles of M2 and M3. Under it, the usual R0 = $36 with R1 bit 4 set stayed at 192 lines, and R0 = $04 with R1 bits 4-3 set gave 224 lines where hardware shows 192."
+   }
+  },
+  "legacy_modes": {
+   "implemented": true,
+   "tier": 1,
+   "modes": {
+    "0": "Graphics I - 32x24 tiles, colour per 8-tile group",
+    "1": "Text - 40 columns of 6-pixel characters, no sprites",
+    "2": "Graphics II - 768 unique patterns, colour per 8x1 row (pseudo-bitmap)",
+    "3": "Multicolor - 64x48 blocks of 4x4 pixels"
+   },
+   "selection": "M1-M4 bits in registers 0 and 1, exactly as on real hardware",
+   "enhancements": {
+    "cram_colour": {
+     "enable": "bank1 R7 bit 0",
+     "effect": "The 16 fixed TMS palette entries are replaced by CRAM entries 0-15, giving 12-bit programmable colour from a 4096-colour space while the mode's tile and colour-table structure is unchanged.",
+     "purpose": "This is to SG-1000 software what the Mode 4 hybrid is to SMS software: the same picture structure, freed from a fixed palette. An SG-1000 conversion gains full colour authority without touching its graphics layout.",
+     "default": "off - legacy modes use the authentic fixed TMS palette"
+    },
+    "sprite_limit": {
+     "enable": "bank1 R7 bit 1",
+     "effect": "raises the legacy per-scanline sprite limit from 4 to the Mode 4 limit in force (8 or 16)",
+     "purpose": "the TMS 4-sprite limit is the single worst constraint in SG-1000 software"
+    },
+    "line_interrupts": {
+     "effect": "VDP register 10 line interrupts, an SMS addition, are available while running legacy modes",
+     "purpose": "raster splits and mid-screen effects in SG-1000-structured software"
+    }
+   }
+  },
+  "sprites": {
+   "sizes": [
+    "8x8",
+    "8x16",
+    "16x16"
+   ],
+   "magnification": {
+    "global": "register 1 bit 0",
+    "per_sprite": "ESAT byte 0 bit 4",
+    "max_effective": "32x32"
+   },
+   "size_16x16_source": "TMS9918 / SG-1000 - present on the SG series, removed on the Master System, restored here",
+   "per_line": [
+    8,
+    16
+   ],
+   "early_clock": {
+    "per_sprite": "ESAT byte 0 bit 5 - shifts that sprite 32 pixels left",
+    "global": "register 0 bit 3 - shifts all sprites 8 pixels left, unchanged",
+    "source": "TMS9918 SAT attribute bit 7",
+    "purpose": "lets individual sprites enter and leave the left edge smoothly; the SMS could only shift the whole sprite plane"
+   },
+   "esat": {
+    "bytes_per_sprite": 2,
+    "size_bytes": 128,
+    "base": "bank 0 register 12",
+    "byte0": {
+     "0": "V-flip",
+     "1": "H-flip",
+     "2": "priority",
+     "3": "size 16x16",
+     "4": "magnify 2x",
+     "5": "early clock (32 px left)",
+     "7-6": "reserved"
+    },
+    "byte1": {
+     "3-0": "palette index (extended CRAM)",
+     "7-4": "reserved"
+    },
+    "v5_change": "widened from 1 byte to 2 to carry magnify and early clock. The v4 single-byte layout is superseded; nothing was implemented against it."
+   },
+   "collision": {
+    "extended": "per-sprite hit bitmaps at bank1 R6 base",
+    "source": "Commodore 64",
+    "tier": 1
+   }
+  },
+  "window_layer": {
+   "tilemap": "32x32, base from bank1 R0",
+   "scrolls": false,
+   "source": "Game Boy",
+   "text_mode": {
+    "enable": "bank1 R7 bit 2",
+    "effect": "the window plane renders as 40 columns of 6-pixel-wide characters instead of 32 columns of 8-pixel tiles",
+    "pattern_base": "bank1 R8, bits 5-0 = VRAM base >> 8",
+    "colours": "bank1 R9 - bits 3-0 foreground palette index, bits 7-4 background palette index",
+    "source": "TMS9918 Mode 1 / SC-3000 40-column text",
+    "purpose": "25 percent more text per line for dialogue, menus and status panels, while the main playfield stays in Mode 4 with scrolling, sprites and 12-bit colour. Recovers SC-3000 text density without a whole-screen mode change."
+   }
+  },
+  "unique_cell_mode": {
+   "enable": "bank1 R7 bit 3",
+   "requires": "VRAM expansion (bank1 R2 bit 4)",
+   "effect": "name table bit 15 becomes tile index bit 9, giving 1024 tiles - enough for all 32x24 = 768 screen cells to be unique",
+   "trade": "the extended-palette index narrows from 4 bits to 3 (8 palettes instead of 16) because bit 15 is reassigned",
+   "source": "TMS9918 Mode 2, whose 768 unique patterns made every cell independent",
+   "purpose": "recovers the Graphics II pseudo-bitmap capability at Mode 4 colour depth: full-screen unique imagery with 16-colour tiles instead of two colours per 8x1 row",
+   "tier": 2
+  },
+  "vram": {
+   "default_bytes": 16384,
+   "extended_bytes": 32768,
+   "banking": "1-bit bank register (bank1 R3)",
+   "tier": 2
+  },
+  "scroll": {
+   "line_h_table": {
+    "tier": 1
+   },
+   "line_v_table": {
+    "source_system": "Atari 8-bit ANTIC",
+    "tier": 1
+   }
+  },
+  "blitter": {
+   "implemented": false,
+   "removed_in": "v3"
+  }
+ },
+ "color_system": {
+  "format": "Game Gear 12-bit",
+  "entry_layout": "0000BBBB GGGGRRRR",
+  "space": 4096,
+  "tiers": {
+   "baseline": {
+    "entries": 32,
+    "palettes": 2,
+    "concurrent": 32
+   },
+   "extended": {
+    "entries": 256,
+    "palettes": 16,
+    "concurrent": 256,
+    "tier": 2
+   }
+  },
+  "legacy_mode_use": "With bank1 R7 bit 0 set, TMS modes index CRAM entries 0-15 in place of the fixed TMS palette.",
+  "power_on_state": {
+   "cold_reset": "all entries cleared to 0x000",
+   "palette_written_flags": "16 flags; an unwritten palette aliases to palette (index AND 1)"
+  },
+  "write_modes": {
+   "legacy": {
+    "bytes_per_entry": 1,
+    "promotion": "v * 5",
+    "default": true
+   },
+   "native": {
+    "bytes_per_entry": 2,
+    "promotion_to_host": "v * 17",
+    "addressing": "Byte-addressed as on the Game Gear: a write to an even CRAM address is held in a latch and the write to the following odd address stores both bytes of the entry (entry = address >> 1). 64 bytes for 32 entries; 512 bytes for 256 entries when extended CRAM is on."
+   }
+  },
+  "game_gear_mode": "Game Gear mode uses the native byte-addressed scheme over 64 bytes."
+ },
+ "vdp_registers": {
+  "bank_0": {
+   "0-10": "stock SMS VDP, including the M1-M4 mode bits",
+   "11": "Line-Scroll (H) Table Base",
+   "12": "Extended Sprite Attribute Table Base (now 128 bytes)",
+   "13": "Window X Split",
+   "14": "Window Y Split",
+   "15": "Feature Enable A - bit0 CRAM native, bit1 line-scroll H, bit2 window, bit3 ESAT, bit4 16 sprites/line, bit5 XRB, bit6 turbo (enables writes to $F3)"
+  },
+  "bank_1": {
+   "0": "Window Tilemap Base",
+   "1": "Line V-Offset Table Base",
+   "2": "Feature Enable B - bit0 line V-offset, bit1 extended CRAM, bit2 16x16 sprites, bit3 per-sprite collision, bit4 VRAM banking, bits7-6 display height",
+   "3": "VRAM Bank (CPU access)",
+   "4": "Render Bank Assignment",
+   "5": "Sprite Palette Base",
+   "6": "Collision Result Base",
+   "7": {
+    "name": "Feature Enable C (SG-series recovery)",
+    "bits": {
+     "0": "Legacy modes draw from CRAM (12-bit colour in TMS modes)",
+     "1": "Legacy sprite limit raised from 4 to the Mode 4 limit",
+     "2": "Text window (window plane renders 40-column 6-pixel text)",
+     "3": "1024-tile unique-cell mode",
+     "4": "ESAT extended to 2 bytes per sprite (magnify, early clock)",
+     "5": "SC-3000 keyboard enable",
+     "7-6": "reserved"
+    },
+    "reset_value": "0x00"
+   },
+   "8": "Text Window Pattern Base - bits 5-0 = VRAM base >> 8",
+   "9": "Text Window Colours - bits 3-0 foreground palette index, bits 7-4 background",
+   "10-15": "reserved"
+  },
+  "bank_2": "unallocated",
+  "bank_3": "reserved",
+  "power_on_values": {
+   "R0": "0x36",
+   "R1": "0xA0",
+   "R2": "0xFF",
+   "R3": "0xFF",
+   "R4": "0xFF",
+   "R5": "0xFF",
+   "R6": "0xFB",
+   "R7": "0x00",
+   "R8": "0x00",
+   "R9": "0x00",
+   "R10": "0xFF",
+   "source": "Official Sega Mark III manual",
+   "note": "Display is OFF at power-on: R1 0xA0 has no display-enable bit. R2 0xFF puts the screen map at 0x3800, R5 0xFF the sprite table at 0x3F00, R6 0xFB the patterns in the first 8 KB."
+  },
+  "xrb_semantics": "Extended Register Banks: Feature Enable A (bank 0 R15) bit 5. While it is clear, bits 5-4 of a register-write command are ignored as on stock hardware, and the bank 1-3 registers keep their values but have no effect (Feature Enable B and C read as 0 to the hardware).",
+  "feature_enable_b_height": "Feature Enable B bits 7-6: 00 = height from the mode bits, 01 = 224 lines, 10 = 240 lines, 11 = reserved (192). A 224/240 selection by the mode bits takes precedence."
+ },
+ "input": {
+  "controller": "Genesis 3-button, TH multiplexed. 0xDC carries port A buttons plus port B up/down; 0xDD carries port B buttons, Reset, CONT and both TH readbacks.",
+  "multiplayer": {
+   "pad_side_tap": {
+    "protocols": [
+     "Sega Team Player (MK-1654)",
+     "EA 4 Way Play"
+    ],
+    "detection_port": "0x16",
+    "tier": 1
+   },
+   "serial_link": {
+    "purpose": "Game Gear multiplayer",
+    "mechanism": "EXT serial, machine-to-machine",
+    "tier": 1
+   }
+  },
+  "keyboard": {
+   "implemented": true,
+   "tier": 1,
+   "source_system": "SC-3000 / SK-1100, 64 keys",
+   "enable": "Feature Enable C bit 5 on Super Sega; always live in SG-1000 (keyboard attached), SC-3000 and SF-7000 modes",
+   "interface": "8255 PPI",
+   "ports": {
+    "0xDC": "PPI port A, input, 8 bits of matrix data",
+    "0xDD": "PPI port B, input, matrix data in bits 3-0; bits 7,6,5 read 0,1,1 with nothing attached",
+    "0xDE": "PPI port C, output, row select in bits 2-0 via a 74LS145; bit 3 cassette out; bits 5-7 printer",
+    "0xDF": "PPI control; not readable, always returns 0xFF"
+   },
+   "polarity": "active low with pull-ups - a pressed key reads 0, an unused matrix position always reads 1",
+   "rows": "8 groups: rows 0-6 keyboard, row 7 the two gamepads",
+   "port_c_readback": "Reading port C returns its output latch: the last value written, or 0 after a mode word.",
+   "ghosting": "The matrix has no diodes. Two or more keys held on one row make any key on another row sharing those columns read as pressed, and the transpose holds for columns. Real behaviour; modelled and toggleable.",
+   "common_init": "Software writes 0x92 to the control register and 0x07 to port C, configuring A and B as inputs with port C output and selecting row 7 for the gamepads.",
+   "reset_key": "One key raises an NMI on the Z80 rather than appearing in the matrix",
+   "v5_error": "v5 specified row select on port 0x3F bits 2-0 with data on 0xDC bits 6-0 and 0xDD bit 0. That scheme does not exist on hardware.",
+   "reset_state": "The 8255 resets with every port an input. Port C's pull-ups then select row 7, the pads, so SG-1000 software that never touches the PPI still reads its controllers with the keyboard attached.",
+   "mode_word": "Writing a mode word (bit 7 set) to $DF clears the output latches, so port C selects row 0 until software writes it; with bit 7 clear the write sets or clears one port C bit (bit set/reset). Intel 8255A behaviour."
+  },
+  "port_3F": {
+   "bits_7_4": "TH/TR output levels: 7 = port B TH, 6 = port B TR, 5 = port A TH, 4 = port A TR",
+   "bits_3_0": "data direction, 1 = input, 0 = output: 3 = port B TH, 2 = port B TR, 1 = port A TH, 0 = port A TR",
+   "reset_state": "input-only, low bits set, for compatibility",
+   "region_detection": "With TH configured as an output, an export machine reads back the level driven; a Japanese machine always reads 0. This is how software detects region."
+  },
+  "pointing_devices": {
+   "mega_drive_mouse": {
+    "interface": "TH-clocked serial on the controller port",
+    "buttons": 3,
+    "reports": "relative deltas",
+    "sequence": "4 ID nibbles (0,B,F,F), then sign/overflow, buttons, and two bytes of delta",
+    "data": "answers on port B",
+    "tier": 2
+   },
+   "sports_pad_trackball": {
+    "interface": "TH-clocked, strobe on 0x3F bit 5 for player 1 or bit 7 for player 2",
+    "reports": "two 8-bit absolute counters that wrap from 0xFF to 0x00 - not deltas",
+    "sequence": "X7-X4 strobe low, X3-X0 strobe high, Y7-Y4 strobe low, Y3-Y0 strobe high",
+    "data": "port A bits 3-0, with buttons S1 and S2 on bits 4 and 5",
+    "direction": "right increases X, up increases Y",
+    "source": "Official Sega Mark III manual, trackball section",
+    "tier": 2
+   },
+   "purpose": "Computer mode is a mouse and keyboard GUI; the pointer is drawn as a hardware sprite at no per-frame cost",
+   "note": "Both share one driver with two device profiles, detected by response pattern."
+  }
+ },
+ "audio": {
+  "psg": {
+   "chip": "SN76489",
+   "voices": 4,
+   "stereo_port": "0x06"
+  },
+  "fm": {
+   "chip": "YM2413",
+   "ports": [
+    "0xF0",
+    "0xF1",
+    "0xF2"
+   ],
+   "audio_control": {
+    "write": "$F2 bits 1-0 select the mute/enable state",
+    "read": "$F2 returns bits 1-0 of the last value written (bits 7-5 carry a C-sync counter on the Japanese SMS; Super Sega returns 0 there)",
+    "detection": "Software disables the I/O chip ($3E bit 2) before reading $F2 so the controller decode does not drive the bus; the FM latch must still answer.",
+    "source": "MAME sms.cpp smsj_audio_control_r"
+   }
+  },
+  "pcm": {
+   "fifo_bytes": 64,
+   "ports": {
+    "0x07": "data",
+    "0x08": "control"
+   },
+   "tier": 1
+  },
+  "wavetable": {
+   "channels": 2,
+   "ports": "0x11-0x15",
+   "tier": 2
+  },
+  "total_voices": {
+   "melodic": 16,
+   "rhythm": 18
+  }
+ },
+ "media": {
+  "cartridge_slot": {
+   "pins": 50,
+   "max_size_bytes": 8388608,
+   "sega_mapper_reach": "8-bit bank registers address 256 x 16 KB = 4 MB. The 8 MB slot figure needs a ninth bank bit. OPEN: maximum ROM size and the register layout above 4 MB."
+  },
+  "card_slot": {
+   "stock_max_size_bytes": 32768,
+   "extended_card": {
+    "max_size_bytes": 524288,
+    "bank_register_port": "0x0B"
+   },
+   "battery_sram": {
+    "size_bytes": 32768
+   }
+  },
+  "dual_slot": {
+   "simultaneous": true,
+   "source_select_port": "0x09"
+  },
+  "sg1000_carts": {
+   "supported": true,
+   "mapping": "linear, no mapper, 1 KB work RAM mirrored from 0xC000",
+   "note": "SG-1000 and SC-3000 cartridges run natively; the machine selects the legacy memory map when an SG image is loaded."
+  },
+  "mappers": {
+   "sega": {
+    "registers": "0xFFFC RAM/misc, 0xFFFD-0xFFFF ROM bank for slots 0-2",
+    "fffc_bits": "7 ROM-write enable, 4 RAM enable 0xC000-0xFFFF, 3 RAM enable 0x8000-0xBFFF, 2 RAM bank select, 1-0 bank shift",
+    "reset_state": "0xFFFC=0x00, 0xFFFD=0x00, 0xFFFE=0x01, 0xFFFF=0x02 on the 315-5235",
+    "slot_0_protection": "the first 1 KB is unaffected by banking, preserving the interrupt vectors",
+    "coverage": "99% of software",
+    "cart_ram_open": "The 315-5235 maps 2 x 16 KB of cartridge RAM through $FFFC bits 3 and 2. The emulator models 2 x 8 KB mirrored in the 16 KB window, and the save card format is built on 8 KB windows. OPEN: which size the machine guarantees."
+   },
+   "codemasters": {
+    "registers": "0x0000, 0x4000, 0x8000 exactly (Gearsystem and MAME decode the full address)",
+    "reset_state": "banks 0, 1, 0 in slots 0, 1, 2",
+    "no_vector_protection": "the first 1 KB banks too, so interrupt vectors must be replaced",
+    "on_cart_ram": "high bit written to 0x4000 maps 8 KB at 0xA000-0xBFFF (Ernie Els Golf)",
+    "note": "no RAM mirroring of mapper writes, so the last value cannot be read back",
+    "v6_error": "v6 said any address within a slot acts as its register. No source supports it; with it, a write into the on-cart RAM window's slot would also bank-switch."
+   },
+   "korean": {
+    "registers": "0xA000 exactly selects slot 2; slots 0 and 1 fixed to banks 0 and 1"
+   },
+   "msx_nemesis": {
+    "registers": "0x0000-0x0003 select 8 KB banks",
+    "layout": "0x0000 -> 0x8000, 0x0001 -> 0xA000, 0x0002 -> 0x4000, 0x0003 -> 0x6000",
+    "msx_variant": "first 16 KB fixed at 0x0000",
+    "nemesis_variant": "last 8 KB bank fixed at 0x0000, second at 0x2000",
+    "use": "Korean ports of MSX games",
+    "implementation": "The emulator and the Pocket core implement the MSX variant only; the Nemesis variant is not implemented yet."
+   },
+   "note": "Only a Sega-mapper cartridge has hardware at 0xFFFC-0xFFFF. On the other families those addresses are plain work RAM and must not bank anything."
+  },
+  "sc3000_carts": {
+   "supported": true,
+   "map_set_by": "the cartridge, not the machine",
+   "rom": "0x0000-0x7FFF, smaller ROMs mirror",
+   "cart_ram": "0x8000-0xBFFF, 16 KB; or 32 KB contiguous 0x8000-0xFFFF with work RAM disabled",
+   "work_ram": "2 KB only, mirrored every 2 KB across 0xC000-0xFFFF",
+   "verified_software": "Sega Home BASIC v1.0j, Mitec SC-3000 BASIC Level 2 and Level 3 all boot and poll the keyboard",
+   "v5_error": "v5 folded SC-3000 into the SG-1000 map with 1 KB of work RAM and nothing at 0x8000. No 32 KB SC-3000 BASIC can initialise under that map."
+  },
+  "sf7000": {
+   "supported": true,
+   "tier": 2,
+   "ram_bytes": 65536,
+   "ipl_rom_bytes": 8192,
+   "rom_overlay": "With /ROM SEL low the IPL is mapped over 0x0000-0x3FFF, mirrored from 8 KB, but WRITES to that range still land in RAM. Reads see ROM, writes see RAM.",
+   "ppi": {
+    "0xE4": "port A, input: FDC and printer status",
+    "0xE5": "port B, printer output",
+    "0xE6": "port C, output: FDD, FDC, ROM mapping, printer",
+    "0xE7": "control; /ROM SEL is driven by 8255 bit set/reset, not whole-port writes"
+   },
+   "port_c_bits": "0 FDD /INUSE, 1 FDD /MOTOR ON, 2 FDD TC, 3 FDC RESET, 6 /ROM SEL, 7 printer /STROBE",
+   "floppy": {
+    "controller": "uPD765-class at 0xE0 status / 0xE1 data",
+    "geometry": "40 tracks x 16 sectors x 256 bytes = 160 KB",
+    "owner": "FPGA, backed by disk images rather than a drive",
+    "rationale": "A harvested uPD765 would still need a 3-inch drive and 3-inch media, both scarcer than the controller. Images have no mechanism to fail and are what survives in preservation."
+   },
+   "source": "SF-7000 IPL disassembly; register map and bit assignments are documented, not inferred",
+   "ppi_mode_word": "As on the keyboard PPI, a mode word clears port C, which drives /ROM SEL low and maps the IPL back in."
+  }
+ },
+ "dma": {
+  "modes": [
+   "rom_to_vram",
+   "ram_to_vram",
+   "vram_to_vram",
+   "fill"
+  ],
+  "registers": "0xF4-0xFA",
+  "tier": 1
+ },
+ "math_unit": {
+  "ports": "0x0C-0x10",
+  "source_system": "NES MMC5",
+  "tier": 1,
+  "registers": {
+   "0x0C": "operand A",
+   "0x0D": "operand B",
+   "0x0E": "write: bit 0 = 0 multiply, 1 divide; read: 0",
+   "0x0F": "result low",
+   "0x10": "result high"
+  },
+  "multiply": "A x B, unsigned 16-bit result",
+  "divide_open": "UNDER-SPECIFIED. The emulator computes ((A << 8) | B) / B, which is almost certainly not the intent. Proposal: A / B with quotient in $0F and remainder in $10, divide by zero returns $FF/$00. Needs a decision."
+ },
+ "compatibility": {
+  "reset_state": "All features disabled, turbo at 100%, legacy modes authentic. Behaviour-identical to stock hardware in every mode.",
+  "extension_gating": "Feature Enable A, B and C; the extended register file behind XRB.",
+  "sg_software": "An unmodified SG-1000 ROM renders with the fixed TMS palette, 4 sprites per line and no line interrupts, exactly as on real hardware, until Feature Enable C bits are set."
+ },
+ "implementation_order": [
+  "1. CRAM expansion and dual write mode",
+  "2. Genesis 3-button TH multiplexing",
+  "3. YM2413 + PSG stereo + mixer",
+  "4. Dual-slot loader, port 0x09, card bank at 0x0B",
+  "5. Extended register banks (XRB)",
+  "6. Legacy TMS modes 0-3 (SG-1000 compatibility baseline)",
+  "7. ESAT 2-byte: flip, priority, size, magnify, early clock, palette",
+  "8. 16-sprite line buffer, 16x16 and 32x32 sprites",
+  "9. Window layer, then text window mode",
+  "10. Line H and V offset tables, 224/240 heights",
+  "11. Legacy mode enhancements: CRAM colour, raised sprite limit, line interrupts",
+  "12. DMA with copy and fill",
+  "13. PCM FIFO, math unit, per-sprite collision",
+  "14. Multitap protocols, EXT serial link, SC-3000 keyboard",
+  "15. TIER 2: extended CRAM, wavetable, VRAM banking, unique-cell mode",
+  "16. Turbo",
+  "17. Card battery SRAM, banked work RAM, lint mode, debugger views"
+ ],
+ "v6_changes": [
+  "Turbo control moved off port 0x3F. Bits 6-4 there are the TR output levels on real hardware: stock SMS/GG software driving TR would have silently changed the clock, and Super Sega software could never have used both. Turbo is now port 0xF3, gated by Feature Enable A bit 6, outside the 0x00-0x3F mirror range.",
+  "Keyboard interface corrected. The SK-1100 is read through the 8255 PPI at 0xDC-0xDF, not via port 0x3F as v5 stated. Row select is PPI port C bits 2-0 at 0xDE; data returns on port A (0xDC, 8 bits) and port B (0xDD, bits 3-0). The v5 scheme does not exist on hardware and real SC-3000 software would not have worked with it.",
+  "Full SK-1100 matrix behaviour specified, resolving the v5 note that it must be transcribed during implementation.",
+  "Work RAM raised from 8 KB banked to 128 KB in 16 banks of 8 KB, to host SF-7000 compatibility and give native software real headroom.",
+  "SC-3000 promoted to its own machine mode. It is not the SG-1000: the cartridge sets the memory map, work RAM is 2 KB mirrored, and the cart supplies RAM at 0x8000. v5 folded it into the SG-1000 map, under which no SC-3000 BASIC can run.",
+  "SF-7000 expansion added: 64 KB RAM, 8 KB IPL ROM with a read/write-split overlay, second PPI at 0xE4-0xE7, uPD765-class floppy controller at 0xE0-0xE1.",
+  "Bus synchroniser cadence set to the official figures: 16 Z80 T-states in VBLANK, 29 during active video.",
+  "Pointing devices added: Mega Drive mouse and Sports Pad trackball, both TH-clocked on the controller port.",
+  "Cartridge mapper families specified: Sega, Codemasters, Korean, MSX/Nemesis.",
+  "VDP power-on register values specified from the official manual.",
+  "Port map conflict with the 0x3E/0x3F mirror scheme documented as an open risk.",
+  "Port 0x3E memory enables implemented rather than merely stored. The emulator kept the value and ignored all six bits, so joystick, RAM, cartridge and card disables had no effect.",
+  "Display height selection corrected in the emulator to match what this profile already specified: the M1-M4 mode bits in registers 0 and 1. The emulator had only the Super Sega Feature Enable B path, so no SMS or GG title could reach the 224 or 240-line modes. The profile was right and the implementation was not.",
+  "Debug facility ports remapped to avoid colliding with the SDSC debug console at 0xFC-0xFD, an established SMS homebrew convention. The FPGA UART now implements SDSC, so existing homebrew debug output works unchanged. FPGA control moved to 0xFB and the watchpoint register file to 0xFE/0xFF."
+ ],
+ "memory": {
+  "work_ram": {
+   "size_bytes": 131072,
+   "banks": 16,
+   "bank_size_bytes": 8192,
+   "window": "0xC000-0xDFFF, mirrored at 0xE000-0xFFFF",
+   "bank_register_port": "0x0A",
+   "rationale": "128 KB lets the first 64 KB be presented as a contiguous bank set for SF-7000 compatibility, and gives native software real headroom. v5 specified 8 KB banked to 64 KB.",
+   "stock_compatibility": "Bank 0 at reset presents the stock 8 KB an SMS title expects."
+  },
+  "vram": {
+   "base_bytes": 16384,
+   "expanded_bytes": 32768,
+   "expansion_enable": "Feature Enable B (bank1 R2) bit 4 enables the 32 KB map; bank1 R3 bit 0 selects the bank the CPU port reaches"
+  },
+  "cram": {
+   "entries_base": 32,
+   "entries_extended": 256,
+   "depth_bits": 12,
+   "extended_enable": "bank1 R2 bit 1"
+  },
+  "port_3E_memory_enables": {
+   "bit_2": "0 enable joysticks, 1 disable",
+   "bit_3": "0 enable base 8K ROM",
+   "bit_4": "0 enable internal 8K RAM",
+   "bit_5": "0 enable card ROM",
+   "bit_6": "0 enable cartridge ROM",
+   "bit_7": "0 enable external port",
+   "source": "Official Sega Mark III manual"
+  }
+ },
+ "port_map": {
+  "mirror_scheme": "On SMS hardware every EVEN address 0x00-0x3E mirrors 0x3E and every ODD address 0x01-0x3F mirrors 0x3F. The Game Gear decodes 0x00-0x06 separately for its own registers.",
+  "open_risk": "Super Sega registers at 0x06-0x16 sit inside that mirror range and must be decoded specifically, as the Game Gear already does. Any SMS or GG title that writes to a mirror address instead of 0x3E/0x3F will reach a Super Sega register instead. Documentation calls mirror use highly unrecommended for homebrew, which implies commercial software does it. NOT YET RESOLVED - candidate fix is to relocate these registers above 0xF0.",
+  "registers": {
+   "0x00": "Game Gear port 0: bit 7 Start (0 = pressed), bit 6 region (1 = export), bits 5-0 read 0. Decoded in Game Gear AND Super Sega modes.",
+   "0x06": "PSG stereo panning",
+   "0x07": "PCM data",
+   "0x08": "PCM control",
+   "0x09": "dual-slot source select",
+   "0x0A": "work RAM bank",
+   "0x0B": "extended card bank register",
+   "0x0C-0x10": "math unit",
+   "0x11-0x15": "wavetable",
+   "0x16": "multitap detection",
+   "0x3E": "memory enables",
+   "0x3F": "I/O port control",
+   "0x7E": "V counter / gun vertical",
+   "0x7F": "H counter / gun horizontal, PSG write",
+   "0xBE": "VDP data",
+   "0xBF": "VDP control / status",
+   "0xC0-0xDF": "PPI: 0xDC-0xDF keyboard and pads, mirrored across the range",
+   "0xE0-0xE7": "SF-7000: FDC and second PPI",
+   "0xF0-0xF2": "YM2413 FM",
+   "0xF3": "turbo step - relocated from 0x3F in v6",
+   "0xF4-0xFA": "DMA engine",
+   "0x01-0x05": "Game Gear serial / EXT link registers, Game Gear and Super Sega modes",
+   "0xFB-0xFF": "debug unit (see debug_facility); reads answer only in Super Sega mode"
+  },
+  "io_chip_disable": "$3E bit 2 disables the controller decode (the $DC/$DD mirror across $C0-$FF) on the Master System and on Super Sega. It has no effect on the Game Gear, even in SMS mode. It does not affect $F2 (FM detection) or Super Sega's fully decoded $F0-$FF window.",
+  "super_sega_read_values": {
+   "0x07-0x16": "decoded by the FPGA in Super Sega mode; ports with no readable register return $FF, never the controller mirror",
+   "0x08": "PCM FIFO fill, bits 6-4",
+   "0x09": "slot source select, as written",
+   "0x0B": "extended card bank, as written",
+   "0x0E": "0 (operation complete)",
+   "0x0F-0x10": "math result, low then high",
+   "0x16": "$81: pad detected, detection complete",
+   "0xF0-0xF1, 0xF3": "$FF",
+   "0xF4-0xFA": "DMA registers, as written",
+   "0xFB-0xFF": "debug unit: $FB the control value as written; $FC and $FD status (bit 7 debug host attached, bit 6 set, bit 0 trace buffer full); $FE and $FF $FF"
+  }
+ },
+ "fpga_partition": {
+  "principle": "A real 315-5535 ASIC renders the base layer; the FPGA owns everything the ASIC has no register for. Modelling the split explicitly keeps the emulator structurally honest.",
+  "asic_jobs": [
+   "Mode 4 and TMS background",
+   "sprites 1-8 per line",
+   "CRAM palettes 0-1",
+   "PSG and stereo panning",
+   "line and frame interrupts"
+  ],
+  "fpga_jobs": [
+   "VDP control-port gating (absorbs bank>=1 writes so they cannot corrupt ASIC registers)",
+   "bus synchroniser",
+   "clock generation and turbo",
+   "cartridge wait states",
+   "shadow VDP state",
+   "sprites 9-16",
+   "extended sprite attributes",
+   "per-sprite collision",
+   "line H offset table",
+   "line V offset table",
+   "window layer",
+   "text window",
+   "unique-cell mode",
+   "extended CRAM 2-15",
+   "DMA engine",
+   "math unit",
+   "PCM FIFO and wavetable",
+   "mapper and slot arbitration",
+   "SK-1100 keyboard via PPI",
+   "mouse and trackball",
+   "floppy controller",
+   "debug unit",
+   "video compositing and output",
+   "overlay dialogs",
+   "power sequencing",
+   "non-volatile storage",
+   "player-sprite correlation"
+  ],
+  "overlay_capability": "Because the FPGA sits in the CPU-to-VDP path it can hold the Z80 and draw over ANY running software, including a commercial cartridge that knows nothing about Super Sega. This is the mechanism for save dialogs, standby, and switching between game and computer mode."
+ },
+ "debug_facility": {
+  "owner": "FPGA",
+  "rationale": "Four capabilities a debugger running on the Z80 cannot provide, each following from the FPGA sitting on the bus.",
+  "ports": {
+   "0xFB": "control: bits 1-0 trace mode, bit 2 arm watchpoint, bit 3 raise overlay, bit 4 clear trace, bit 5 emit marker",
+   "0xFC": "SDSC console control; value 2 clears the console",
+   "0xFD": "character output, SDSC-compatible",
+   "0xFE": "watchpoint register select bits 2-0; kind in bits 7-6 (VRAM, port, CPU write, CRAM)",
+   "0xFF": "watchpoint register data"
+  },
+  "watchpoint_fields": "address low and high, range end low and high, value to match, flags (bit 0 match value, bit 1 one-shot), ignore count",
+  "watchpoint_note": "A single address on a busy port such as 0xBE fires tens of thousands of times per second. Range, value match, ignore count and one-shot together reduce that to one meaningful hit.",
+  "trace_buffer": "FPGA-side, mirrored to FRAM on a fault, so it outlives the crash that destroyed the program state. It is not cleared by a machine reset.",
+  "overlay": "Composited after the ASIC output, using a font in FPGA memory. Never touches the program VRAM or CRAM, so software cannot detect it happened.",
+  "post": "Runs before the CPU leaves reset. Ten documented codes; also blinked on the power LED for a machine that cannot reach video.",
+  "availability": "Writes reach the debug unit in every machine mode, since its purpose is inspecting stock software; stock hardware ignores writes to $FB-$FF. Reads of $FB-$FF answer from the debug unit only in Super Sega mode. In the stock modes they read as on the stock machine (the controller mirror; $FF on the Game Gear), because stock software may read its pads there.",
+  "read_values": "debug unit: $FB the control value as written; $FC and $FD status (bit 7 debug host attached, bit 6 set, bit 0 trace buffer full); $FE and $FF $FF"
+ },
+ "stock_behaviour": {
+  "note": "Behaviour of the stock parts that every implementation must reproduce. These are not Super Sega additions; they are listed because the emulator had them wrong until October 2026 and the Pocket core is verified against it.",
+  "cpu": {
+   "halt": "An interrupt taken in HALT returns to the instruction after HALT.",
+   "ei": "Interrupts are not accepted until the instruction after EI has executed.",
+   "sampling": "Maskable interrupts are sampled between instructions.",
+   "index_prefix": "DD/FD take a displacement only for the (HL) forms. (IX+d) costs 8 T-states more than (HL); LD (IX+d),n costs 5 more. DDCB: BIT 20, others 23. A prefix followed by another prefix costs 4."
+  },
+  "vdp": {
+   "h_scroll": "Screen x = map x + R8 (the background moves right as R8 increases). Latched once per line before the line is drawn; R0 bit 6 exempts rows 0-1.",
+   "v_scroll": "R9 is latched once per frame; a write takes effect from the next frame.",
+   "sprite_y": "A sprite starts on line Y+1. When Y+1 is 241-256 it starts at Y+1-256 instead, so Y = $F0-$FF shows its lower rows at the top of the screen (Gearsystem and MAME; a plain 8-bit compare would differ only for 32-line magnified sprites at Y = $E0-$EF).",
+   "extra_height": "224/240-line modes use a 32x32 name table at (R2 bits 3-2) x $1000 + $700, the map wraps at 256 lines instead of 224, and $D0 no longer ends the sprite list.",
+   "event_timing": {
+    "note": "Within the 228-cycle line, these happen at fixed cycle offsets (Gearsystem's model, which passes the SMS VDP test ROMs). The machine uses the 315-5535 column.",
+    "columns": "event: SMS2 / 315-5535",
+    "h_scroll_latch": "14 / 16",
+    "v_counter_update": "25 / 27",
+    "frame_flag": "25 / 27 (line height+1)",
+    "line_interrupt": "27 / 28",
+    "sprite_overflow_flag": "25 / 27 (from the previous line's sprites)",
+    "display_enable_latch": "37 / 20",
+    "line_render": "195 / 186 (background of this line, sprites of the next)",
+    "collision_flag": "20 / 22 + X x 228 / 256 of the line after the sprites were drawn, or at the render event if that comes first (Gearsystem drops such late collisions; the hardware flags a collision anywhere on the line)",
+    "io_access_point": "IN/OUT reach the port 10 T-states into the instruction (IN A,(n), OUT (n),A)"
+   },
+   "v_counter": {
+    "NTSC_192": "00-DA, D5-FF",
+    "NTSC_224": "00-EA, E5-FF",
+    "NTSC_240": "00-FF, 00-05",
+    "PAL_192": "00-F2, BA-FF",
+    "PAL_224": "00-FF, 00-02, CA-FF",
+    "PAL_240": "00-FF, 00-0A, D2-FF",
+    "source": "Charles MacDonald, Sega Master System VDP documentation (which lists NTSC 240 as 00-FF, 00-06: 263 values for a 262-line frame; the implementations use 00-05)"
+   },
+   "h_counter": "00-93 then E9-FF, one count per two pixels; latched on a TH edge for the light gun.",
+   "frame_flag": "Status bit 7 is set at cycle 25 (SMS2) / 27 (315-5535) of line height + 1, the second line after the last displayed one, and stays set until the status register is read.",
+   "line_counter": "On lines 0 to height inclusive (one line past the display) the counter counts down; on reaching 0 it reloads from R10 and raises the line interrupt. On other lines it is reloaded from R10. Mode 4 only (TMS modes raise no line interrupt as stock).",
+   "line_timing": "228 CPU cycles per line, 262 lines NTSC, 313 PAL; the overrun of the last instruction of a line belongs to the next line."
+  },
+  "psg": {
+   "tone": "Counters run at CPU/16 and toggle the output on reaching zero; a period of 0 behaves as 1.",
+   "noise": "The noise counter (rate $10/$20/$40 or tone 2) toggles a flip-flop; the 16-bit shift register advances on its rising edge, once per two counter periods. White noise taps bits 0 and 3; writing the noise register resets the register to $8000.",
+   "volume": "Attenuation 2 dB per step; 15 is silent."
+  },
+  "io": {
+   "low_port_reads": "Reads of $00-$3F return $FF on the Master System, and on the Game Gear and Super Sega for every port they do not decode as a register.",
+   "tr_readback": "A TR pin configured as an output ($3F bit 0 or 2 clear) reads back the level driven: $DC bit 5 for port A, $DD bit 3 for port B.",
+   "game_gear_decode": "Above $C0 the Game Gear answers only $C0/$DC (port A) and $C1/$DD (port B, with bits 7-6 = $3F bits 7-6); every other port reads $FF, $F2 included (no FM).",
+   "fm_latch": "The $F2 FM detection latch answers in Master System and Super Sega modes only.",
+   "source": "Gearsystem SmsIOPorts / GameGearIOPorts"
+  },
+  "verification": "Batman Returns (Europe) SMS in PAL at frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) GG at frames 200, 500, 900 and 1500: the emulator and the Pocket core RTL (Verilator) both match Gearsystem, Game Gear within Gearsystem's colour rounding (it expands channel value 5 to 86 rather than 85). Plus VDP test ROMs at 192/224/240 lines (October 2026)."
+ },
+ "software_detection": {
+  "status": "OPEN",
+  "question": "How does one ROM tell, at run time, that it is on a Super Sega? Extended features are reachable only in Super Sega mode, which the header region (8) selects, and an export SMS BIOS refuses region 8. A single ROM for both machines therefore cannot use region 8.",
+  "options": [
+   "Two ROMs from one source (what the Super Mario Land DX port does now).",
+   "A boot-menu option to run a region-4 cartridge in Super Sega mode, plus a read-only machine ID register the ROM can test.",
+   "An unlock sequence that switches a running region-4 title into Super Sega mode."
+  ],
+  "source": "Super Mario Land DX port design, distribution question"
+ },
+ "modding": {
+  "machine_side": "Computer mode can apply a BPS patch to a cartridge image while writing a blank card, which is how a mod reaches real hardware. The console plays mods; it does not make them.",
+  "not_machine": "Making mods (the ROM hack maker and its plugins) is emulator-only.",
+  "distribution": "Mods are distributed only as BPS patches.",
+  "source": "Golden Axe / ROM hack maker work (October 2026)"
+ },
+ "enhancement_layer": {
+  "purpose": "Optional boosts for unmodified SG-1000, SC-3000, Master System and Game Gear software, applied by intercepting the fixed hardware interfaces (VDP ports, PSG, pads) rather than patching the ROM. Full rationale and tiers: SuperSega_AutoEnhancement_Layer.md.",
+  "default": "Every boost is off at power-on, so the machine behaves as stock hardware. Each one is switched independently: on the console from the boot menu, in the emulator from its AEL panel, on the Analogue Pocket core from the core settings (Interact) menu.",
+  "precedence": "Explicit software intent wins. Every boost acts only on software running in the stock modes (SG-1000, SC-3000, Master System, Game Gear): Super Sega software sets these features itself and reads C as a button of its own. Pseudo-stereo also stops once software writes $06. Start = Pause applies in the Master System, SG-1000 and SC-3000 modes (the Game Gear has a Start button of its own). The TMS colour boost is the exception today: see Q11.",
+  "boosts": {
+   "sprite_limit": "16 sprites per line in Mode 4 instead of 8 (legacy modes: 4 -> 8 or 16).",
+   "overflow_stock": "With the raised limit, status bit 6 is still set by a 9th sprite on a line, for software that reads it as logic.",
+   "start_pause": "Start on the pad raises the Pause NMI (SMS, SG-1000, SC-3000 modes).",
+   "turbo": "A turbo step (125-200 %) for stock software in the SMS, GG, SG-1000 and SC-3000 modes. Super Sega software sets its own step through $F3.",
+   "vram_boost": "No VDP access wait (bus synchroniser bypassed) while a turbo step is active.",
+   "autofire": "While C is held, button 2 repeats: it toggles every two frames (15 Hz at 60 Hz). The pad state itself is not changed, so releasing C leaves button 2 as the pad has it.",
+   "pseudo_stereo": "Until software writes $06, the PSG is panned tone 0 left, tone 1 right, tone 2 and noise centre (the $06 value $DE).",
+   "gg_uncrop": "Game Gear software is shown at the full 256x192 instead of the 160x144 window.",
+   "tms_colour": "SG-1000/SC-3000 picture modes use true TMS9918 colours instead of the Master System approximation.",
+   "fm_present": "Inherent to the machine (the FM unit is always fitted), not a switch."
+  },
+  "not_modelled": "\"VRAM write reliability\" (AEL doc, tier 1) has no switch: the emulator and the Pocket core never drop a VDP write, so they already behave as if it were on.",
+  "region_speed": "\"Region speed correction\" (AEL doc, tier 1) is the machine's 50/60 Hz video setting (the emulator's PAL switch, the Pocket core's Video setting), not a separate boost."
+ },
+ "open_questions": [
+  {
+   "id": "Q1",
+   "topic": "Port mirror range",
+   "status": "open",
+   "detail": "Registers $06-$16 sit in the $3E/$3F mirror range; relocation above $F0 is the candidate fix."
+  },
+  {
+   "id": "Q2",
+   "topic": "Maximum ROM size and mapper layout above 4 MB",
+   "status": "open",
+   "detail": "See media.cartridge_slot.sega_mapper_reach."
+  },
+  {
+   "id": "Q3",
+   "topic": "Cartridge save-RAM size",
+   "status": "open",
+   "detail": "See media.mappers.sega.cart_ram_open."
+  },
+  {
+   "id": "Q4",
+   "topic": "ESAT entry format; H-flip per sprite or per tile",
+   "status": "resolved in v6",
+   "detail": "2 bytes per sprite; byte 0 bit 1 H-flip, bit 0 V-flip, per sprite."
+  },
+  {
+   "id": "Q5",
+   "topic": "Unique-cell mode and 32 KB VRAM: coupled or independent",
+   "status": "resolved in v6",
+   "detail": "Coupled: unique-cell mode requires VRAM expansion (Feature Enable B bit 4)."
+  },
+  {
+   "id": "Q6",
+   "topic": "Turbo default for retagged ROMs",
+   "status": "resolved",
+   "detail": "Off at reset. A title enables it itself (Feature Enable A bit 6, then $F3). The enhancement layer's turbo boost is for unmodified software in the stock modes and does not apply to Super Sega titles."
+  },
+  {
+   "id": "Q7",
+   "topic": "Math unit divide",
+   "status": "open",
+   "detail": "See math_unit.divide_open."
+  },
+  {
+   "id": "Q8",
+   "topic": "Run-time machine detection",
+   "status": "open",
+   "detail": "See software_detection."
+  },
+  {
+   "id": "Q9",
+   "topic": "Work RAM bank readback at $0A",
+   "status": "open",
+   "detail": "Not readable today. Interrupt handlers that switch banks need to restore the previous one; readback or a documented RAM shadow is needed."
+  },
+  {
+   "id": "Q10",
+   "topic": "Reverting third-party GG2SMS layers",
+   "status": "emulator workflow",
+   "detail": "A hack-maker workflow, not a machine question; listed so it is not lost."
+  },
+  {
+   "id": "Q11",
+   "topic": "Default of the TMS colour boost",
+   "status": "open",
+   "detail": "The AEL rule is that every boost defaults off, but the emulator starts with true TMS9918 colours on. Either the emulator default changes to the Master System approximation, or the AEL doc lists TMS colours as an exception. The emulator also applies it to the legacy modes of Super Sega software, where no other boost acts. Not changed in v7."
+  },
+  {
+   "id": "Q12",
+   "topic": "Cartridge wait state at 200 % turbo",
+   "status": "open",
+   "detail": "The profile gives one wait state per cartridge access at 200 % (250 ns ROM). The emulator applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only software running at 200 %."
+  },
+  {
+   "id": "Q13",
+   "topic": "Feature Enable C bit 4 (ESAT 2-byte)",
+   "status": "open",
+   "detail": "v6 made ESAT 2 bytes per sprite (Q4), but Feature Enable C bit 4 still selects a 2-byte mode and the emulator implements a 1-byte layout when it is clear. Retire the bit, or document the 1-byte layout."
+  },
+  {
+   "id": "Q14",
+   "topic": "PCM FIFO fill reading at $08",
+   "status": "open",
+   "detail": "$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bits 6-4 = bytes queued / 8, saturating at 7."
+  }
+ ]
+}

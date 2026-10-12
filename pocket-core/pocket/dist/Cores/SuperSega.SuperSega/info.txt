@@ -1,0 +1,18 @@
+Super Sega 8-bit machine core (milestone 1, untested on hardware).
+
+Runs Master System and Game Gear software on the Super Sega machine model:
+Z80, Mode 4 VDP (192/224/240 lines, Game Gear CRAM), PSG, Sega, Codemasters
+and Korean mappers, cartridge saves. Super Sega titles run, but ESAT, the
+window and text layers, line tables and unique-cell mode are not drawn yet.
+SG-1000/SC-3000 software loads but the TMS9918 picture modes are not drawn
+yet, and there is no FM sound yet.
+
+ROMs go in /Assets/supersega/common/. Pocket B = button 1, A = button 2,
+Y = auto-fire for button 2 (with that boost on), Select = Pause. In Super
+Sega mode the pad is a Mega Drive pad: B = B, A = C, Y = A, Start = Start,
+so buttons 1 and 2 stay on B and A. A docked USB keyboard is the SC-3000
+SK-1100 keyboard.
+
+Boost options in the core settings are the machine's enhancement layer. All
+are off by default, which is stock behaviour, and they act only on Master
+System, Game Gear, SG-1000 and SC-3000 software, never on Super Sega titles.

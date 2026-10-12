@@ -1,0 +1,271 @@
+{
+  "interact": {
+    "magic": "APF_VER_1",
+    "variables": [
+      {
+        "name": "Reset",
+        "id": 1,
+        "type": "action",
+        "enabled": true,
+        "address": "0x00F0",
+        "value": 1
+      },
+      {
+        "name": "System",
+        "id": 10,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0100",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "Auto"
+          },
+          {
+            "value": 1,
+            "name": "Master System"
+          },
+          {
+            "value": 2,
+            "name": "Game Gear"
+          },
+          {
+            "value": 3,
+            "name": "Super Sega"
+          },
+          {
+            "value": 4,
+            "name": "SG-1000"
+          },
+          {
+            "value": 5,
+            "name": "SC-3000"
+          }
+        ]
+      },
+      {
+        "name": "Region",
+        "id": 11,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0104",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "Export"
+          },
+          {
+            "value": 1,
+            "name": "Japan"
+          }
+        ]
+      },
+      {
+        "name": "Video",
+        "id": 12,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0108",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "NTSC 60 Hz"
+          },
+          {
+            "value": 1,
+            "name": "PAL 50 Hz"
+          }
+        ]
+      },
+      {
+        "name": "Mapper",
+        "id": 13,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x010C",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "Sega"
+          },
+          {
+            "value": 1,
+            "name": "Codemasters"
+          },
+          {
+            "value": 2,
+            "name": "Korean"
+          },
+          {
+            "value": 3,
+            "name": "Korean MSX"
+          }
+        ]
+      },
+      {
+        "name": "Boost: Sprites/line",
+        "id": 20,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0114",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "Stock (8)"
+          },
+          {
+            "value": 1,
+            "name": "16"
+          },
+          {
+            "value": 2,
+            "name": "16, stock flag"
+          }
+        ]
+      },
+      {
+        "name": "Boost: CPU turbo",
+        "id": 21,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0124",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "Off"
+          },
+          {
+            "value": 1,
+            "name": "125%"
+          },
+          {
+            "value": 2,
+            "name": "150%"
+          },
+          {
+            "value": 3,
+            "name": "175%"
+          },
+          {
+            "value": 4,
+            "name": "200%"
+          }
+        ]
+      },
+      {
+        "name": "Boost: VRAM speed-up",
+        "id": 22,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0128",
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Boost: Start = Pause",
+        "id": 23,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0118",
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Boost: Auto-fire (Y)",
+        "id": 24,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x012C",
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Boost: Pseudo-stereo",
+        "id": 25,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0130",
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Game Gear screen",
+        "id": 26,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0110",
+        "defaultval": 0,
+        "options": [
+          {
+            "value": 0,
+            "name": "LCD 160x144"
+          },
+          {
+            "value": 1,
+            "name": "Full 256x192"
+          }
+        ]
+      },
+      {
+        "name": "Keyboard ghosting",
+        "id": 30,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x011C",
+        "defaultval": 1,
+        "value": 1
+      },
+      {
+        "name": "SC-3000 cart RAM",
+        "id": 31,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0120",
+        "defaultval": 1,
+        "options": [
+          {
+            "value": 0,
+            "name": "16 KB"
+          },
+          {
+            "value": 1,
+            "name": "32 KB"
+          }
+        ]
+      }
+    ],
+    "messages": []
+  }
+}
