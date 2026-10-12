@@ -165,6 +165,13 @@ probe('M10b', 'Super Sega multitap detection $16 and slot select $09 readback', 
   const m = sms('ss'); m.out(0x09, 0x02);
   return { ok: m.inp(0x16) === 0x81 && m.inp(0x09) === 0x02, note: `$16=${m.inp(0x16).toString(16)} $09=${m.inp(0x09).toString(16)}` };
 });
+probe('M38', 'Super Sega: writes to the read-only ports $0F, $10 and $16 are absorbed, not taken as $3E/$3F mirrors; on the Master System they still are (Technical Reference \u00a711)', () => {
+  const s = sms('ss'); const mc = s.memCtl, ic = s.ioCtl;
+  s.out(0x0F, 0x00); s.out(0x10, 0x00); s.out(0x16, 0x00);
+  const m = sms('sms'); m.out(0x0F, 0x55); m.out(0x10, 0xAA);
+  return { ok: s.memCtl === mc && s.ioCtl === ic && m.ioCtl === 0x55 && m.memCtl === 0xAA,
+           note: `SS $3E ${s.memCtl.toString(16)} $3F ${s.ioCtl.toString(16)}; SMS $3E ${m.memCtl.toString(16)} $3F ${m.ioCtl.toString(16)}` };
+});
 probe('M10c', 'Game Gear $00: $C0 idle, $40 with Start, export (MAME sms.cpp gg_input_port_00_r)', () => {
   const m = sms('gg'); const a = m.inp(0x00); m.btn.start = 1; const b = m.inp(0x00);
   return { ok: a === 0xC0 && b === 0x40, note: `${a.toString(16)} / ${b.toString(16)}` };

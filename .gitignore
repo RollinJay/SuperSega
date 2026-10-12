@@ -7,6 +7,10 @@ pocket-core/sim/z80/z80_js.log
 pocket-core/sim/z80/z80_rtl.log
 emulator/tools/out/
 __pycache__/
+# Playwright for emulator/tools/controls_test.js, installed locally with npm
+node_modules/
+emulator/tools/package.json
+emulator/tools/package-lock.json
 
 # Quartus project assembled by pocket-core/pocket/setup.sh. It holds Analogue's
 # APF framework and Intel files, which are under their own licences and must not

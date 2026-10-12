@@ -521,14 +521,15 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
     </div>
 
     <div class="pane" id="p-ctrl">
-      <label>Keyboard mapping &#8212; click a binding, then press a key</label>
+      <label>Controls &#8212; click a binding, then press a key or a gamepad button</label>
       <table id="bindtab"></table>
       <div class="row" style="margin-top:8px">
         <button id="bindreset">Reset to defaults</button>
         <span class="pill" id="padstat">no gamepad</span>
       </div>
-      <div class="note">Gamepads are detected automatically and use the standard mapping: face buttons to A/B/C,
-      Start to Start, d-pad and left stick to directions. SMS and Game Gear modes present only two buttons, as the
+      <div class="note">Gamepads are detected automatically. By default the face buttons give A/B/C, Start is Start,
+      Select is Pause, and the d-pad and left stick give directions; the left stick always moves the d-pad.
+      Bindings are kept in this browser. SMS and Game Gear modes present only two buttons, as the
       real machines do; the third button and Start reach the game only in Super Sega mode through the Genesis TH multiplex.</div>
     </div>
 
@@ -1955,6 +1956,10 @@ class Machine{
         case 0x15: { const w=this.wave[this.waveSel]; w.vol=v&15; w.pan=(v>>4)&3; return; }
       }
       if(p>=0xF4&&p<=0xFA){ this.dma[p-0xF4]=v; if(p===0xFA&&(v&0x80)) this.runDMA(); return; }
+      /* Super Sega decodes $07-$16 itself. The ports not written above ($0F/$10
+         math result, $16 multitap) are read-only: a write must not fall through
+         to the $3E/$3F mirror below. */
+      if(p>=0x07&&p<=0x16) return;
     }
     if(p<0x40){
       if(p&1){ this.ioCtl=v;
@@ -3306,7 +3311,7 @@ function dbgOverlayDraw(fb,lines,W,H){
      $E5 PPI port B      printer output
      $E6 PPI port C      FDD, FDC, ROM mapping and printer control, output
      $E7 PPI control
-   Port C bits: 0 FDD /INUSE · 1 FDD /MOTOR ON · 2 FDD TC · 3 FDC RESET
+   Port C bits: 0 FDD /INUSE · 1 FDD /MOTOR ON · 2 FDC TC · 3 FDC RESET
                 6 /ROM SEL · 7 printer /STROBE
 
    The detail worth naming: with /ROM SEL low the IPL is mapped over $0000-$3FFF,
@@ -3314,8 +3319,8 @@ function dbgOverlayDraw(fb,lines,W,H){
    The IPL drives it through 8255 bit set/reset on $E7 rather than whole-port
    writes, so that command has to be decoded.
 
-   The floppy controller is NOT emulated. $E0 reports a drive that is present but
-   never ready, so the IPL takes its error path instead of hanging. */
+   The floppy controller is emulated by makeFDC() below and backed by a disk
+   image; with no image loaded the drive reports not ready. */
 function makeSF7000(){
   const S={ram:new Uint8Array(0x10000), rom:null, romSel:0, portC:0, ctrl:0x92,
             fdcReads:0, romMaps:0, ramMaps:0, fdc:makeFDC()};
@@ -3389,6 +3394,16 @@ let BIND=Object.assign({},DEFBIND);
 (function(){ const v=store.get('binds'); if(v){ try{ Object.assign(BIND,JSON.parse(v)); }catch(e){} } })();
 let REV={}; function rebuildRev(){ REV={}; for(const k in BIND) REV[BIND[k]]=k; }
 rebuildRev();
+/* Gamepad bindings: button indices of the browser's standard mapping. A binding
+   may list several buttons; rebinding replaces the list with the one pressed.
+   The left stick always drives the d-pad as well. */
+const DEFPAD={up:[12],down:[13],left:[14],right:[15],a:[0],b:[1],c:[2,3],start:[9],pause:[8]};
+const PADNAMES=['bottom face','right face','left face','top face','L1','R1','L2','R2','Select',
+  'Start','L3','R3','d-pad up','d-pad down','d-pad left','d-pad right','Home'];
+const padName=i=>PADNAMES[i]||('button '+i);
+let PADBIND=JSON.parse(JSON.stringify(DEFPAD));
+(function(){ const v=store.get('padbinds'); if(v){ try{ const o=JSON.parse(v);
+  for(const k in DEFPAD) if(Array.isArray(o[k])&&o[k].every(Number.isInteger)) PADBIND[k]=o[k]; }catch(e){} } })();
 
 
 /* ================= Sound Lab: cross-chip translation + mixer + feasibility ================= */
@@ -4715,37 +4730,52 @@ document.getElementById('cart').onchange=e=>{ const f=e.target.files[0]; if(!f)r
 document.getElementById('card').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   f.arrayBuffer().then(b=>{ m.loadCard(b); refresh(); }); };
 
-let bindWait=null;
+/* Keyboard, touch buttons and gamepad each keep their own state and are merged
+   into the pad the machine reads, so one source never releases a button another
+   is holding. */
+const KEYS={}, TOUCH={}, PADIN={};
+function mergeInput(){ for(const k in m.btn) m.btn[k]=(KEYS[k]||TOUCH[k]||PADIN[k])?1:0; }
+let bindWait=null, padBindWait=null;
 addEventListener('keydown',e=>{
+  if(padBindWait&&e.key==='Escape'){ padBindWait=null; refresh(); e.preventDefault(); return; }
   if(bindWait){ BIND[bindWait]=e.key; bindWait=null; rebuildRev();
     store.set('binds',JSON.stringify(BIND)); refresh(); e.preventDefault(); return; }
   const k=REV[e.key]||REV[e.key.toLowerCase()];
   if(k==='pause'){ m.cpu.nmi(); e.preventDefault(); return; }
-  if(k){ m.btn[k]=1; e.preventDefault(); }
+  if(k){ KEYS[k]=1; mergeInput(); e.preventDefault(); }
 });
 addEventListener('keyup',e=>{ const k=REV[e.key]||REV[e.key.toLowerCase()];
-  if(k&&k!=='pause'){ m.btn[k]=0; e.preventDefault(); } });
+  if(k&&k!=='pause'){ KEYS[k]=0; mergeInput(); e.preventDefault(); } });
 
-/* gamepad: standard mapping */
-let padOn=false;
+/* gamepad: the first connected pad, through PADBIND */
+let padOn=false, padPrev=[];
 function pollPad(){
   let gps=[]; try{ gps=navigator.getGamepads?navigator.getGamepads():[]; }catch(e){}
-  const g=[...gps].find(x=>x); 
-  if(!g){ if(padOn){padOn=false; const e=document.getElementById('padstat'); if(e){e.textContent='no gamepad';e.className='pill';}} return; }
+  const g=[...gps].find(x=>x);
+  if(!g){ if(padOn){padOn=false; const e=document.getElementById('padstat'); if(e){e.textContent='no gamepad';e.className='pill';}}
+    for(const k in PADIN) PADIN[k]=0; padPrev=[]; mergeInput(); return; }
   if(!padOn){ padOn=true; const e=document.getElementById('padstat');
     if(e){e.textContent='gamepad: '+g.id.slice(0,28); e.className='pill g';} }
   const B=g.buttons, ax=g.axes||[];
-  const pressed=i=>B[i]&&B[i].pressed;
-  m.btn.a=pressed(0)?1:0; m.btn.b=pressed(1)?1:0;
-  m.btn.c=(pressed(2)||pressed(3))?1:0; m.btn.start=pressed(9)?1:0;
-  m.btn.up   =(pressed(12)||(ax[1]<-0.4))?1:0;
-  m.btn.down =(pressed(13)||(ax[1]> 0.4))?1:0;
-  m.btn.left =(pressed(14)||(ax[0]<-0.4))?1:0;
-  m.btn.right=(pressed(15)||(ax[0]> 0.4))?1:0;
+  const now=B.map(b=>!!(b&&b.pressed));
+  if(padBindWait){                               /* binding: take the first newly pressed button */
+    const i=now.findIndex((p,j)=>p&&!padPrev[j]);
+    if(i>=0){ PADBIND[padBindWait]=[i]; padBindWait=null;
+      store.set('padbinds',JSON.stringify(PADBIND)); refresh(); }
+    padPrev=now; return;
+  }
+  const on=k=>PADBIND[k].some(i=>now[i]);
+  for(const k of ['a','b','c','start','up','down','left','right']) PADIN[k]=on(k)?1:0;
+  if(ax[1]<-0.4) PADIN.up=1;   if(ax[1]>0.4) PADIN.down=1;
+  if(ax[0]<-0.4) PADIN.left=1; if(ax[0]>0.4) PADIN.right=1;
+  if(on('pause')&&!PADBIND.pause.some(i=>padPrev[i])) m.cpu.nmi();
+  padPrev=now; mergeInput();
 }
+/* While waiting for a pad button the emulation may be paused, so poll on our own. */
+function padBindPoll(){ if(!padBindWait) return; pollPad(); requestAnimationFrame(padBindPoll); }
 document.querySelectorAll('.touch button').forEach(b=>{
   const n=b.dataset.b;
-  const on=e=>{e.preventDefault();m.btn[n]=1;}, off=e=>{e.preventDefault();m.btn[n]=0;};
+  const on=e=>{e.preventDefault();TOUCH[n]=1;mergeInput();}, off=e=>{e.preventDefault();TOUCH[n]=0;mergeInput();};
   b.addEventListener('touchstart',on,{passive:false}); b.addEventListener('touchend',off,{passive:false});
   b.addEventListener('mousedown',on); b.addEventListener('mouseup',off); b.addEventListener('mouseleave',off);
 });
@@ -4873,11 +4903,13 @@ function refresh(){
   ft+='<tr><td>Turbo step</td><td class="v">'+Math.round(m.cpuMult()*100)+'%</td></tr>';
   document.getElementById('feattab').innerHTML=ft;
   // controls
-  const BNAMES={up:'Up',down:'Down',left:'Left',right:'Right',a:'A',b:'B',c:'C',start:'Start',pause:'Pause / NMI'};
-  let bt='<tr><th>Input</th><th>Key</th></tr>';
+  const BNAMES={up:'Up',down:'Down',left:'Left',right:'Right',a:'A (button 1)',b:'B (button 2)',c:'C',start:'Start',pause:'Pause / NMI'};
+  let bt='<tr><th>Input</th><th>Key</th><th>Gamepad</th></tr>';
   for(const k in BNAMES) bt+='<tr><td>'+BNAMES[k]+'</td><td><button data-bind="'+k+'">'+
-    (BIND[k]==='ArrowUp'?'Up':BIND[k]==='ArrowDown'?'Down':BIND[k]==='ArrowLeft'?'Left':
-     BIND[k]==='ArrowRight'?'Right':BIND[k])+'</button></td></tr>';
+    (bindWait===k?'press a key...':
+     BIND[k]==='ArrowUp'?'Up':BIND[k]==='ArrowDown'?'Down':BIND[k]==='ArrowLeft'?'Left':
+     BIND[k]==='ArrowRight'?'Right':BIND[k])+'</button></td><td><button data-padbind="'+k+'">'+
+    (padBindWait===k?'press a pad button... (Esc cancels)':PADBIND[k].map(padName).join(' / '))+'</button></td></tr>';
   document.getElementById('bindtab').innerHTML=bt;
   // slots
   let stt='<tr><th>Slot</th><th>Contents</th></tr>';
@@ -5930,7 +5962,8 @@ $('batsave').onclick=async ()=>{
 $('cfgsave').onclick=()=>{ log(cfgSave(m)?'settings remembered for '+m.romId:'no ROM'); refresh(); };
 $('cfgforget').onclick=()=>{ if(m.romId){store.del('cfg_'+m.romId); log('settings forgotten'); refresh();} };
 $('bindreset').onclick=()=>{ BIND=Object.assign({},DEFBIND); rebuildRev();
-  store.set('binds',JSON.stringify(BIND)); refresh(); };
+  PADBIND=JSON.parse(JSON.stringify(DEFPAD)); bindWait=padBindWait=null;
+  store.set('binds',JSON.stringify(BIND)); store.set('padbinds',JSON.stringify(PADBIND)); refresh(); };
 
 /* drag & drop a ROM or patch onto the screen */
 ['dragover','drop'].forEach(ev=>cv.addEventListener(ev,e=>{e.preventDefault();}));
@@ -5944,8 +5977,10 @@ cv.addEventListener('drop',e=>{
 });
 
 document.addEventListener('click',e=>{
+  const pb=e.target.closest('button[data-padbind]');
+  if(pb){ bindWait=null; padBindWait=pb.dataset.padbind; padPrev=[]; refresh(); padBindPoll(); return; }
   const b=e.target.closest('button[data-bind]'); if(!b)return;
-  bindWait=b.dataset.bind; b.textContent='press a key...'; 
+  padBindWait=null; bindWait=b.dataset.bind; b.textContent='press a key...'; 
 });
 
 /* ---- Sound Lab UI ---- */
