@@ -180,7 +180,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
         <button data-b="c">C</button><button data-b="start">ST</button>
       </div>
     </div>
-    <div class="note">Keys — arrows: d-pad · Z=A X=B C=C · Enter=Start · Tab=Pause/NMI. Super Sega mode exposes A/B/C/Start via the Genesis TH multiplex; SMS and GG modes present only two buttons, as the real machines do.</div>
+    <div class="note">Keys — arrows: d-pad · Z=A X=B C=C · Enter=Start · Tab=Pause/NMI (not in Game Gear mode). Super Sega mode exposes A/B/C/Start via the Genesis TH multiplex; SMS and GG modes present only two buttons, as the real machines do.</div>
   </div>
 
   <div class="side">
@@ -529,8 +529,9 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       </div>
       <div class="note">Gamepads are detected automatically. By default the face buttons give A/B/C, Start is Start,
       Select is Pause, and the d-pad and left stick give directions; the left stick always moves the d-pad.
-      Bindings are kept in this browser. SMS and Game Gear modes present only two buttons, as the
-      real machines do; the third button and Start reach the game only in Super Sega mode through the Genesis TH multiplex.</div>
+      Bindings are kept in this browser. In the Master System, Game Gear, SG-1000, SC-3000 and SF-7000 modes A is
+      button 1 and B is button 2 (C is auto-fire when that boost is on); in Super Sega mode B is button 1, C is button 2,
+      and A and Start are read through the TH multiplex, as on a Mega Drive pad. Pause does nothing in Game Gear mode.</div>
     </div>
 
     <div class="pane" id="p-saves">
@@ -2302,7 +2303,10 @@ class Machine{
     if((this.frameNo&15)===0) this.collectGallery();
     if(typeof HACK!=='undefined'&&HACK.rs.freeze.length)
       for(const f of HACK.rs.freeze) this.wram[this.wramBank*0x2000+f.i]=f.v;
-    if(this.ael.startpause && this.btn.start && !this.prevStart) this.cpu.nmi();
+    /* Start = Pause: Master System, SG-1000 and SC-3000 (with the SF-7000) only. The
+       Game Gear has a Start of its own, and boosts never act on Super Sega software. */
+    if(this.ael.startpause && this.btn.start && !this.prevStart &&
+       (this.mode==='sms'||this.mode==='sg'||this.mode==='sc'||this.mode==='sf')) this.cpu.nmi();
     this.prevStart=this.btn.start;
     const b=this.budget; b.workEnd=0; b.run=0; b.lastBf=-99999; b.synced=false; b.halted=false;
     /* The frame interrupt flag is NOT cleared here: it stays set until the
@@ -4739,13 +4743,16 @@ document.getElementById('card').onchange=e=>{ const f=e.target.files[0]; if(!f)r
    is holding. */
 const KEYS={}, TOUCH={}, PADIN={};
 function mergeInput(){ for(const k in m.btn) m.btn[k]=(KEYS[k]||TOUCH[k]||PADIN[k])?1:0; }
+/* A key or touch released while the page is in the background never sends its
+   release, so drop them when the page loses focus. */
+addEventListener('blur',()=>{ for(const k in KEYS) KEYS[k]=0; for(const k in TOUCH) TOUCH[k]=0; mergeInput(); });
 let bindWait=null, padBindWait=null;
 addEventListener('keydown',e=>{
   if(padBindWait&&e.key==='Escape'){ padBindWait=null; refresh(); e.preventDefault(); return; }
   if(bindWait){ BIND[bindWait]=e.key; bindWait=null; rebuildRev();
     store.set('binds',JSON.stringify(BIND)); refresh(); e.preventDefault(); return; }
   const k=REV[e.key]||REV[e.key.toLowerCase()];
-  if(k==='pause'){ m.cpu.nmi(); e.preventDefault(); return; }
+  if(k==='pause'){ if(m.mode!=='gg') m.cpu.nmi(); e.preventDefault(); return; }   // the Game Gear has no Pause button
   if(k){ KEYS[k]=1; mergeInput(); e.preventDefault(); }
 });
 addEventListener('keyup',e=>{ const k=REV[e.key]||REV[e.key.toLowerCase()];
@@ -4772,7 +4779,7 @@ function pollPad(){
   for(const k of ['a','b','c','start','up','down','left','right']) PADIN[k]=on(k)?1:0;
   if(ax[1]<-0.4) PADIN.up=1;   if(ax[1]>0.4) PADIN.down=1;
   if(ax[0]<-0.4) PADIN.left=1; if(ax[0]>0.4) PADIN.right=1;
-  if(on('pause')&&!PADBIND.pause.some(i=>padPrev[i])) m.cpu.nmi();
+  if(m.mode!=='gg'&&on('pause')&&!PADBIND.pause.some(i=>padPrev[i])) m.cpu.nmi();
   padPrev=now; mergeInput();
 }
 /* While waiting for a pad button the emulation may be paused, so poll on our own. */
@@ -4781,6 +4788,7 @@ document.querySelectorAll('.touch button').forEach(b=>{
   const n=b.dataset.b;
   const on=e=>{e.preventDefault();TOUCH[n]=1;mergeInput();}, off=e=>{e.preventDefault();TOUCH[n]=0;mergeInput();};
   b.addEventListener('touchstart',on,{passive:false}); b.addEventListener('touchend',off,{passive:false});
+  b.addEventListener('touchcancel',off,{passive:false});
   b.addEventListener('mousedown',on); b.addEventListener('mouseup',off); b.addEventListener('mouseleave',off);
 });
 
@@ -4907,7 +4915,7 @@ function refresh(){
   ft+='<tr><td>Turbo step</td><td class="v">'+Math.round(m.cpuMult()*100)+'%</td></tr>';
   document.getElementById('feattab').innerHTML=ft;
   // controls
-  const BNAMES={up:'Up',down:'Down',left:'Left',right:'Right',a:'A (button 1)',b:'B (button 2)',c:'C',start:'Start',pause:'Pause / NMI'};
+  const BNAMES={up:'Up',down:'Down',left:'Left',right:'Right',a:'A',b:'B',c:'C',start:'Start',pause:'Pause / NMI'};
   let bt='<tr><th>Input</th><th>Key</th><th>Gamepad</th></tr>';
   for(const k in BNAMES) bt+='<tr><td>'+BNAMES[k]+'</td><td><button data-bind="'+k+'">'+
     (bindWait===k?'press a key...':

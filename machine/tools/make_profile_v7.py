@@ -92,10 +92,14 @@ p['port_map']['mirror_scheme'] = (
     'On SMS hardware every EVEN address 0x00-0x3E mirrors 0x3E and every ODD address 0x01-0x3F mirrors 0x3F. '
     'The Game Gear decodes 0x00-0x06 separately for its own registers. On every stock machine the PSG is '
     'written at any port in 0x40-0x7F and the VDP answers across 0x80-0xBF (even ports data, odd ports '
-    'control); on the Master System and Game Gear the V and H counters read at every even and odd port in '
-    '0x40-0x7F.')
+    'control); on the Master System and Game Gear the V counter reads at every even port and the H counter at '
+    'every odd port in 0x40-0x7F. The SG-1000, SC-3000 and SF-7000 have no 0x3E/0x3F registers: in those '
+    'modes writes to 0x00-0x3F do nothing.')
 change(LATER + 'port_map.mirror_scheme now gives the PSG/counter mirror across $40-$7F and the VDP mirror '
        'across $80-$BF, which both implementations decode and which the stock machines have.')
+change(LATER + 'The SG-1000, SC-3000 and SF-7000 modes have no $3E/$3F registers, so writes to $00-$3F do '
+       'nothing there (port_map.mirror_scheme). The Pocket core already ignored them; the emulator let writes '
+       'to $07-$3F change its I/O control value.')
 pm['0x7E'] = 'V counter / gun vertical (read); PSG (write)'
 pm['0x7F'] = 'H counter / gun horizontal (read); PSG (write)'
 pm['0xC0-0xDF'] = ('controllers: 0xDC/0xDD, mirrored across the range; while the SK-1100 keyboard is live '
@@ -517,14 +521,16 @@ p['open_questions'] = [
                 'modes on Super Sega, and what enables it?')},
     {'id': 'Q16', 'topic': 'Register layouts defined only by the emulator', 'status': 'open',
      'detail': ('The bit layouts of the DMA engine ($F4-$FA), PCM control ($08 write), the wavetable ($11-$15), '
-                'slot select ($09) and the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) are '
+                'slot select ($09), the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the '
+                'window split (bank 0 R13 and R14) are '
                 'defined today only by the emulator\'s implementation (the Pocket core already follows it for $09). '
                 'They need writing into the profile and the Technical Reference, and checking, before the Pocket '
                 'core implements them, as v7 did for the math unit.')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
-                'is selected. Decide whether they do, and what the TMS modes draw below line 192 if so.')},
+                'is selected. Should the machine apply them in the TMS modes, and if so, what do those modes '
+                'draw below line 192?')},
 ]
 change('open_questions section added, consolidating questions from the Golden Axe conversion '
        'plan, the ROM hack maker spec and the SML DX port, with the ones v6 already answers marked resolved.')
@@ -551,8 +557,10 @@ change(LATER + 'Line interrupts in the legacy (TMS) modes recorded as open quest
        'C enables them, which no bit does. The statements that answered the question now point to Q15.')
 change(LATER + 'Open question Q17 added: whether Feature Enable B\'s 224/240-line heights apply while a TMS9918 '
        'mode is selected, as both implementations do today.')
+p['vdp_registers']['bank_0']['14'] = 'Window Y Split; bit 7 selects side'
 change(LATER + 'Open question Q16 added: the register layouts of the DMA engine, PCM control, the wavetable, '
-       'slot select and the VDP base registers are defined only by the emulator\'s implementation.')
+       'slot select, the VDP base registers and the window split are defined only by the emulator\'s '
+       'implementation. vdp_registers.bank_0 R14 now gives its bit 7 (side), as the Technical Reference does.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

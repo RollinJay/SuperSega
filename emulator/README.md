@@ -1,22 +1,22 @@
 # Super Sega emulator — v7 fixes
 
-`supersega-emulator.html` is the emulator with every v7 fix applied. `fix_emulator_v7.py` is the same change as one patch, for applying to the original (pre-v7) page, `supersega-emulator.orig.html`, which is not included in this repository:
+`supersega-emulator.html` is the emulator with every v7 fix applied, plus the later fixes in section 7 of `../machine/SuperSega_v7_Reconciliation.md`. `fix_emulator_v7.py` is the v7 round as one patch, for applying to the original (pre-v7) page, `supersega-emulator.orig.html`, which is not included in this repository:
 
 ```sh
-python3 fix_emulator_v7.py supersega-emulator.orig.html supersega-emulator.html
+python3 fix_emulator_v7.py supersega-emulator.orig.html supersega-emulator.v7.html
 ```
 
 The patch has 108 edits. Each is labelled **MODEL** (the emulator's model of the machine now does what the machine does; 75 edits) or **APP** (the application only; 33 edits). Every anchor is checked in order before anything is written, so a page that does not match stops the script instead of being half-patched. `../machine/SuperSega_v7_Reconciliation.md` explains the fixes in plain language.
 
 ## Changing the emulator
 
-`fix_emulator_v7.py` is the record of the v7 round. It cannot be re-run here, because the original page is not in the repository, so later changes are made to `supersega-emulator.html` directly and git history is their record. A fix to the machine model also gets a probe in `tools/probes_v7.js` where one is possible (numbered on from the patch's MODEL fixes: M38 is the first), and a line in section 7 of `../machine/SuperSega_v7_Reconciliation.md`.
+`fix_emulator_v7.py` is the record of the v7 round. It cannot be re-run here, because the original page is not in the repository, so later changes are made to `supersega-emulator.html` directly and git history is their record. A fix to the machine model also gets a probe in `tools/probes_v7.js` where one is possible (numbered on from the patch's MODEL fixes: M38 was the first), and a line in section 7 of `../machine/SuperSega_v7_Reconciliation.md`.
 
 ## Checks (Node.js 18 or later, Python 3)
 
 ```sh
 cd tools && mkdir -p out
-node probes_v7.js ../supersega-emulator.html          # 42 behavioural probes, each with its hardware source
+node probes_v7.js ../supersega-emulator.html          # 45 behavioural probes, each with its hardware source
 node selftest.js ../supersega-emulator.html           # the page's own Debug-tab self-test, headless (29 checks)
 python3 profile_crosscheck.py ../supersega-emulator.html ../../machine/super_sega_machine_v7.json
 python3 wiring_audit.py ../supersega-emulator.html    # every control wired to code, every subsystem present

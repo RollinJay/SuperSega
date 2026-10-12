@@ -1,6 +1,6 @@
 # Super Sega — v7 Reconciliation: Machine vs Emulator
 
-October 2026. Companion to `super_sega_machine_v7.json` and `SuperSega_Technical_Reference_v3.md`. Paths below are relative to the top of the repository (`machine/`, `emulator/`, `pocket-core/`).
+October 2026. Companion to `super_sega_machine_v7.json` and `SuperSega_Technical_Reference_v3.md`. Paths below are relative to the top of the repository (`machine/`, `emulator/`, `pocket-core/`). The *October 2026 package* is the set of files (these documents, the emulator and the Pocket core) this repository was first imported from; §7 lists what has changed since.
 
 **Terms used below.** *Feature Enable A, B, C* are the three registers through which new software opts into Super Sega features (VDP bank 0 R15, bank 1 R2 and R7; "bank1 R3" is register 3 of the extension register bank 1). The *enhancement layer* (AEL) is the set of optional boosts for unmodified software, all off by default. The *bus synchroniser* holds the CPU when turbo runs it faster than the video chip can accept data. The Technical Reference explains each in full.
 
@@ -16,7 +16,7 @@ Work on Super Sega has happened in several chats: the machine design itself, the
 | The emulator's machine model | The part of the HTML5 emulator that behaves like the console |
 | The Analogue Pocket core | The new RTL in `pocket-core/rtl` plus the Pocket wrapper in `pocket-core/pocket` |
 
-**The emulator** is an application. Besides its machine model it has tools that no console has. They are not part of the machine, so they never go into the machine documents or the Pocket core's machine layer:
+**The emulator** is an application. Besides its machine model it has tools that no console has. They are not part of the machine, so they never go into the machine documents or the Pocket core's machine layer (`pocket-core/rtl/`; the core's other layer, `pocket-core/pocket/`, connects the machine to the Pocket):
 
 | Emulator-only feature | Notes |
 |---|---|
@@ -29,11 +29,11 @@ Work on Super Sega has happened in several chats: the machine design itself, the
 | FM dual-run capture | Analysis tool |
 | Save states | The console has none; the Pocket core has none in this milestone |
 
-**Rule for disagreements.** Where the emulator and the machine documents disagree, the documents win and the emulator is fixed — unless the documents themselves are wrong about stock hardware, in which case both are corrected together and the change is recorded in `v7_changes`.
+**Rule for disagreements.** Where the emulator and the machine documents disagree, the documents win and the emulator is fixed — unless the documents themselves are wrong about stock hardware, in which case both documents are corrected (and any implementation that followed them) and the change is recorded in `v7_changes`.
 
 ## 2. Machine changes in v7
 
-All are recorded in the profile's `v7_changes` (20 entries in the package, 36 now; §7 lists the later changes). The ones that change behaviour:
+All are recorded in the profile's `v7_changes` (20 entries in the package, 37 now; §7 lists the later changes). The ones that change behaviour:
 
 | Change | Source | Emulator | Pocket RTL |
 |---|---|---|---|
@@ -100,7 +100,7 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 
 | Check | Result |
 |---|---|
-| Behavioural probes (`emulator/tools/probes_v7.js`) for 41 behaviours, each citing its hardware source. The probes are named after the patch's MODEL fixes (M1–M37 in `emulator/fix_emulator_v7.py`); four fixes have no probe of their own. M11 (Game Gear `$01`–`$06` power-on values) shows only in the I/O test ROM comparison below, in Game Gear mode. M13 (cartridge wait states lengthen the access) is exercised by no check: headless runs use the emulator's default ROM access, a copy in fast RAM, and even with its other setting, cartridge timing, a wait state arises only at the 200 % turbo step. M15 (SG-1000/SC-3000/SF-7000 writes to `$00`–`$06` do nothing) is exercised by no check. M17 (T-states lost during ED/CB instructions) is caught by the bus-synchroniser probe (M12) | 41 of 41 pass on the fixed page, 0 of 41 on the original |
+| Behavioural probes (`emulator/tools/probes_v7.js`) for 41 behaviours, each citing its hardware source. The probes are named after the patch's MODEL fixes (M1–M37 in `emulator/fix_emulator_v7.py`); four fixes have no probe of their own. M11 (Game Gear `$01`–`$06` power-on values) shows only in the I/O test ROM comparison below, in Game Gear mode. M13 (cartridge wait states lengthen the access) is exercised by no check: headless runs use the emulator's default ROM access, a copy in fast RAM, and even with its other setting, cartridge timing, a wait state arises only at the 200 % turbo step. M15 (SG-1000/SC-3000/SF-7000 writes to `$00`–`$06` do nothing) is exercised by no check. M17 (T-states lost during ED/CB instructions) is caught by the bus-synchroniser probe (M12) | 41 of 41 pass on the fixed page, 0 of 41 on the original (four more since, M38–M41, §7; 45 of 45 pass) |
 | The page's own self-test, run headless | 29 of 29 |
 | Gearsystem as an independent oracle: Batman Returns SMS (PAL) frames 30, 60, 120, 200, 500, 900, 1500 and GG frames 200, 500, 900, 1500 | identical (GG within Gearsystem's colour rounding: it expands channel value 5 to 86, not 85) |
 | `emulator/tools/profile_crosscheck.py` (an earlier chat's check that the emulator implements what the profile claims; its height check updated to the v7 rule) | 47 of 47 claims on the fixed page; the original page fails the height rule (the script has since been rewritten to read every value from the profile: §7) |
@@ -146,28 +146,31 @@ The repository corrected the following after the package was imported; each mach
 9. Save states are no longer listed as a missing Pocket core feature: they would belong to the Pocket platform layer, not the machine, and are not planned in this milestone (Pocket design document only).
 10. The PAL CPU clock is defined as 3.546893 MHz, as on a PAL Master System. Neither implementation uses it yet: both run PAL at the NTSC clock (50.16 Hz frames instead of 49.70 Hz). PAL turbo frequencies are not defined yet.
 11. Writes to `$07`–`$16` and to VDP registers 11–15 take effect only in Super Sega mode, and Q1 now names the real risk: old code run in Super Sega mode that writes a `$3E`/`$3F` mirror address.
-12. Register layouts that only the emulator defines (DMA engine, PCM control, wavetable, slot select, VDP base registers) are recorded as open question Q16.
+12. Register layouts that only the emulator defines (DMA engine, PCM control, wavetable, slot select, VDP base registers, window split) are recorded as open question Q16.
 13. The height cases are written out: with M4 and M2 set, M1 and M3 both set give 192 lines, and so does Feature Enable B height 11.
 14. The two risks kept from Technical Reference v2 (VDP registers 11–15 checked against only six titles; keyboard polarity from one source that contradicts itself) are recorded in the profile too, which no longer states the polarity as settled.
 15. The FM detection latch rule (Master System and Super Sega modes only) has its own `v7_changes` entry, so §2's statement that every change in its table is listed there holds.
 16. The profile notes that the enhancement-layer design document it cites is not in this repository.
 17. Both documents give the standard port mirrors both implementations decode: the PSG (and on the Master System and Game Gear the V and H counters) across `$40`–`$7F`, the VDP across `$80`–`$BF`.
 18. Whether Feature Enable B's 224- and 240-line heights apply in the TMS modes is recorded as open question Q17.
+19. Both documents say that the SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers, so writes to `$00`–`$3F` do nothing in those modes (the emulator now follows this: M39).
 
 ### Emulator
 
-Fixes to the emulator's model of the machine, each with a probe in `emulator/tools/probes_v7.js` that fails on the page as it was:
+Fixes to the emulator's model of the machine. M38–M41 each have a probe in `emulator/tools/probes_v7.js` that fails on the page as it was:
 
 - **M38.** In Super Sega mode, writes to the read-only ports `$0F`, `$10` (math result) and `$16` (multitap) fell through to the `$3E`/`$3F` mirror and changed the memory and I/O control registers. Super Sega decodes `$07`–`$16` itself, as the Pocket core already did.
 - **M39.** In the SG-1000, SC-3000 and SF-7000 modes, writes to `$07`–`$3F` changed the I/O control value, which affects what TH and TR read back. Those machines have no `$3E`/`$3F` registers, and the Pocket core already ignored the writes.
 - **M40.** In the TMS9918 modes the line interrupt was raised in every machine mode. As stock only Mode 4 raises it; in Super Sega mode the question is open (Q15), and the emulator keeps raising it there.
-- The Z80 now resets to interrupt mode 0, as the profile's `cpu.reset_state` says; the emulator takes every interrupt at `$0038`, so this changes nothing a program can see.
+- **M41.** The Start = Pause boost raised Pause in every mode. It now acts only in the Master System, SG-1000 and SC-3000 modes, as the profile's enhancement layer says: the Game Gear has a Start button of its own, and boosts never act on Super Sega software.
 
-Application changes: gamepad buttons can be rebound in the Controls tab like keys, and keyboard, touch and gamepad input are merged each frame (a connected gamepad used to release keys held on the keyboard). `profile_crosscheck.py` now reads every value it checks from the profile (49 claims; altering a value in the profile now shows as a mismatch, which it did not before), `probes_v7.js` exits with status 1 when a probe fails, and `controls_test.js` checks the bindings in a browser.
+Also, without a probe because no program can see it: the Z80 now resets to interrupt mode 0, as the profile's `cpu.reset_state` says; the emulator takes every interrupt at `$0038` whatever the mode.
+
+Application changes: gamepad buttons can be rebound in the Controls tab like keys, and keyboard, touch and gamepad input are merged each frame (a connected gamepad used to release keys held on the keyboard). The Pause key and the gamepad's Pause do nothing in Game Gear mode, which has no Pause button. `profile_crosscheck.py` now reads every value it checks from the profile, and the claims about behaviour the profile describes in words check that the code for it is present (49 claims; before, most values were written into the script, so a wrong profile still passed), `probes_v7.js` exits with status 1 when a probe fails, and `controls_test.js` checks the bindings in a browser.
 
 ### Pocket core
 
 - The CPU resets with SP = `$DFF0` (a second documented local change to tv80), and the trace harness samples SP after tv80 has written it back.
-- As stock, only Mode 4 raises the line interrupt (the same change as M40).
+- In the stock machine modes only Mode 4 now raises the line interrupt, as on stock hardware; in Super Sega mode the TMS modes still raise it (open question Q15). The same change as M40.
 - The controls players remap in the Pocket's Core Settings > Controls menu are labelled correctly in every mode, and `tools/check_core_json.py` checks the core's definition files against the platform's limits and the RTL.
 - `pocket/setup.sh` fetches the Analogue core template at the release `core_top.v` was written against (v1.3.0).

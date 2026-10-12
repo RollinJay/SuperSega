@@ -58,7 +58,9 @@ for port,desc in kb['ports'].items():
     else:                                       # read: matrix data
         ok='(p&3)===%d) return this.kb.port'%(n&3) in kbrd
     chk('keyboard port %s decoded (%s)'%(port, desc.split(',')[0]), 0xC0<=n<=0xDF and ok)
-chk('keyboard row select on 0xDE', "(p&3)===2){ this.kb.portC=v" in js)
+rowsel=[int(k,16) for k,d in kb['ports'].items() if 'row select' in d]
+chk('keyboard row select on %s'%', '.join('0x%02X'%n for n in rowsel),
+    bool(rowsel) and all('(p&3)===%d){ this.kb.portC=v; this.kb.row='%(n&3) in js for n in rowsel))
 chk('keyboard control not readable', 'return 0xFF;                                  // $DF' in js)
 chk('keyboard ghosting modelled', 'K.ghost=' in js)
 chk('keyboard active low', '(~m)&0xFF' in js)
@@ -82,7 +84,9 @@ chk('non-Sega mappers ignore 0xFFFC',
 
 sc=prof['media']['sc3000_carts']
 chk('SC-3000 its own mode', "mode==='sc'" in js)
-chk('SC-3000 2 KB work RAM mirrored', 'a&0x7FF' in js)
+kb_sc=re.match(r'(\d+) KB', sc['work_ram'])
+chk('SC-3000 %s work RAM mirrored'%(kb_sc and kb_sc.group(0)),
+    kb_sc and re.search(r'// 16 KB cart DRAM\s+return this\.ram\[a&0x%X\];'%(int(kb_sc.group(1))*1024-1), js))
 chk('SC-3000 32 KB contiguous option', 'scRam===32' in js)
 
 sf=prof['media']['sf7000']
@@ -95,7 +99,7 @@ chk('floppy geometry %s'%sf['floppy']['geometry'],
     g and 'tracks:%s, sectors:%s, bytes:%s'%g.groups() in js)
 
 # --- claims that were previously in the profile but untested, so drift went unseen ---
-chk('display heights selected by M1-M4 as the profile states (v7: M2 enables, M1 -> 224, M3 -> 240)',
+chk('display heights selected by M1-M4 (behaviour: M2 enables, M1 -> 224, M3 -> 240)',
     'const M1=(this.reg[1]>>4)&1' in js and 'if(M4&&M2){ if(M1&&!M3) return 224; if(M3&&!M1) return 240; }' in js,
     'the v6 rule (M4 and M3) had M2 and M3 swapped; MAME sega315_5246 and Gearsystem use M2 as the enable')
 chk('224 and 240 reachable', "return 224" in js and "return 240" in js)
@@ -120,7 +124,7 @@ chk('region detection via TH readback', 'this.jpRegion' in js)
 fp=prof['fpga_partition']
 chk('FPGA job table present', 'FPGA_JOBS' in js)
 chk('FPGA jobs: %d declared'%len(fp['fpga_jobs']),
-    js.count("side:'fpga'")>=len(fp['fpga_jobs'])-2,
+    js.count("side:'fpga'")==len(fp['fpga_jobs']),
     '%d in code'%js.count("side:'fpga'"))
 chk('ASIC jobs: %d declared'%len(fp['asic_jobs']),
     js.count("side:'asic'")==len(fp['asic_jobs']),

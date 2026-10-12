@@ -79,9 +79,11 @@ const rom = path.resolve(process.argv[3]);
   // reset to defaults
   await page.click('#bindreset', { force: true }).catch(() => page.evaluate(() => document.getElementById('bindreset').click()));
   ok('reset restores defaults', await page.evaluate(() => JSON.stringify(PADBIND) === JSON.stringify(DEFPAD) && BIND.c === 'c'));
+  ok('defaults stored', await page.evaluate(() => localStorage.getItem('ss_padbinds') === JSON.stringify(DEFPAD)));
   // pad unplugged: its buttons release
   await page.setInputFiles('#cart', rom); await page.waitForTimeout(200);
   await page.click('#run'); await setBtn(0, true); await frames(5);
+  ok('pad A held before unplug', await page.evaluate(() => m.btn.a) === 1);
   await page.evaluate(() => { window.__padOn = false; }); await frames(5);
   ok('unplugged pad releases its buttons', await page.evaluate(() => m.btn.a) === 0);
   ok('no page errors', errors.length === 0, errors.join(' | '));

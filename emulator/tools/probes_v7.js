@@ -306,12 +306,18 @@ probe('M30', 'Game Gear: only $C0/$DC and $C1/$DD answer above $C0 (Gearsystem)'
   return { ok: (a & 1) === 0 && (b & 1) === 0 && c === 0xFF && d === 0xFF, note: [a, b, c, d].map(v => v.toString(16)).join(' ') };
 });
 
-probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 in a TMS mode raises none; Mode 4 on the Master System does (machine profile stock_behaviour.vdp.line_counter)', () => {
-  const g = sms('sg'); g.vdp.reg[0] = 0x10; g.vdp.reg[1] = 0x40; g.vdp.reg[10] = 0;   // TMS mode, IE1 set, counter 0
-  const s = sms('sms'); s.vdp.reg[0] = 0x14; s.vdp.reg[1] = 0x40; s.vdp.reg[10] = 0;  // Mode 4, IE1 set
-  g.vdp.irqLine = 0; s.vdp.irqLine = 0;
-  for (let i = 0; i < 4; i++) { g.vdp.scanline(); s.vdp.scanline(); }
-  return { ok: !g.vdp.irqLine && !!s.vdp.irqLine, note: `SG TMS ${g.vdp.irqLine}, SMS Mode 4 ${s.vdp.irqLine}` };
+probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 or a Master System in a TMS mode raises none, Mode 4 does; Super Sega mode still raises it in a TMS mode (open question Q15) (machine profile stock_behaviour.vdp.line_counter)', () => {
+  const run = (mode, r0) => { const m = sms(mode); m.vdp.reg[0] = r0; m.vdp.reg[1] = 0x40; m.vdp.reg[10] = 0;  // IE1 set, counter 0
+    m.vdp.irqLine = 0; for (let i = 0; i < 4; i++) m.vdp.scanline(); return m.vdp.irqLine ? 1 : 0; };
+  const sgTms = run('sg', 0x10), smsTms = run('sms', 0x10), smsM4 = run('sms', 0x14), ssTms = run('ss', 0x10);
+  return { ok: !sgTms && !smsTms && smsM4 && ssTms,
+           note: `SG TMS ${sgTms}, SMS TMS ${smsTms}, SMS Mode 4 ${smsM4}, SS TMS ${ssTms}` };
+});
+probe('M41', 'Start = Pause boost: Start raises Pause in the Master System, SG-1000 and SC-3000 modes, not on the Game Gear (it has its own Start) nor for Super Sega software (machine profile enhancement_layer)', () => {
+  const res = ['sms', 'sg', 'sc', 'gg', 'ss'].map(mode => { const m = sms(mode); let n = 0;
+    m.ael.startpause = true; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
+    m.btn.start = 1; m.runFrame(); m.runFrame(); return n; });
+  return { ok: res.join('') === '11100', note: 'NMIs sms sg sc gg ss: ' + res.join(' ') };
 });
 
 // ---------------------------------------------------------------- mappers

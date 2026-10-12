@@ -128,7 +128,7 @@ Both selection paths must work: the standard bits are how Master System and Game
 | Sprite overflow | status bit 6, set by a ninth sprite on a line **by Y alone** — off-screen and transparent sprites count |
 | Frame interrupt flag | status bit 7, set early in line *height* + 1 (the second line after the last displayed one, §16); stays set until the status register is read |
 | CRAM addressing | high address bits ignored, so the address always lands in CRAM |
-| Line interrupt counter | on lines 0 to *height* (one line past the display) it counts down, and on reaching 0 it reloads from R10 and raises the line interrupt; on the other lines it is reloaded from R10 |
+| Line interrupt counter | on lines 0 to *height* (one line past the display) it counts down, and on reaching 0 it reloads from R10 and raises the line interrupt; on the other lines it is reloaded from R10. Mode 4 only as stock (the TMS modes raise none); whether Super Sega runs it in the TMS modes is open question Q15 |
 | Name-table spare bits | the top three bits of each entry are unused by the VDP; some games keep collision flags there |
 | 8×16 sprites | the low bit of the tile index is ignored |
 | Registers 11 and above | ignored by real hardware, which is why the Super Sega extensions live there |
@@ -213,6 +213,10 @@ One key (RESET) raises an NMI instead of appearing in the matrix.
 |---|---|
 | Mega Drive mouse | TH-clocked serial, 3 buttons, relative movement. Four ID nibbles (`0,B,F,F`), then sign/overflow, buttons and two bytes of movement. Answers on port B |
 | Sports Pad trackball | TH-clocked, strobe on `$3F` bit 5 (player 1) or bit 7 (player 2). Two 8-bit **absolute** counters that wrap. Clocked out X7–X4 strobe low, X3–X0 strobe high, Y7–Y4 low, Y3–Y0 high, on port A bits 3–0, with buttons on bits 4 and 5 |
+
+### Multiplayer
+
+A multitap on the pad port (Sega Team Player MK-1654 or EA 4 Way Play protocol), detected through `$16` (§11); and, for Game Gear multiplayer, a machine-to-machine serial link cable on the Game Gear EXT registers `$01`–`$05`.
 
 ---
 
@@ -368,7 +372,7 @@ Bank 2 unallocated; bank 3 reserved.
 | `$FC`–`$FD` | SDSC debug console |
 | `$FE`–`$FF` | watchpoint register select / data |
 
-On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V and H counters read at every even and odd port in `$40`–`$7F`. The Game Gear decodes `$00`–`$06` separately, and Super Sega extends that to `$16`. Writes to `$07`–`$16`, like writes to VDP registers 11–15 (§10), take effect only in Super Sega mode; in every other mode they do what they do on the stock machine.
+On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V counter reads at every even port and the H counter at every odd port in `$40`–`$7F`. The SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers: in those modes writes to `$00`–`$3F` do nothing. The Game Gear decodes `$00`–`$06` separately, and Super Sega extends that to `$16`. Writes to `$07`–`$16`, like writes to VDP registers 11–15 (§10), take effect only in Super Sega mode; in every other mode they do what they do on the stock machine.
 
 **Reads.** `$00`–`$3F` are write-only on the Master System and read `$FF`; on the Game Gear and Super Sega every port there that is not a register listed above also reads `$FF`. In Super Sega mode, `$07`–`$16` and `$F0`–`$FF` are fully decoded: unreadable ports return `$FF`, never the controller mirror. In the other modes `$FB`–`$FF` read as on the stock machine — the controller mirror, or `$FF` on the Game Gear — because stock software may read its pads there (§13).
 
@@ -511,7 +515,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range. They act as registers only in Super Sega mode (`$06` also in Game Gear mode, §11), so stock software in its own mode is unaffected. The risk is old code run in Super Sega mode — a title retagged to region 8 (§14), a converted title, or a stock cartridge started in Super Sega mode, which a boot-menu answer to Q8 would allow — that writes a mirror address in `$06`–`$16`. Move them above `$F0`? | open |
+| Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range. They act as registers only in Super Sega mode (`$06` also in Game Gear mode, §11), so stock software in its own mode is unaffected. The risk is old code run in Super Sega mode that writes a mirror address in `$06`–`$16`: a title retagged to region 8 (§14), a converted title, or a stock cartridge started in Super Sega mode (one proposed answer to Q8 is a boot-menu option that does this). Move them above `$F0`? | open |
 | Q2 | Maximum ROM size and the mapper register layout above 4 MB | open |
 | Q3 | Cartridge save-RAM size the machine guarantees (the 315-5235 maps 2 × 16 KB; the emulator models 2 × 8 KB) | open |
 | Q4 | ESAT format | resolved in v6: 2 bytes per sprite |
@@ -526,8 +530,8 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q13 | Feature Enable C bit 4 (ESAT 2-byte) contradicts ESAT being 2 bytes per sprite (Q4); the emulator still has a 1-byte layout when the bit is clear. Retire the bit or document the 1-byte layout | open |
 | Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | open |
 | Q15 | Line interrupts in the TMS9918 modes. The machine profile lists them as a Super Sega enhancement for SG-1000-style software (line interrupts are a Master System addition) but defines no bit that enables them. As stock the TMS modes raise none, and both implementations follow that in the stock modes; in Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set (the Pocket core does not draw the TMS modes yet). Should the line counter run in the TMS modes on Super Sega, and what enables it? | open |
-| Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) and the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | open |
-| Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for Super Sega software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Do they, and what do the TMS modes draw below line 192? | open |
+| Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the window split (bank 0 R13 and R14) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | open |
+| Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for Super Sega software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192? | open |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in Super Sega mode, the only mode in which those registers act (§10); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
