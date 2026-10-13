@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Super Sega - Pocket core regression checks, run by CI (.github/workflows/checks.yml).
 #
+#   0. the Pocket definition files (input.json, interact.json) are within the
+#      platform's limits and match what pocket/ss_pocket.v reads and decodes
 #   1. tools/mk_testrom.py reproduces roms/ byte for byte
 #   2. sim/z80: the Z80 wrapper's instruction timing matches the emulator's Z80
 #   3. sim/sys: the machine draws the same frames as the emulator's machine model
@@ -29,6 +31,9 @@ step() { printf '\n== %s\n' "$*"; }
 build() {                                     # build <sim dir>: quiet unless it fails
     (cd "sim/$1" && ./build.sh > "$W/build_$1.log" 2>&1) || { cat "$W/build_$1.log"; return 1; }
 }
+
+step "0. Pocket definition files"
+python3 tools/check_core_json.py
 
 step "1. test ROMs are reproducible"
 python3 tools/mk_testrom.py "$W/roms" > /dev/null

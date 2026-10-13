@@ -4,7 +4,10 @@
 v7 folds in the updates to the machine that were made in other chats, the
 stock-hardware behaviour the emulator was corrected to follow (which every
 implementation of the machine must follow, the Pocket core included), and
-internal inconsistencies found in v6. Every change is listed in v7_changes.
+internal inconsistencies found in v6. Every change is listed in v7_changes;
+those made after the October 2026 package say so. Every edit sets a value, or
+inserts one only when it is missing, so run on the committed v7 the script
+reproduces it byte for byte.
 Usage: make_profile_v7.py v6.json v7.json
 """
 import json, sys, copy
@@ -12,6 +15,19 @@ import json, sys, copy
 src, dst = sys.argv[1], sys.argv[2]
 v6 = json.load(open(src))
 p = copy.deepcopy(v6)
+
+def put_after(d, after, key, value):
+    """d[key] = value, with key placed right after d[after] (at the end if there is no such key)."""
+    items = [(k, v) for k, v in d.items() if k != key]
+    d.clear()
+    for k, v in items:
+        d[k] = v
+        if k == after:
+            d[key] = value
+    if key not in d:
+        d[key] = value
+
+LATER = '(after the October 2026 package) '
 
 p['$schema'] = 'super-sega-machine-block/v7'
 p['supersedes'] = 'super_sega_machine_v6.json'
@@ -71,6 +87,47 @@ change('Debug unit port reads: in the stock modes $FB-$FF read as on the stock m
        'on the Game Gear), and the debug unit answers reads only in Super Sega mode, which therefore decodes $F0-$FF '
        'fully. Writes reach the debug unit in every mode, as before. The emulator answered $FB-$FD reads in every '
        'mode, so stock software reading its pads at those mirror addresses saw the debug status instead.')
+
+p['port_map']['mirror_scheme'] = (
+    'On SMS hardware every EVEN address 0x00-0x3E mirrors 0x3E and every ODD address 0x01-0x3F mirrors 0x3F. '
+    'The Game Gear decodes 0x00-0x06 separately for its own registers. On every stock machine the PSG is '
+    'written at any port in 0x40-0x7F and the VDP answers across 0x80-0xBF (even ports data, odd ports '
+    'control); on the Master System and Game Gear the V counter reads at every even port and the H counter at '
+    'every odd port in 0x40-0x7F. The SG-1000, SC-3000 and SF-7000 have no 0x3E/0x3F registers: in those '
+    'modes writes to 0x00-0x3F do nothing.')
+change(LATER + 'port_map.mirror_scheme now gives the PSG/counter mirror across $40-$7F and the VDP mirror '
+       'across $80-$BF, which both implementations decode and which the stock machines have.')
+change(LATER + 'The SG-1000, SC-3000 and SF-7000 modes have no $3E/$3F registers, so writes to $00-$3F do '
+       'nothing there (port_map.mirror_scheme). The Pocket core already ignored them; the emulator let writes '
+       'to $07-$3F change its I/O control value.')
+pm['0x7E'] = 'V counter / gun vertical (read); PSG (write)'
+pm['0x7F'] = 'H counter / gun horizontal (read); PSG (write)'
+pm['0xC0-0xDF'] = ('controllers: 0xDC/0xDD, mirrored across the range; while the SK-1100 keyboard is live '
+                   '(input.keyboard.enable), the PPI at 0xDC-0xDF instead, mirrored across the range')
+change(LATER + 'Port map corrected to match the Technical Reference and both implementations: the PSG is '
+       'written at $7E as well as $7F (v6 named only $7F), and $C0-$DF is the controller mirror unless the '
+       'SK-1100 keyboard is live, when the PPI answers there (v6 named only the PPI).')
+
+put_after(p['port_map'], 'mirror_scheme', 'mode_scope', (
+    'Writes to the Super Sega registers at 0x07-0x16 take effect only in Super Sega mode, as do writes to VDP '
+    'bank 0 R11-R15 (vdp_registers.bank_0_scope). 0x06 is a register in the Super Sega and Game Gear modes. In '
+    'every other mode these ports and registers do what they do on the stock machine.'))
+p['port_map']['open_risk'] = (
+    'Super Sega registers at 0x06-0x16 sit inside that mirror range and must be decoded specifically, as the '
+    'Game Gear already does. Because they are decoded only in Super Sega mode (mode_scope), stock software '
+    'running in its own mode is unaffected. The risk is old code running in Super Sega mode - a retagged or '
+    'converted title, or a stock cartridge started in Super Sega mode as software_detection option 2 '
+    'proposes - that writes a mirror address in 0x06-0x16 instead of 0x3E/0x3F: it reaches a Super Sega '
+    'register instead. Documentation calls mirror use highly unrecommended for homebrew, which implies '
+    'commercial software does it. NOT YET RESOLVED - candidate fix is to relocate these registers above 0xF0 '
+    '(open question Q1).')
+put_after(p['vdp_registers'], 'bank_0', 'bank_0_scope', (
+    'Registers 11-15 take effect only in Super Sega mode; in the other modes they are ignored, as on the '
+    'stock VDP.'))
+change(LATER + 'Writes to $07-$16 and to VDP bank 0 R11-R15 stated to take effect only in Super Sega mode '
+       '(port_map.mode_scope, vdp_registers.bank_0_scope), as both implementations do. Q1 and '
+       'port_map.open_risk now name the case at risk: old code running in Super Sega mode that writes a '
+       '$3E/$3F mirror address in $06-$16. They said any old title.')
 
 # ------------------------------------------------------------------ colour
 cs = p['color_system']
@@ -148,7 +205,8 @@ p['stock_behaviour'] = {
                        'the last displayed one, and stays set until the status register is read.'),
         'line_counter': ('On lines 0 to height inclusive (one line past the display) the counter counts down; '
                          'on reaching 0 it reloads from R10 and raises the line interrupt. On other lines it is '
-                         'reloaded from R10. Mode 4 only (TMS modes raise no line interrupt as stock).'),
+                         'reloaded from R10. Mode 4 only as stock (TMS modes raise no line interrupt); whether '
+                         'Super Sega runs it in the TMS modes is open question Q15.'),
         'line_timing': '228 CPU cycles per line, 262 lines NTSC, 313 PAL; the overrun of the last instruction of a line belongs to the next line.',
     },
     'psg': {
@@ -182,6 +240,14 @@ p['memory']['vram']['expansion_enable'] = ('Feature Enable B (bank1 R2) bit 4 en
                                            'map; bank1 R3 bit 0 selects the bank the CPU port reaches')
 change('VRAM expansion control corrected: v6 gave "bank1 R3 bit 0" in memory.vram but '
        '"bank1 R2 bit 4" in video.unique_cell_mode. R2 bit 4 enables, R3 bit 0 selects.')
+
+put_after(p['memory']['port_3E_memory_enables'], 'bit_7', 'reset_value', (
+    '0xA8: the state of a machine whose BIOS has handed over to a cartridge - cartridge, RAM and controllers '
+    'enabled; BIOS, card and external port disabled'))
+p['input']['port_3F']['reset_state'] = '0xFF: every pin an input (bits 3-0 set), level bits 7-4 set'
+change(LATER + 'Reset values written down: $3E resets to $A8 (the BIOS has handed over to the cartridge), as '
+       'the Technical Reference already said, and $3F to $FF (every pin an input, level bits set), where v6 '
+       'said only "low bits set". Both implementations already use these values.')
 
 # ------------------------------------------------------------------ math unit
 p['math_unit'] = {
@@ -243,8 +309,8 @@ change('Modding boundary recorded: patch application while writing a card is a m
 # ------------------------------------------------------------------ v6 errors found in v7 review
 hs = p['video']['mode4']['height_selection']
 hs['standard'] = ('M2 (R0 bit 1) enables the extra heights. With M4 and M2 set, M1 (R1 bit 4) '
-                  'gives 224 lines and M3 (R1 bit 3) gives 240; with M2 clear, Mode 4 is 192 '
-                  'lines whatever M1 and M3 say. M4 is R0 bit 2.')
+                  'gives 224 lines and M3 (R1 bit 3) gives 240; with both M1 and M3 set it stays 192 '
+                  'lines. With M2 clear, Mode 4 is 192 lines whatever M1 and M3 say. M4 is R0 bit 2.')
 hs['source'] = 'MAME sega315_5246 select_extended_res_mode4; Gearsystem'
 hs['v6_error'] = ('v6 gave 224 = M4 M3 M1 with M2 clear and 240 = M4 M3 M2 with M1 clear, '
                   'swapping the roles of M2 and M3. Under it, the usual R0 = $36 with R1 bit 4 '
@@ -253,6 +319,9 @@ hs['v6_error'] = ('v6 gave 224 = M4 M3 M1 with M2 clear and 240 = M4 M3 M2 with 
 change('Extra-height mode bits corrected (v6 error, also in Technical Reference v2): M2 enables the extra heights; '
        'M1 then selects 224 lines and M3 selects 240. v6 had M2 and M3 swapped. Found while testing the Pocket RTL '
        'against Gearsystem and MAME. Emulator and RTL fixed.')
+change(LATER + 'Height cases written out: with M4 and M2 set, M1 and M3 both set give 192 lines '
+       '(video.mode4.height_selection did not say), and Feature Enable B height 11 gives 192 lines (the '
+       'Technical Reference said only "reserved"). Both implementations already do this.')
 
 cm = p['media']['mappers']['codemasters']
 cm['registers'] = '0x0000, 0x4000, 0x8000 exactly (Gearsystem and MAME decode the full address)'
@@ -276,10 +345,30 @@ change('8255 behaviour specified for both PPIs: reset state (all inputs, row 7 s
        'pull-ups), a mode word clearing port C, and bit set/reset on the keyboard PPI. The '
        'emulator selected keyboard row 0 at reset, so SG-1000 titles could not read their pads.')
 
+p['media']['sf7000']['port_c_bits'] = '0 FDD /INUSE, 1 FDD /MOTOR ON, 2 FDC TC, 3 FDC RESET, 6 /ROM SEL, 7 printer /STROBE'
+change(LATER + 'SF-7000 PPI port C bit 2 is the floppy controller\'s TC (terminal count) input, not the '
+       'drive\'s: "2 FDC TC" (v6 had "2 FDD TC"). MAME sg1000.cpp ("PC2 TC signal to FDC") and the '
+       'Technical Reference agree.')
+
+kb['polarity'] = ('Taken as active low with pull-ups - a pressed key reads 0, an unused matrix position always '
+                  'reads 1. Evidence, not proof: this rests on a single source that contradicts itself (a risk '
+                  'from Technical Reference v2 that v3 keeps). Both implementations use it.')
+put_after(p['vdp_registers'], 'bank_0_scope', 'bank_0_evidence', (
+    'Evidence, not proof (a risk from Technical Reference v2 that v3 keeps): six commercial titles were checked '
+    'and none write VDP registers 11-15, where Feature Enable A lives. It matters for old code running in Super '
+    'Sega mode, the only mode in which those registers take effect (bank_0_scope).'))
+change(LATER + 'Two risks from Technical Reference v2 that v3 keeps are recorded beside the statements they qualify: '
+       'VDP registers 11-15 were checked against only six commercial titles (vdp_registers.bank_0_evidence), '
+       'and the keyboard\'s active-low polarity rests on one source that contradicts itself '
+       '(input.keyboard.polarity, no longer stated as settled).')
+
 change('Stock behaviour extended: sprite Y wrap rule (Gearsystem/MAME), 224/240-line name table, '
        'per-line VDP event timing, PSG noise rate and 2 dB volume steps, low-port reads, TR '
        'readback and Game Gear port decoding. The emulator had the noise an octave high, a '
        'linear volume curve, the controller mirror answering $00-$3F, and no TR readback.')
+change(LATER + 'The $F2 FM detection latch answers only in Master System and Super Sega modes '
+       '(stock_behaviour.io.fm_latch); the emulator answered in the Game Gear, SC-3000 and SF-7000 modes too. The '
+       'package made this change without listing it here.')
 
 # ------------------------------------------------------------------ review fixes (v7 check)
 p['glossary'] = {
@@ -318,12 +407,35 @@ change('Review fixes: Feature Enable A bit 6 (turbo) added to the register table
        'FPGA job list (27 jobs, as the Technical Reference says); the keyboard is also live in SG-1000 mode; '
        'a glossary added for terms used throughout.')
 
+cpu = p['cpu']
+put_after(cpu, 'base_clock_hz', 'pal_clock_hz', 3546893)
+cpu['turbo']['clock_generation'] = ('FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock (PAL '
+                                    'turbo frequencies are not defined yet); VDP, PSG and FM stay at 1x')
+put_after(cpu, 'pal_clock_hz', 'clock_standards', (
+    'base_clock_hz is the NTSC clock. In PAL the CPU runs at pal_clock_hz, as on a PAL Master System, so a '
+    '313-line frame of 228 cycles per line is 49.70 Hz (at the NTSC clock it would be 50.16 Hz).'))
+change(LATER + 'PAL CPU clock defined: 3.546893 MHz, as on a PAL Master System, giving 49.70 Hz frames. v6 gave '
+       'only the NTSC clock. The emulator and the Pocket core both still run PAL at the NTSC clock (50.16 Hz). '
+       'The turbo frequencies are stated for the NTSC clock; PAL ones are not defined yet.')
+put_after(cpu, 'clock_standards', 'reset_state', (
+    'At hand-over to software: PC $0000, SP $DFF0 (where the Master System BIOS leaves it), interrupts disabled '
+    '(IFF1 = IFF2 = 0) and interrupt mode 0, as after a Z80 reset; software selects IM 1 itself.'))
+change(LATER + 'CPU state at hand-over to software defined (cpu.reset_state): PC $0000, SP $DFF0, interrupts '
+       'disabled, interrupt mode 0. $DFF0 is where the Master System BIOS leaves SP and where the emulator and '
+       'Gearsystem start; the Pocket core\'s CPU reset SP to $FFFF and is changed to match.')
+put_after(cpu['turbo'], 'enable', 'cartridge_wait', (
+    'A 250 ns cartridge ROM is fast enough up to 175 %; at 200 % each cartridge access takes one wait state '
+    '(open question Q12 covers the Pocket core).'))
+change(LATER + 'Cartridge wait state at 200 % written into the profile (cpu.turbo.cartridge_wait) as the '
+       'Technical Reference gives it; Q12 cited it, but no profile field stated it.')
+
 # ------------------------------------------------------------------ enhancement layer
 p['enhancement_layer'] = {
     'purpose': ('Optional boosts for unmodified SG-1000, SC-3000, Master System and Game Gear '
                 'software, applied by intercepting the fixed hardware interfaces (VDP ports, '
                 'PSG, pads) rather than patching the ROM. Full rationale and tiers: '
-                'SuperSega_AutoEnhancement_Layer.md.'),
+                'SuperSega_AutoEnhancement_Layer.md (the "AEL doc" below), an earlier design document that '
+                'is not in this repository.'),
     'default': ('Every boost is off at power-on, so the machine behaves as stock hardware. '
                 'Each one is switched independently: on the console from the boot menu, in the '
                 'emulator from its AEL panel, on the Analogue Pocket core from the core settings '
@@ -357,11 +469,16 @@ change('enhancement_layer section added: the boosts for stock software, all off 
        'their exact behaviour (pseudo-stereo panning, auto-fire rate), and every boost limited to software '
        'in the stock modes. The emulator\'s pseudo-stereo silenced PSG tones 1 and 2 ($06 = $99); it now uses '
        '$DE. Its auto-fire overwrote the pad state, which left button 2 held when C was released mid-toggle.')
+change(LATER + 'The enhancement-layer design document the profile cites (SuperSega_AutoEnhancement_Layer.md, '
+       'the "AEL doc") is noted as an earlier document that is not in this repository.')
 
 # ------------------------------------------------------------------ open questions
 p['open_questions'] = [
     {'id': 'Q1', 'topic': 'Port mirror range', 'status': 'open',
-     'detail': 'Registers $06-$16 sit in the $3E/$3F mirror range; relocation above $F0 is the candidate fix.'},
+     'detail': ('Registers $06-$16 sit in the $3E/$3F mirror range. Stock software in its own mode is unaffected '
+                '(port_map.mode_scope); the risk is old code running in Super Sega mode - a retagged or converted '
+                'title, or a stock cartridge started in Super Sega mode (software_detection option 2) - that '
+                'writes a $3E/$3F mirror address in $06-$16. Relocation above $F0 is the candidate fix.')},
     {'id': 'Q2', 'topic': 'Maximum ROM size and mapper layout above 4 MB', 'status': 'open',
      'detail': 'See media.cartridge_slot.sega_mapper_reach.'},
     {'id': 'Q3', 'topic': 'Cartridge save-RAM size', 'status': 'open',
@@ -385,18 +502,65 @@ p['open_questions'] = [
                 'AEL doc lists TMS colours as an exception. The emulator also applies it to the legacy modes '
                 'of Super Sega software, where no other boost acts. Not changed in v7.')},
     {'id': 'Q13', 'topic': 'Feature Enable C bit 4 (ESAT 2-byte)', 'status': 'open',
-     'detail': ('v6 made ESAT 2 bytes per sprite (Q4), but Feature Enable C bit 4 still selects a 2-byte mode and the '
-                'emulator implements a 1-byte layout when it is clear. Retire the bit, or document the 1-byte layout.')},
+     'detail': ('ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still '
+                'selects a 2-byte mode and the emulator implements a 1-byte layout when it is clear. Retire the bit, '
+                'or document the 1-byte layout.')},
     {'id': 'Q14', 'topic': 'PCM FIFO fill reading at $08', 'status': 'open',
      'detail': ('$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returns the '
                 'fill modulo 8, so a full FIFO reads as empty. Proposal: bits 6-4 = bytes queued / 8, saturating at 7.')},
     {'id': 'Q12', 'topic': 'Cartridge wait state at 200 % turbo', 'status': 'open',
-     'detail': ('The profile gives one wait state per cartridge access at 200 % (250 ns ROM). The emulator '
-                'applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only software '
-                'running at 200 %.')},
+     'detail': ('cpu.turbo.cartridge_wait gives one wait state per cartridge access at 200 % (250 ns ROM). The '
+                'emulator applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only '
+                'software running at 200 %.')},
+    {'id': 'Q15', 'topic': 'Line interrupts in the TMS9918 (legacy) modes', 'status': 'open',
+     'detail': ('v5 made line interrupts in the legacy modes a Super Sega enhancement '
+                '(video.legacy_modes.enhancements.line_interrupts), but no enable bit was ever assigned; as stock, '
+                'TMS modes raise none (stock_behaviour.vdp.line_counter), and both implementations follow that in '
+                'the stock modes. In Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set '
+                '(the Pocket core does not draw the TMS modes yet). Should the line counter run in the legacy '
+                'modes on Super Sega, and what enables it?')},
+    {'id': 'Q16', 'topic': 'Register layouts defined only by the emulator', 'status': 'open',
+     'detail': ('The bit layouts of the DMA engine ($F4-$FA), PCM control ($08 write), the wavetable ($11-$15), '
+                'slot select ($09), the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the '
+                'window split (bank 0 R13 and R14) are '
+                'defined today only by the emulator\'s implementation (the Pocket core already follows it for $09). '
+                'They need writing into the profile and the Technical Reference, and checking, before the Pocket '
+                'core implements them, as v7 did for the math unit.')},
+    {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
+     'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
+                'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
+                'is selected. Should the machine apply them in the TMS modes, and if so, what do those modes '
+                'draw below line 192?')},
 ]
 change('open_questions section added, consolidating questions from the Golden Axe conversion '
        'plan, the ROM hack maker spec and the SML DX port, with the ones v6 already answers marked resolved.')
+
+p['video']['sprites']['esat']['v5_change'] = (
+    'widened from 1 byte to 2 to carry magnify and early clock. The v4 single-byte layout is superseded; the '
+    'emulator still implements a 1-byte layout while Feature Enable C bit 4 is clear (open question Q13).')
+change(LATER + 'Q13 now gives the ESAT history as the profile records it: 2 bytes per sprite since v5, '
+       'confirmed in v6 (Q4). It said v6 made the change. video.sprites.esat.v5_change now points to Q13.')
+
+le = p['video']['legacy_modes']['enhancements']['line_interrupts']
+le['effect'] = 'VDP register 10 line interrupts, an SMS addition, while running legacy modes (proposed in v5)'
+le['enable'] = ('OPEN - no enable bit is defined, and whether the line counter runs in the legacy modes is '
+                'undecided (open question Q15)')
+p['compatibility']['sg_software'] = (
+    'An unmodified SG-1000 ROM renders with the fixed TMS palette, 4 sprites per line and no line interrupts, '
+    'exactly as on real hardware, until Feature Enable C bits 0-1 are set. Whether Super Sega software can '
+    'enable line interrupts in the legacy modes is open question Q15.')
+order = p['implementation_order']
+order[[i for i, s in enumerate(order) if s.startswith('11. ')][0]] = (
+    '11. Legacy mode enhancements: CRAM colour, raised sprite limit, line interrupts (open question Q15)')
+change(LATER + 'Line interrupts in the legacy (TMS) modes recorded as open question Q15. v5 made them a Super '
+       'Sega enhancement but no enable bit was ever assigned, and compatibility.sg_software said Feature Enable '
+       'C enables them, which no bit does. The statements that answered the question now point to Q15.')
+change(LATER + 'Open question Q17 added: whether Feature Enable B\'s 224/240-line heights apply while a TMS9918 '
+       'mode is selected, as both implementations do today.')
+p['vdp_registers']['bank_0']['14'] = 'Window Y Split; bit 7 selects side'
+change(LATER + 'Open question Q16 added: the register layouts of the DMA engine, PCM control, the wavetable, '
+       'slot select, the VDP base registers and the window split are defined only by the emulator\'s '
+       'implementation. vdp_registers.bank_0 R14 now gives its bit 7 (side), as the Technical Reference does.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

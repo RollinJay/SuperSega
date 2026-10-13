@@ -24,10 +24,11 @@ The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in eit
 | Master System and Game Gear software | runs in simulation; every frame compared so far matches Gearsystem (one title, Batman Returns: SMS frames 30–1500, GG frames 200–1500, GG within Gearsystem's colour rounding) |
 | Super Sega software | register banks, native/extended CRAM, the Feature Enable B height, 16 sprites per line, turbo and the bus synchroniser give the same picture as the emulator on a feature test ROM. VRAM expansion is CPU access only. ESAT, 16×16/magnified sprites, window/text layers, line tables and unique-cell mode are accepted but **not drawn yet** |
 | SG-1000 / SC-3000 software | loads and runs, but the TMS9918 picture modes are **not drawn yet**. The keyboard is implemented but not yet tested on the core |
+| Super Sega system registers | work RAM banking (`$0A`); the math unit (`$0C`–`$10`), with divide as the emulator does it until Q7 is decided (Q-numbers are the machine's open questions, Technical Reference §17); multitap detection (`$16`); the Game Gear serial registers (`$01`–`$05`), which hold what is written. Slot select (`$09`) and the card bank (`$0B`) are decoded, but the platform loads no card, so the card slot is always empty |
 | Sound | PSG with stereo. **No FM yet**: the core reports no FM unit, so games that check for it play their PSG music. No PCM/wavetable |
-| Saves | cartridge RAM saved to the SD card (32 KB `.sav`) |
+| Saves | cartridge RAM saved to the SD card (32 KB `.sav`). Save states would be a feature of the Pocket platform layer, not of the machine, and are not planned in this milestone |
 | Enhancement-layer boosts | sprite limit, stock overflow flag, Start = Pause, turbo, VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop — all off by default, switchable in the settings menu, acting only on Master System, Game Gear, SG-1000 and SC-3000 software |
-| Not yet | FM, PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, link cable, sleep, save states |
+| Not yet | FM, PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, the PAL CPU clock (§3), sleep |
 
 ## 3. Clocks
 
@@ -41,7 +42,7 @@ One PLL from the Pocket's 74.25 MHz reference makes three clocks from a single V
 
 Inside the machine everything runs on `clk_sys` with clock enables: the CPU enable (every 15 clocks at 100 %, or a fractional accumulator for the turbo steps), the base-cycle enable for the VDP's timing, the PSG enable (÷16), and the pixel enable (÷10). Because the three PLL outputs share a VCO, the video stage samples the machine's video registers directly; the constraints keep the three clocks in one group so those paths are timed rather than cut.
 
-**PAL.** The Pocket core uses the NTSC master clock in PAL mode too, so PAL frames run at 50.16 Hz instead of the PAL console's 49.70 Hz (0.9 % fast). A second PLL setting would fix it; not done.
+**PAL.** The machine's PAL CPU clock is 3.546893 MHz (Technical Reference §1). The Pocket core uses the NTSC master clock in PAL mode too, so PAL frames run at 50.16 Hz instead of the PAL console's 49.70 Hz (0.9 % fast). A second PLL setting would fix it; not done.
 
 ## 4. Memory
 
@@ -112,7 +113,11 @@ The machine's PSG output (signed 16-bit, stereo) passes through two one-pole low
 | Start | Start (Game Gear); Pause on SMS/SG/SC with the "Start = Pause" boost | Start |
 | Select | Pause (not in Game Gear mode: the Game Gear has no Pause button) | Pause |
 
-Buttons 1 and 2 stay on B and A in every mode, so a game and its Super Sega conversion play with the same buttons. The machine itself sees a Master System pad in the stock modes and a Mega Drive pad in Super Sega mode; only this table is the Pocket's choice.
+Buttons 1 and 2 stay on B and A in every mode, so a game and its Super Sega conversion play with the same buttons. The machine itself sees a Master System pad in the stock modes and a Mega Drive pad in Super Sega mode; only this default layout is the Pocket's choice.
+
+**Players set their own layout** in the Pocket's Core Settings > Controls menu. Analogue OS remaps a core's buttons per core (since firmware 1.1-beta-5; for docked controllers since 2.4, still marked beta) and builds that menu from `pocket/dist/Cores/SuperSega.SuperSega/input.json`. The OS applies the remap before the core sees the pad, so the core needs no settings of its own for it, and a remap holds in every mode, because the core gives each of its inputs a fixed role per mode whichever Pocket button the player puts it on. `input.json` therefore names each input by its role in both kinds of mode: Button 1 (SS: B), Button 2 (SS: C), Auto-fire (SS: A), Start and Pause, where SS is Super Sega mode. The d-pad cannot be remapped. X, L and R have no function by default, but the player can move any of the five functions onto them. `tools/check_core_json.py` (run by `sim/check.sh`) keeps `input.json` within the platform's limits and checks that every button it names is one the core reads.
+
+To check on hardware, since the simulations cannot: the Controls menu shows the five entries with these defaults; a button moved to X still acts as its function in both a stock mode and Super Sega mode; a remap of a docked second pad works; and a remap survives a power cycle.
 
 Docked controllers 1 and 2 are the two pads. A docked USB keyboard (APF controller 3, type 4) is the SK-1100: up to six keys and the modifiers are mapped by position.
 
@@ -148,17 +153,17 @@ All settings are marked to persist, so the Pocket keeps them between sessions. B
 | Boost: CPU turbo | Off, 125 %, 150 %, 175 %, 200 % (stock software; Super Sega titles set their own) |
 | Boost: VRAM speed-up | on/off |
 | Boost: Start = Pause | on/off |
-| Boost: Auto-fire (Y) | on/off |
+| Boost: Auto-fire | on/off (the trigger is Y unless the player moves it) |
 | Boost: Pseudo-stereo | on/off |
 | Game Gear screen | LCD 160×144, Full 256×192 |
 | Keyboard ghosting | on (stock) / off |
 | SC-3000 cart RAM | 16 KB, 32 KB |
 
-The APF shows at most 16 entries; 14 are used. The two left are for the true-TMS-colour and legacy-sprite-limit boosts, which arrive with the TMS modes.
+The APF shows at most 16 entries; 14 are used. The two left are for the true-TMS-colour and legacy-sprite-limit boosts, which arrive with the TMS modes. Controls take none: they are the Pocket's own Controls menu (§9).
 
 ## 11. Machine RTL notes
 
-- **CPU**: tv80 (MIT, a Verilog translation of T80) behind a wrapper that runs it on clock enables and reports the exact enable at which an I/O access happens. One line of tv80 is changed (documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`): with an external WAIT on an I/O cycle, tv80 lingered in T2 after WAIT was released, so the wrapper saw the access twice. Found when the turbo bus synchroniser hung the CPU; instruction timing without WAIT is unchanged.
+- **CPU**: tv80 (MIT, a Verilog translation of T80) behind a wrapper that runs it on clock enables and reports the exact enable at which an I/O access happens. Two lines of tv80 are changed (documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`). With an external WAIT on an I/O cycle, tv80 lingered in T2 after WAIT was released, so the wrapper saw the access twice; this was found when the turbo bus synchroniser hung the CPU, and instruction timing without WAIT is unchanged. And SP resets to `$DFF0`, the value the machine hands to software (Technical Reference §1), instead of tv80's `$FFFF`.
 - **VDP timing** follows Gearsystem's per-cycle event table (315-5535 column, §16 of the Technical Reference). The renderer draws a line at its render event: next line's sprites first (so overflow and collision flags are ready on time), then this line's background, then the composite through CRAM into the output ring. All line buffers are block RAM with one write and one registered read port; the only flip-flop array is the 512 sprite-present bits used for collisions.
 - **Enhancement layer** inputs on `ss_top`: `ael_sprlimit`, `ael_ovf_stock`, `ael_startpause`, `ael_turbo`, `ael_vramboost`, `ael_autofire`, `ael_pstereo`; Game Gear uncrop is the `gg_crop` input. Every boost is ignored in Super Sega mode, where software sets those features itself.
 - **Debug unit**: not in this milestone. Its control port `$FB` is written in every mode and reads back in Super Sega mode; `$FC`/`$FD` read the status of a unit with no debug host attached (`$40`). In the stock modes `$FB`–`$FF` read as the controller mirror, as on the stock machine.
@@ -211,10 +216,10 @@ Not yet done: a Quartus build (timing closure, real resource use), and anything 
 ## 15. Next milestones
 
 1. **Hardware bring-up**: Quartus build, timing, first boot on a Pocket (the user's hands-on testing).
-2. **TMS9918 modes** (SG-1000, SC-3000), with the true-colour and sprite-limit boosts.
+2. **TMS9918 modes** (SG-1000, SC-3000), with the true-colour and sprite-limit boosts. Whether these modes raise line interrupts on Super Sega is open (Q15).
 3. **FM**: a YM2413 core. Candidates are jtopll (GPL-3) and IKAOPLL; the choice depends on the licence decision below.
 4. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
-5. DMA engine, math unit divide (once Q7 is decided), PCM and wavetable.
+5. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
 6. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
 7. Cartridge wait state at 200 % (Q12), PAL clock, a proper audio decimation filter.
 
@@ -225,4 +230,4 @@ Not yet done: a Quartus build (timing closure, real resource use), and anything 
 | Licence for the Super Sega RTL | Decides which FM core can be used (a GPL-3 core makes the combined core GPL-3) |
 | FM core | jtopll vs IKAOPLL (or writing one) |
 | Core and author name | `SuperSega.SuperSega` and the `supersega` platform are placeholders |
-| Math unit divide (Q7), mirror range (Q1), TMS-colour default (Q11) | Machine questions that block parts of later milestones |
+| Math unit divide (Q7), mirror range (Q1), TMS-colour default (Q11), TMS-mode line interrupts (Q15), register layouts written only in the emulator (Q16), Feature Enable B height in the TMS modes (Q17) | Machine questions that block parts of later milestones |

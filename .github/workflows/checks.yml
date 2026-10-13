@@ -22,6 +22,10 @@ jobs:
           node-version: 22
       - name: Machine profile is valid JSON
         run: python3 -m json.tool ../../machine/super_sega_machine_v7.json > /dev/null
+      - name: Profile generator reproduces the profile
+        run: |
+          python3 ../../machine/tools/make_profile_v7.py ../../machine/super_sega_machine_v7.json "$RUNNER_TEMP/profile.json"
+          cmp "$RUNNER_TEMP/profile.json" ../../machine/super_sega_machine_v7.json
       - name: Behavioural probes
         run: node probes_v7.js ../supersega-emulator.html
       - name: Self-test
@@ -30,6 +34,12 @@ jobs:
         run: python3 profile_crosscheck.py ../supersega-emulator.html ../../machine/super_sega_machine_v7.json
       - name: Wiring audit
         run: python3 wiring_audit.py ../supersega-emulator.html
+      - name: Install Playwright and Chromium
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Key and gamepad bindings in a browser
+        run: node controls_test.js ../supersega-emulator.html ../../pocket-core/roms/vdp224.sms
 
   pocket-core:
     name: Pocket core simulations

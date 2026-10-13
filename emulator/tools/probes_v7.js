@@ -165,6 +165,19 @@ probe('M10b', 'Super Sega multitap detection $16 and slot select $09 readback', 
   const m = sms('ss'); m.out(0x09, 0x02);
   return { ok: m.inp(0x16) === 0x81 && m.inp(0x09) === 0x02, note: `$16=${m.inp(0x16).toString(16)} $09=${m.inp(0x09).toString(16)}` };
 });
+probe('M38', 'Super Sega: writes to the read-only ports $0F, $10 and $16 are absorbed, not taken as $3E/$3F mirrors; on the Master System they still are (Technical Reference \u00a711)', () => {
+  const s = sms('ss'); const mc = s.memCtl, ic = s.ioCtl;
+  s.out(0x0F, 0x00); s.out(0x10, 0x00); s.out(0x16, 0x00);
+  const m = sms('sms'); m.out(0x0F, 0x55); m.out(0x10, 0xAA);
+  return { ok: s.memCtl === mc && s.ioCtl === ic && m.ioCtl === 0x55 && m.memCtl === 0xAA,
+           note: `SS $3E ${s.memCtl.toString(16)} $3F ${s.ioCtl.toString(16)}; SMS $3E ${m.memCtl.toString(16)} $3F ${m.ioCtl.toString(16)}` };
+});
+probe('M39', 'SG-1000, SC-3000 and SF-7000 have no $3E/$3F registers: writes to $07-$3F change nothing, as in the Pocket core (Technical Reference \u00a711)', () => {
+  const res = ['sg', 'sc', 'sf'].map(mode => { const m = sms(mode); const mc = m.memCtl, ic = m.ioCtl;
+    m.out(0x3E, 0x00); m.out(0x3F, 0x00); m.out(0x07, 0x55); m.out(0x21, 0x00);
+    return m.memCtl === mc && m.ioCtl === ic; });
+  return { ok: res.every(Boolean), note: 'sg sc sf: ' + res.join(' ') };
+});
 probe('M10c', 'Game Gear $00: $C0 idle, $40 with Start, export (MAME sms.cpp gg_input_port_00_r)', () => {
   const m = sms('gg'); const a = m.inp(0x00); m.btn.start = 1; const b = m.inp(0x00);
   return { ok: a === 0xC0 && b === 0x40, note: `${a.toString(16)} / ${b.toString(16)}` };
@@ -291,6 +304,20 @@ probe('M30', 'Game Gear: only $C0/$DC and $C1/$DD answer above $C0 (Gearsystem)'
   const g = sms('gg'); g.btn.up = 1;
   const a = g.inp(0xC0), b = g.inp(0xDC), c = g.inp(0xC2), d = g.inp(0xFE);
   return { ok: (a & 1) === 0 && (b & 1) === 0 && c === 0xFF && d === 0xFF, note: [a, b, c, d].map(v => v.toString(16)).join(' ') };
+});
+
+probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 or a Master System in a TMS mode raises none, Mode 4 does; Super Sega mode still raises it in a TMS mode (open question Q15) (machine profile stock_behaviour.vdp.line_counter)', () => {
+  const run = (mode, r0) => { const m = sms(mode); m.vdp.reg[0] = r0; m.vdp.reg[1] = 0x40; m.vdp.reg[10] = 0;  // IE1 set, counter 0
+    m.vdp.irqLine = 0; for (let i = 0; i < 4; i++) m.vdp.scanline(); return m.vdp.irqLine ? 1 : 0; };
+  const sgTms = run('sg', 0x10), smsTms = run('sms', 0x10), smsM4 = run('sms', 0x14), ssTms = run('ss', 0x10);
+  return { ok: !sgTms && !smsTms && smsM4 && ssTms,
+           note: `SG TMS ${sgTms}, SMS TMS ${smsTms}, SMS Mode 4 ${smsM4}, SS TMS ${ssTms}` };
+});
+probe('M41', 'Start = Pause boost: Start raises Pause in the Master System, SG-1000 and SC-3000 modes, not on the Game Gear (it has its own Start) nor for Super Sega software (machine profile enhancement_layer)', () => {
+  const res = ['sms', 'sg', 'sc', 'gg', 'ss'].map(mode => { const m = sms(mode); let n = 0;
+    m.ael.startpause = true; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
+    m.btn.start = 1; m.runFrame(); m.runFrame(); return n; });
+  return { ok: res.join('') === '11100', note: 'NMIs sms sg sc gg ss: ' + res.join(' ') };
 });
 
 // ---------------------------------------------------------------- mappers

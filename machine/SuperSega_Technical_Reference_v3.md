@@ -26,12 +26,13 @@ The machine exists in three forms that must behave the same: the physical consol
 | | |
 |---|---|
 | CPU | Z80, CMOS static (Z84C00 class) |
-| Base clock | 3.579545 MHz |
-| Interrupt mode | IM 1 (`RST 38h`); NMI is the Pause button |
+| Base clock | 3.579545 MHz (NTSC); 3.546893 MHz in PAL, as on a PAL Master System, which gives 49.70 Hz frames of 313 lines |
+| State at hand-over to software | PC `$0000`, SP `$DFF0` (where the Master System BIOS leaves it), interrupts disabled, interrupt mode 0 as after a Z80 reset |
+| Interrupt mode | IM 1 (`RST 38h`), selected by software; NMI is the Pause button |
 | Turbo steps | 100 / 125 / 150 / 175 / 200 % |
 | Turbo control | port `$F3`, bits 2–0, step 0–4 |
 | Turbo enable | Feature Enable A bit 6 — off at reset; a write to `$F3` takes effect only while it is set, and the step then stays until `$F3` is written again |
-| Turbo generation | FPGA PLL, true 4.47 / 5.37 / 6.26 / 7.16 MHz |
+| Turbo generation | FPGA PLL, true 4.47 / 5.37 / 6.26 / 7.16 MHz at the NTSC clock (PAL turbo frequencies are not defined yet) |
 
 Turbo gives the CPU more cycles per frame; the video chip (VDP), PSG and FM chip stay at normal speed, so the picture, raster timing and frame rate do not change. A game's frame rate stays governed by its own wait for the vertical blank. Software that does not wait for vertical blank must stay at 100 %.
 
@@ -109,7 +110,7 @@ Mode 4 shows 192, 224 or 240 lines. The four mode bits are spread over two regis
 | M4 = 1, M2 = 1, M1 = 1, M3 = 0 | 224 lines |
 | M4 = 1, M2 = 1, M3 = 1, M1 = 0 | 240 lines |
 | M4 = 1 with M2 = 0, or any other combination | 192 lines |
-| Feature Enable B bits 7–6 (Super Sega software) | 192 / 224 / 240 |
+| Feature Enable B bits 7–6 (Super Sega software) | 192 / 224 / 240 (defined for Mode 4; the TMS modes are open question Q17) |
 
 M2 is the switch that allows the taller modes; M1 and M3 then pick the height.
 
@@ -127,7 +128,7 @@ Both selection paths must work: the standard bits are how Master System and Game
 | Sprite overflow | status bit 6, set by a ninth sprite on a line **by Y alone** — off-screen and transparent sprites count |
 | Frame interrupt flag | status bit 7, set early in line *height* + 1 (the second line after the last displayed one, §16); stays set until the status register is read |
 | CRAM addressing | high address bits ignored, so the address always lands in CRAM |
-| Line interrupt counter | on lines 0 to *height* (one line past the display) it counts down, and on reaching 0 it reloads from R10 and raises the line interrupt; on the other lines it is reloaded from R10 |
+| Line interrupt counter | on lines 0 to *height* (one line past the display) it counts down, and on reaching 0 it reloads from R10 and raises the line interrupt; on the other lines it is reloaded from R10. Mode 4 only as stock (the TMS modes raise none); whether Super Sega runs it in the TMS modes is open question Q15 |
 | Name-table spare bits | the top three bits of each entry are unused by the VDP; some games keep collision flags there |
 | 8×16 sprites | the low bit of the tile index is ignored |
 | Registers 11 and above | ignored by real hardware, which is why the Super Sega extensions live there |
@@ -177,7 +178,7 @@ Reset reads 1 when the button is absent. CONT reads 1 on 8-bit hardware and 0 on
 | 7–4 | output levels: 7 port B TH, 6 port B TR, 5 port A TH, 4 port A TR |
 | 3–0 | direction, 1 = input, 0 = output: 3 port B TH, 2 port B TR, 1 port A TH, 0 port A TR |
 
-Reset state is all inputs. A pin set as an output reads back the level written: TR on `$DC` bit 5 (port A) and `$DD` bit 3 (port B); TH on `$DD` bits 6 and 7 — on an export machine. A Japanese machine always reads 0 on TH; this difference is how software detects the region.
+Reset value `$FF`: all inputs, with the level bits 7–4 set. A pin set as an output reads back the level written: TR on `$DC` bit 5 (port A) and `$DD` bit 3 (port B); TH on `$DD` bits 6 and 7 — on an export machine. A Japanese machine always reads 0 on TH; this difference is how software detects the region.
 
 ### Game Gear differences
 
@@ -194,7 +195,7 @@ The SC-3000's 64-key keyboard, read through an 8255 PPI (programmable peripheral
 | `$DE` | PPI port C, output: row select in bits 2–0 (through a 74LS145); bit 3 cassette out; bits 5–7 printer |
 | `$DF` | PPI control; not readable (returns `$FF`) |
 
-Eight rows: 0–6 the keyboard, 7 the two gamepads. Inputs are active low with pull-ups, so a pressed key reads 0. Reading port C returns its output latch: the last value written, or 0 after a mode word.
+Eight rows: 0–6 the keyboard, 7 the two gamepads. Inputs are active low with pull-ups, so a pressed key reads 0 (evidence, not proof: §17). Reading port C returns its output latch: the last value written, or 0 after a mode word.
 
 The 8255 behaves as the Intel part does:
 
@@ -213,6 +214,10 @@ One key (RESET) raises an NMI instead of appearing in the matrix.
 | Mega Drive mouse | TH-clocked serial, 3 buttons, relative movement. Four ID nibbles (`0,B,F,F`), then sign/overflow, buttons and two bytes of movement. Answers on port B |
 | Sports Pad trackball | TH-clocked, strobe on `$3F` bit 5 (player 1) or bit 7 (player 2). Two 8-bit **absolute** counters that wrap. Clocked out X7–X4 strobe low, X3–X0 strobe high, Y7–Y4 low, Y3–Y0 high, on port A bits 3–0, with buttons on bits 4 and 5 |
 
+### Multiplayer
+
+A multitap on the pad port (Sega Team Player MK-1654 or EA 4 Way Play protocol), detected through `$16` (§11); and, for Game Gear multiplayer, a machine-to-machine serial link cable on the Game Gear EXT registers `$01`–`$05`.
+
 ---
 
 ## 7. Audio
@@ -223,6 +228,8 @@ One key (RESET) raises an NMI instead of appearing in the matrix.
 | YM2413 FM | `$F0` register, `$F1` data, `$F2` control | the FM unit is always fitted |
 | PCM FIFO (64 bytes) | `$07` data, `$08` control | Super Sega |
 | Two wavetable voices | `$11`–`$15` | Super Sega |
+
+The register layouts of PCM control (`$08` write) and the wavetable are not written down yet (open question Q16).
 
 **PSG details.** Tone counters run at the CPU clock ÷ 16 and flip their output on reaching zero; a period of 0 behaves as 1. The noise counter (rate `$10`, `$20`, `$40`, or tone 2's period) flips a flip-flop, and the 16-bit noise shift register advances on its rising edge — once per two counter periods. White noise taps bits 0 and 3; writing the noise register resets the shift register to `$8000`. Volume is attenuation in 2 dB steps; 15 is silent.
 
@@ -282,7 +289,7 @@ Mods reach real hardware as BPS patches, applied by computer mode while it write
 
 ## 9. DMA Engine and Math Unit
 
-DMA on `$F4`–`$FA`: ROM or RAM to VRAM, VRAM to VRAM, and fill.
+DMA on `$F4`–`$FA`: ROM or RAM to VRAM, VRAM to VRAM, and fill. Its register layout is not written down yet (open question Q16).
 
 | Math port | Function |
 |---|---|
@@ -313,6 +320,8 @@ The VDP register-write command byte is `10bbnnnn`. On stock hardware bits 5–4 
 
 **Feature Enable A** — bit 0 native 12-bit CRAM · bit 1 line-scroll horizontal · bit 2 window layer · bit 3 ESAT · bit 4 16 sprites per line · bit 5 XRB · bit 6 turbo
 
+Registers 11–15 take effect only in Super Sega mode; in the other modes they are ignored, as on the stock VDP.
+
 ### Bank 1
 
 | Reg | Function |
@@ -328,7 +337,7 @@ The VDP register-write command byte is `10bbnnnn`. On stock hardware bits 5–4 
 | 8 | text window pattern base |
 | 9 | text window colours |
 
-**Feature Enable B** — bit 0 line vertical offset · bit 1 extended CRAM · bit 2 16×16 sprites · bit 3 per-sprite collision · bit 4 VRAM expansion · bits 7–6 display height (00 from the mode bits, 01 224 lines, 10 240 lines, 11 reserved; a 224/240 selection by the mode bits takes precedence)
+**Feature Enable B** — bit 0 line vertical offset · bit 1 extended CRAM · bit 2 16×16 sprites · bit 3 per-sprite collision · bit 4 VRAM expansion · bits 7–6 display height (00 from the mode bits, 01 224 lines, 10 240 lines, 11 reserved, giving 192 lines; a 224/240 selection by the mode bits takes precedence)
 
 **Feature Enable C** — bit 0 legacy modes draw from CRAM · bit 1 legacy sprite limit raised · bit 2 text window · bit 3 unique-cell mode (1024 tiles, so every screen cell can have its own; needs VRAM expansion) · bit 4 ESAT 2-byte (see open question Q13) · bit 5 SC-3000 keyboard
 
@@ -363,7 +372,7 @@ Bank 2 unallocated; bank 3 reserved.
 | `$FC`–`$FD` | SDSC debug console |
 | `$FE`–`$FF` | watchpoint register select / data |
 
-On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). The Game Gear decodes `$00`–`$06` separately, and Super Sega extends that to `$16`.
+On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V counter reads at every even port and the H counter at every odd port in `$40`–`$7F`. The SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers: in those modes writes to `$00`–`$3F` do nothing. The Game Gear decodes `$00`–`$06` separately, and Super Sega extends that to `$16`. Writes to `$07`–`$16`, like writes to VDP registers 11–15 (§10), take effect only in Super Sega mode; in every other mode they do what they do on the stock machine.
 
 **Reads.** `$00`–`$3F` are write-only on the Master System and read `$FF`; on the Game Gear and Super Sega every port there that is not a register listed above also reads `$FF`. In Super Sega mode, `$07`–`$16` and `$F0`–`$FF` are fully decoded: unreadable ports return `$FF`, never the controller mirror. In the other modes `$FB`–`$FF` read as on the stock machine — the controller mirror, or `$FF` on the Game Gear — because stock software may read its pads there (§13).
 
@@ -506,7 +515,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range; any old title writing a mirror address reaches a Super Sega register. Move them above `$F0`? | open |
+| Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range. They act as registers only in Super Sega mode (`$06` also in Game Gear mode, §11), so stock software in its own mode is unaffected. The risk is old code run in Super Sega mode that writes a mirror address in `$06`–`$16`: a title retagged to region 8 (§14), a converted title, or a stock cartridge started in Super Sega mode (one proposed answer to Q8 is a boot-menu option that does this). Move them above `$F0`? | open |
 | Q2 | Maximum ROM size and the mapper register layout above 4 MB | open |
 | Q3 | Cartridge save-RAM size the machine guarantees (the 315-5235 maps 2 × 16 KB; the emulator models 2 × 8 KB) | open |
 | Q4 | ESAT format | resolved in v6: 2 bytes per sprite |
@@ -520,8 +529,11 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q12 | One cartridge wait state at 200 % turbo: the emulator applies it; the Pocket core does not yet | open |
 | Q13 | Feature Enable C bit 4 (ESAT 2-byte) contradicts ESAT being 2 bytes per sprite (Q4); the emulator still has a 1-byte layout when the bit is clear. Retire the bit or document the 1-byte layout | open |
 | Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | open |
+| Q15 | Line interrupts in the TMS9918 modes. The machine profile lists them as a Super Sega enhancement for SG-1000-style software (line interrupts are a Master System addition) but defines no bit that enables them. As stock the TMS modes raise none, and both implementations follow that in the stock modes; in Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set (the Pocket core does not draw the TMS modes yet). Should the line counter run in the TMS modes on Super Sega, and what enables it? | open |
+| Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the window split (bank 0 R13 and R14) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | open |
+| Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for Super Sega software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192? | open |
 
-Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), and the keyboard's active-low polarity rests on a single source that contradicts itself.
+Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in Super Sega mode, the only mode in which those registers act (§10); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
 ---
 
@@ -544,13 +556,22 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Z80, Mode 4 VDP (192/224/240), Game Gear CRAM, PSG | yes | yes |
 | Mappers | Sega, Codemasters, Korean, Korean MSX (MSX variant) | the same |
 | Controllers, SK-1100 keyboard | yes | yes (keyboard not yet tested on the core) |
+| Mega Drive mouse, Sports Pad trackball | yes | not yet |
+| Multitap detection (`$16`) | yes | yes |
+| Multitap protocols (Sega Team Player, EA 4 Way Play) | not yet | not yet |
+| Game Gear serial registers (`$01`–`$05`) | yes (they hold what is written) | yes (the same) |
+| Link cable | not yet | not yet |
 | Super Sega register banks, native/extended CRAM, 16 sprites per line, turbo and bus synchroniser | yes | yes |
+| Work RAM banking (`$0A`) | yes | yes |
+| Math unit (`$0C`–`$10`) | yes; divide as §9 describes, until Q7 is decided | the same |
+| Card slot: slot select (`$09`) and card bank (`$0B`) | yes | registers and memory decode only: the Pocket platform loads no card, so the slot is always empty |
 | VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |
 | ESAT, 16×16 and magnified sprites, window/text layers, line tables, unique-cell | yes | registers only, not drawn |
 | TMS9918 modes (SG-1000, SC-3000) | yes | not yet |
 | YM2413 FM | yes (approximate synthesis) | not yet; the core reports no FM unit so software uses its PSG music |
 | PCM, wavetable, DMA engine | yes | not yet |
 | SF-7000, floppy, debug unit | yes | not yet |
+| PAL CPU clock (3.546893 MHz, §1) | not yet: the CPU runs at the NTSC clock in PAL too, so a PAL frame lasts 1/50.16 s of machine time instead of 1/49.70 s | the same |
 | Enhancement layer | all | all except true TMS colours and the legacy-mode sprite limit, which come with the TMS9918 modes |
 
 **Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a Super Sega feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and Super Sega modes and gets the same values on both, apart from the two differences the implementations are meant to have: the core has no FM unit yet (`$F2`), and no debug host is attached to it (`$FC`/`$FD` bit 7). Nothing has run on a Pocket yet.

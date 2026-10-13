@@ -1,0 +1,46 @@
+name: Pocket core build
+
+# Compiles the Analogue Pocket core with Quartus Prime Lite (in the
+# raetro/quartus:pocket Docker image) and uploads the SD-card files as an
+# artifact: unzip it onto the root of the Pocket's SD card (pocket-core/TESTING.md).
+
+on:
+  push:
+    paths:
+      - 'pocket-core/**'
+      - '.github/workflows/pocket-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Quartus build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Free disk space for the Quartus image
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v4
+      - name: Pull Quartus
+        run: docker pull raetro/quartus:pocket
+      - name: Build the core and the SD-card files
+        run: pocket-core/pocket/build_core.sh
+      - name: Timing and resource summary
+        if: always()
+        run: |
+          cd pocket-core/pocket/build/src/fpga/output_files
+          cat ap_core.fit.summary || true
+          grep -A12 "Slow 1100mV 85C Model Setup Summary" ap_core.sta.rpt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SuperSega-pocket
+          path: pocket-core/pocket/build/sdcard/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quartus-reports
+          path: pocket-core/pocket/build/src/fpga/output_files/*.rpt

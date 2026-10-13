@@ -11,7 +11,7 @@ rtl/                  the machine (platform-independent)
   ss_vdp.v            Mode 4 VDP with the Super Sega register file
   ss_psg.v            SN76489 (Sega) with stereo panning
   ss_dpram.v          inferred dual-port block RAM
-  third_party/tv80/   Z80 core (MIT); one local change, see LOCAL_CHANGES.md
+  third_party/tv80/   Z80 core (MIT); two local changes, see LOCAL_CHANGES.md
 pocket/               Analogue Pocket platform layer
   core_top.v          APF top level (port list from the APF template)
   ss_pocket.v         settings, ROM loading, system detection, PSRAM, saves, controls, video, audio
@@ -29,7 +29,7 @@ sim/
   pocket/             platform simulation: APF bridge model, PSRAM model, saves
   ref/                Gearsystem runners used as a test oracle (sources only; see ref/README.md)
 syn/                  Yosys resource estimate (synth.ys, synth.log)
-tools/                test ROM generator, frame comparison, I/O test decoder
+tools/                test ROM generator, frame comparison, I/O test decoder, Pocket definition-file check
 roms/                 the generated test ROMs (homebrew, made by tools/mk_testrom.py)
 ```
 
@@ -37,10 +37,11 @@ roms/                 the generated test ROMs (homebrew, made by tools/mk_testro
 
 Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check.sh` run the emulator in `../emulator/`), Python 3 with numpy and Pillow, and Yosys 0.33 for the resource estimate.
 
-`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
+`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
 
 ```sh
 python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, ssfeat, ports test ROMs
+python3 tools/check_core_json.py             # input.json/interact.json against platform limits and the RTL
 (cd sim/z80 && ./run.sh)                     # Z80 wrapper timing against the emulator's Z80
 (cd syn && yosys -q -l synth.log synth.ys)   # resource estimate; rewrites syn/synth.log
 cd sim/sys && ./build.sh && mkdir -p out
@@ -70,7 +71,7 @@ Copy `build/dist/*` to the SD card, put `bitstream.rbf_r` in `Cores/SuperSega.Su
 
 ## Licences
 
-- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80). One line changed, documented.
+- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80). Two lines changed, documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`.
 - agg23 analogue-pocket-utils: MIT (Adam Gastineau).
 - APF framework files: Analogue's licence; fetched by `setup.sh`, not included.
 - Gearsystem (GPL-3): used only as a test oracle through `sim/ref`; nothing from it is in the core.
