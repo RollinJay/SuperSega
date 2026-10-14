@@ -1,6 +1,6 @@
 # Super Sega — Analogue Pocket Core: Design and Status
 
-October 2026. Milestone 1. **Simulated, not yet built in Quartus or run on a Pocket.**
+October 2026. Milestone 1. **Simulated, and built in Quartus with timing met; not yet run on a Pocket.**
 
 ## 1. What this is
 
@@ -55,9 +55,9 @@ Inside the machine everything runs on `clk_sys` with clock enables: the CPU enab
 | Cartridge RAM (saves) | block RAM, second port for the save slot | 32 KB |
 | CRAM, line buffers | block RAM | small |
 
-The machine reads ROM over a request/acknowledge bus; the platform serves it from PSRAM through agg23's MIT-licensed PSRAM controller. A read takes about 9 machine clocks (170 ns) from the CPU's request to the data. Simulation shows no added wait states for ROM latencies up to 12 clocks even at 200 % turbo (at 16 clocks the CPU starts to wait), so PSRAM is fast enough with margin.
+The machine reads ROM over a request/acknowledge bus; the platform serves it from PSRAM through agg23's MIT-licensed PSRAM controller. A read takes about 9 machine clocks (170 ns) from the CPU's request to the data. Simulation at 200 % turbo shows the same instruction timing for ROM latencies up to 11 clocks; from 12 clocks the CPU starts to wait, which only slows it slightly. So PSRAM is fast enough with a small margin at the top turbo step and a large one at normal speed. (The memory controller sees the CPU's bus one clock late, for timing, §11; before that the limit was 12 clocks.)
 
-**Block RAM budget.** The resource estimate (§12) puts block RAM at about 229 of 308 M10K blocks, most of it the 128 KB work RAM. When FM and the Super Sega render features need block RAM, the work RAM moves to the Pocket's 256 KB SRAM chip.
+**Block RAM budget.** The Quartus build (§12) uses 200 of the 308 M10K blocks, most of them for the 128 KB work RAM. When FM and the Super Sega render features need block RAM, the work RAM moves to the Pocket's 256 KB SRAM chip.
 
 ## 5. Loading a cartridge
 
@@ -169,23 +169,26 @@ The APF shows at most 16 entries; 14 are used. The two left are for the true-TMS
 - **Debug unit**: not in this milestone. Its control port `$FB` is written in every mode and reads back in Super Sega mode; `$FC`/`$FD` read the status of a unit with no debug host attached (`$40`). In the stock modes `$FB`–`$FF` read as the controller mirror, as on the stock machine.
 - **FM**: `ss_top` has a parameter `FM_FITTED`, 0 in milestone 1. While it is 0 the `$F2` detection latch does not answer, so software sees a console without the FM unit. With an FM core it becomes 1 and the latch answers in Master System and Super Sega modes.
 - **Collision flag**: set at Gearsystem's time (22 + X × 228 ÷ 256 into the line), or at the render event if that is earlier. Gearsystem drops collisions that fall after its render event; the hardware does not.
+- **Meeting timing at 53.7 MHz.** Everything runs on the one system clock, but the CPU only advances on its clock enable, at most once every 7 clocks (200 % turbo), and never on two clocks in a row. tv80's instruction decoding is too slow for one clock, so `pocket/core_constraints.sdc` gives two clocks to paths from the CPU to itself and to the blocks that take CPU data only on an enable edge (the I/O decode, the VDP, the PSG and the wrapper's bus strobes). The memory controller acts between enable edges, so instead of a relaxed constraint it gets a register stage: it sees the CPU's bus one clock late (§4). Two calculations that were one long chain of logic now take several clocks, with the result ready long before the CPU can read it: the SC-3000 keyboard's ghosting (16 clocks) and the math unit's divide (16 clocks; the CPU's next IN comes at least 82 clocks later).
 
-## 12. Resources (estimate)
+## 12. Resources and timing
 
-Yosys 0.33 `synth_intel_alm -family cyclonev` on the machine alone (Quartus will differ; the Pocket's FPGA is a 5CEBA4F23C8 with 18,480 ALMs and 308 M10K blocks):
+Quartus Prime Lite 18.1 build of the whole core (machine, Pocket platform layer and Analogue's framework) for the Pocket's FPGA, a Cyclone V 5CEBA4F23C8:
 
-| | Count |
-|---|---|
-| LUTs | ~7,600 (≈ 5,600 ALMs, ~30 %) |
-| Flip-flops | ~1,950 |
-| M10K | 197 + 32 for the dual-clock cartridge RAM Yosys left unmapped ≈ 229 (74 %) |
-| DSP | 2 (9×9) |
+| | Used | Of |
+|---|---|---|
+| Logic (ALMs) | 4,940 (27 %) | 18,480 |
+| Registers | 6,172 | |
+| Block RAM (M10K) | 200 (65 %) | 308 |
+| DSP blocks | 2 | 66 |
 
-An earlier version of the VDP read its line buffers combinationally, which turned them into 15,000 flip-flops; restructuring them as block RAM brought the flip-flop count down eightfold. (In this Yosys version ABC's last optimisation step, `&mfs`, aborts on the design; Yosys then uses the mapping from the step before, so the LUT count is if anything slightly high. The log is `syn/synth.log`.)
+Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 4.7 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
+
+`syn/` holds an earlier Yosys estimate of the machine alone (about 5,600 ALMs and 229 M10K blocks), useful only as a quick check where Quartus is not installed. An earlier version of the VDP read its line buffers combinationally, which turned them into 15,000 flip-flops; restructuring them as block RAM brought the flip-flop count down eightfold.
 
 ## 13. Verification
 
-Everything below is simulation (Verilator 5.020, iverilog). Gearsystem is used only as an independent test oracle and is not part of any deliverable.
+Everything below is simulation (Verilator 5.020, iverilog) except the last row, the Quartus build. Gearsystem is used only as an independent test oracle and is not part of any deliverable.
 
 | Test | Result |
 |---|---|
@@ -196,7 +199,7 @@ Everything below is simulation (Verilator 5.020, iverilog). Gearsystem is used o
 | Sprite-limit test ROM: stock / 16 / 16 + stock flag | RTL = emulator, overflow flag as specified |
 | Super Sega feature ROM: register banks, native and extended CRAM with palette aliasing, Feature Enable B 224 lines, 16 sprites, 200 % turbo with VRAM writes during the display | RTL = emulator; the write loop runs 34.7 times a frame (1719 cycles per 64 writes), as the synchroniser's slot spacing predicts |
 | Turbo: instructions per frame at 125–200 % | 1.250 / 1.500 / 1.749 / 1.999 ×, picture unchanged |
-| ROM latency at 200 % turbo | no wait states up to 12 clocks; the PSRAM path takes about 9 |
+| ROM latency at 200 % turbo | no wait states up to 11 clocks (12 before the memory controller's register stage, §11); the PSRAM path takes about 9 |
 | PSG: tone `$0FE` | 440.4 Hz (expected 440.4); pseudo-stereo puts it left only in Master System mode and leaves it centred in Super Sega mode |
 | **Pocket platform** (bridge model → loader → PSRAM model → machine → video at the pixel clock) | Batman SMS frames 200/500 and GG 200/500 identical to Gearsystem; scaler slot words correct on every line |
 | Cartridge load at the APF's maximum bridge rate | passes |
@@ -206,16 +209,18 @@ Everything below is simulation (Verilator 5.020, iverilog). Gearsystem is used o
 | Pocket buttons B, A and Y held, Master System and Super Sega modes (`tb_pocket -hold`) | B reads as button 1 and A as button 2 in both modes; Y is C (stock) or A (Super Sega) |
 | Verilator lint of `core_top` with the APF's `core_bridge_cmd` (project tree from `pocket/setup.sh`) | elaborates; only style warnings, the substantive ones in the template's own code |
 | Identifiers used before their declaration (Quartus rejects these under `default_nettype none`) | none after fixes in `ss_top`, `ss_save_unload` and `core_top` |
+| I/O unit (`sim/io/run.sh`): SC-3000 keyboard ghosting (4,000 random key patterns) and the math unit (20,000 operand pairs) through the real port writes and reads, against reference models | match; the test catches a closure that skips ghosting and a divide one step short |
+| Quartus build (`pocket/build_core.sh`) | compiles; timing met at every corner (§12) |
 
-Not yet done: a Quartus build (timing closure, real resource use), and anything on hardware.
+Not yet done: anything on hardware.
 
 ## 14. Building
 
-`pocket/setup.sh` fetches the APF framework files from `github.com/open-fpga/core-template` (they are under Analogue's licence and not kept in the repository), lays out a Quartus project with the core's sources in `pocket/build/`, and copies the SD-card files there. From `pocket/`: compile `build/src/fpga/ap_core.qpf` in Quartus Prime Lite, run `python3 tools/reverse_rbf.py build/src/fpga/output_files/ap_core.rbf bitstream.rbf_r`, and copy `build/dist/*` to the SD card with the bitstream in `Cores/SuperSega.SuperSega/`. ROMs go in `/Assets/supersega/common/`.
+`pocket/build_core.sh` builds everything in one step (about 15 minutes). It runs `pocket/setup.sh`, which fetches the APF framework files from `github.com/open-fpga/core-template` (they are under Analogue's licence and not kept in the repository) and lays out a Quartus project with the core's sources in `pocket/build/`; compiles it with Quartus Prime Lite 18.1 (`quartus_sh` if it is installed, otherwise the `raetro/quartus:pocket` Docker image); turns the bitstream into the reversed form the Pocket loads (`tools/reverse_rbf.py`); and puts the files for the root of the SD card, with the test ROMs and `TESTING.md`, in `pocket/build/sdcard/` and `pocket/build/SuperSega-pocket.zip`. GitHub runs the same script on every push that changes `pocket-core/` (the "Pocket core build" workflow, `../.github/workflows/pocket-build.yml`) and offers the SD-card files as a download. Games go in `/Assets/supersega/common/`.
 
 ## 15. Next milestones
 
-1. **Hardware bring-up**: Quartus build, timing, first boot on a Pocket (the user's hands-on testing).
+1. **Hardware bring-up**: first boot on a Pocket (the user's hands-on testing, guided by `TESTING.md`). The Quartus build and timing are done (§12).
 2. **TMS9918 modes** (SG-1000, SC-3000), with the true-colour and sprite-limit boosts. Whether these modes raise line interrupts on Super Sega is open (Q15).
 3. **FM**: a YM2413 core. Candidates are jtopll (GPL-3) and IKAOPLL; the choice depends on the licence decision below.
 4. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.

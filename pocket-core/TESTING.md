@@ -1,6 +1,6 @@
 # Testing the core on an Analogue Pocket
 
-This is the first build of the core that can be put on a Pocket. Everything below "should work" was checked in simulation only; **nothing has run on real hardware yet**, so treat this as a first test.
+This is the first build of the core that can be put on a Pocket. Everything below "should work" was checked in simulation, and the build meets timing in Quartus's analysis (its logic is fast enough for its clock, with margin), but **nothing has run on real hardware yet**, so treat this as a first test.
 
 ## Install
 
@@ -51,7 +51,7 @@ If these work, the core loads, draws, plays sound and reads the buttons.
 
 ## Unknown until it runs
 
-- Whether the core loads at all, and whether it meets timing at full speed (the build report says, but only the hardware proves it).
+- Whether the core loads at all. Quartus's timing analysis passes at every temperature and voltage it models, so timing is not expected to be the problem, but only the hardware proves it.
 - Loading large ROMs (the biggest Master System games are 1 MB) from the Pocket's memory.
 - Picture scaling and aspect on the Pocket's screen and on a TV through the Dock.
 - Audio level, clicks or pops.

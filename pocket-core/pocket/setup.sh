@@ -52,6 +52,8 @@ sed -e '/core\/core_top.v/d' -e '/core\/core_bridge_cmd.v/d' -e '/core\/core_con
 # start a new line if the template's last kept line has no line end
 if [ -n "$(tail -c 1 "$OUT/src/fpga/ap_core.qsf")" ]; then echo >> "$OUT/src/fpga/ap_core.qsf"; fi
 echo 'set_global_assignment -name QIP_FILE core/ss_core.qip' >> "$OUT/src/fpga/ap_core.qsf"
+# leave out the simulation-only blocks (`ifndef SYNTHESIS), as the Yosys estimate does
+echo 'set_global_assignment -name VERILOG_MACRO "SYNTHESIS=1"' >> "$OUT/src/fpga/ap_core.qsf"
 
 cp -r "$HERE/dist" "$OUT/"
 echo "Quartus project: $OUT/src/fpga/ap_core.qpf"

@@ -112,7 +112,12 @@ module ss_top #(
     wire        turbo_on = (step_eff != 3'd0);
     wire [10:0] tacc_next = tacc + {3'd0, turbo_rate};
     wire        ce_turbo = (tacc_next >= 11'd1500);
-    wire        ce_cpu = turbo_on ? ce_turbo : ce_base;
+    // Two CPU enables are never on consecutive clocks (they can meet only when
+    // the turbo step changes), so every CPU register path has at least two
+    // clocks; core_constraints.sdc relies on this.
+    reg         ce_cpu_d = 1'b0;
+    wire        ce_cpu = (turbo_on ? ce_turbo : ce_base) && !ce_cpu_d;
+    always @(posedge clk_sys) ce_cpu_d <= ce_cpu;
 
     always @(posedge clk_sys) begin
         if (reset) begin
@@ -165,6 +170,19 @@ module ss_top #(
     end
 
     // ------------------------------------------------------------ memory
+    // The memory controller sees the CPU bus one clock late. The access-start
+    // pulse comes from the CPU's instruction decoding in the first clock of T1,
+    // and that logic is too deep to reach the controller's registers within the
+    // same clock; this register stage delays each access by one clock (19 ns),
+    // well inside a T-state.
+    reg  [15:0] m_a = 16'd0;
+    reg  [7:0]  m_dout = 8'd0;
+    reg         m_mreq_n = 1'b1, m_rd_n = 1'b1, m_wr_n = 1'b1, m_rd_start = 1'b0;
+    always @(posedge clk_sys) begin
+        m_a <= a; m_dout <= cpu_dout;
+        m_mreq_n <= mreq_n; m_rd_n <= rd_n; m_wr_n <= wr_n;
+        m_rd_start <= mem_rd_start;
+    end
     wire [7:0]  mem_rdata;
     wire [7:0]  mem_ctl, io_ctl, slot_sel;
     wire [3:0]  wram_bank;
@@ -172,8 +190,8 @@ module ss_top #(
     ss_mem u_mem (
         .clk(clk_sys), .rst(reset), .mode(mode), .mapper(mapper), .sc_ram32(sc_ram32),
         .rom_mask(rom_mask), .card_present(card_present), .card_mask(card_mask),
-        .a(a), .dout(cpu_dout), .mreq_n(mreq_n), .rd_n(rd_n), .wr_n(wr_n),
-        .rd_start(mem_rd_start), .rdata(mem_rdata), .wait_n(mem_wait_n),
+        .a(m_a), .dout(m_dout), .mreq_n(m_mreq_n), .rd_n(m_rd_n), .wr_n(m_wr_n),
+        .rd_start(m_rd_start), .rdata(mem_rdata), .wait_n(mem_wait_n),
         .mem_ctl(mem_ctl), .wram_bank(wram_bank), .slot_sel(slot_sel), .card_bank(card_bank),
         .rom_req(rom_req), .rom_addr(rom_addr), .rom_ack(rom_ack), .rom_data(rom_data),
         .sv_clk(sv_clk), .sv_we(sv_we), .sv_addr(sv_addr), .sv_din(sv_din), .sv_dout(sv_dout),

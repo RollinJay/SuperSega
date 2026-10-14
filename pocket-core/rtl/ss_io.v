@@ -74,6 +74,8 @@ module ss_io (
     reg [7:0] gg_sio [1:5];
     reg [7:0] math_a, math_b;
     reg [15:0] math_res;
+    reg        math_div;                 // the result is the divider's (div_q)
+    reg [15:0] div_q = 16'd0;
     reg [7:0] dma [0:6];
     reg [7:0] ppi_c, ppi_ctl;
     // Debug unit control port ($FB). The debug unit itself is not in this core
@@ -103,27 +105,37 @@ module ss_io (
     endfunction
 
     reg [11:0] rm [0:7];
-    reg [11:0] kb_m;
-    reg [7:0]  reach;
     // Row select: port C bits 2-0 while port C (lower) is an output; as an input
     // (the 8255's state after reset) the pull-ups select row 7, the pads.
     wire [2:0] kb_row = ppi_ctl[0] ? 3'd7 : ppi_c[2:0];
-    integer r, it;
+    integer r;
     always @* begin
-        reach = 8'd0;
         for (r = 0; r < 7; r = r + 1) rm[r] = kb_keys[r*12 +: 12];
         rm[7] = row7(pad1, pad2);
-        kb_m = rm[kb_row];
-        if (kb_ghosting) begin
-            reach = 8'd0; reach[kb_row] = 1'b1;
-            for (it = 0; it < 7; it = it + 1)
-                for (r = 0; r < 8; r = r + 1)
-                    if (!reach[r] && (rm[r] & kb_m) != 12'd0) begin
-                        reach[r] = 1'b1;
-                        kb_m = kb_m | rm[r];
-                    end
-        end
     end
+
+    // The closure is built one step per clock, so it is not one long chain of
+    // logic: each step adds every row that shares a column with the keys found
+    // so far, and seven steps reach all eight rows. It restarts from the
+    // selected row every eight clocks, so a change of keys or row shows within
+    // sixteen clocks (0.3 us), well before the CPU's next instruction can read it.
+    reg [11:0] kb_acc = 12'd0, kb_closed = 12'd0, kb_grow;
+    reg [2:0]  kb_step = 3'd0;
+    integer g;
+    always @* begin
+        kb_grow = kb_acc;
+        for (g = 0; g < 8; g = g + 1)
+            if ((rm[g] & kb_acc) != 12'd0) kb_grow = kb_grow | rm[g];
+    end
+    always @(posedge clk) begin
+        kb_step <= kb_step + 3'd1;
+        if (kb_step == 3'd7) begin
+            kb_closed <= kb_grow;
+            kb_acc <= rm[kb_row];
+        end else
+            kb_acc <= kb_grow;
+    end
+    wire [11:0] kb_m = kb_ghosting ? kb_closed : rm[kb_row];
 
     // ------------------------------------------------------------ pads
     // SMS / GG port $DC and $DD (active low). Super Sega: Genesis 3-button pads,
@@ -177,8 +189,8 @@ module ss_io (
                 8'h09: rdata = slot_sel;
                 8'h0B: rdata = {3'b000, card_bank};
                 8'h0E: rdata = 8'h00;
-                8'h0F: rdata = math_res[7:0];
-                8'h10: rdata = math_res[15:8];
+                8'h0F: rdata = math_div ? div_q[7:0] : math_res[7:0];
+                8'h10: rdata = math_div ? div_q[15:8] : math_res[15:8];
                 8'h16: rdata = 8'h81;
                 default: rdata = 8'hFF;
             endcase
@@ -231,8 +243,27 @@ module ss_io (
     assign th_latch = wr && lowport && port[0] && !legacy &&
                       ((wdata[1] && wdata[5] && !io_ctl[5]) || (wdata[3] && wdata[7] && !io_ctl[7]));
 
-    // math unit (division as the reference emulator does it; profile Q7 open)
-    wire [15:0] div_num = {math_a, math_b};
+    // math unit (division as the reference emulator does it; profile Q7 open).
+    // The divide makes one quotient bit per clock (restoring division), so its
+    // result is ready 16 clocks after the $0E write, long before the CPU's next
+    // IN can read it (at least 82 clocks later), and the divider is not one long
+    // chain of logic.
+    wire        div_start = wr && ss && port == 8'h0E && wdata[0] && math_b != 8'd0;
+    reg  [7:0]  div_r = 8'd0, div_d = 8'd0;
+    reg  [4:0]  div_n = 5'd0;
+    wire [8:0]  div_sh  = {div_r, div_q[15]};
+    wire        div_ge  = div_sh >= {1'b0, div_d};
+    wire [8:0]  div_sub = div_sh - {1'b0, div_d};
+    always @(posedge clk) begin
+        if (rst) div_n <= 5'd0;
+        else if (div_start) begin
+            div_q <= {math_a, math_b}; div_r <= 8'd0; div_d <= math_b; div_n <= 5'd16;
+        end else if (div_n != 5'd0) begin
+            div_r <= div_ge ? div_sub[7:0] : div_sh[7:0];
+            div_q <= {div_q[14:0], div_ge};
+            div_n <= div_n - 5'd1;
+        end
+    end
 
     integer i;
     always @(posedge clk) begin
@@ -240,7 +271,7 @@ module ss_io (
             mem_ctl <= 8'hA8; io_ctl <= 8'hFF; wram_bank <= 4'd0; slot_sel <= 8'd0;
             card_bank <= 5'd0; turbo_step <= 3'd0; fm_ctl <= 2'd0; pcm_ctl <= 8'd0;
             gg_sio[1] <= 8'h7F; gg_sio[2] <= 8'hFF; gg_sio[3] <= 8'h00; gg_sio[4] <= 8'hFF; gg_sio[5] <= 8'h00;
-            math_a <= 8'd0; math_b <= 8'd0; math_res <= 16'd0;
+            math_a <= 8'd0; math_b <= 8'd0; math_res <= 16'd0; math_div <= 1'b0;
             for (i = 0; i < 7; i = i + 1) dma[i] <= 8'd0;
             ppi_c <= 8'h00; ppi_ctl <= 8'h9B;      // 8255 reset: every port an input
         end else if (wr) begin
@@ -254,8 +285,10 @@ module ss_io (
                     8'h0B: card_bank <= wdata[4:0];
                     8'h0C: math_a <= wdata;
                     8'h0D: math_b <= wdata;
-                    8'h0E: math_res <= wdata[0] ? ((math_b != 8'd0) ? (div_num / {8'd0, math_b}) : 16'd0)
-                                                : (math_a * math_b);
+                    8'h0E: begin   // divide: div_q; divide by zero: 0; multiply: A x B
+                        math_res <= wdata[0] ? 16'd0 : (math_a * math_b);
+                        math_div <= wdata[0] && math_b != 8'd0;
+                    end
                     default: ;
                 endcase
             end else if (port < 8'h40) begin

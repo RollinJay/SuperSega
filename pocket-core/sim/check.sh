@@ -5,10 +5,12 @@
 #      platform's limits and match what pocket/ss_pocket.v reads and decodes
 #   1. tools/mk_testrom.py reproduces roms/ byte for byte
 #   2. sim/z80: the Z80 wrapper's instruction timing matches the emulator's Z80
-#   3. sim/sys: the machine draws the same frames as the emulator's machine model
+#   3. sim/io: the SC-3000 keyboard's ghosting and the math unit's divide, which
+#      take several clocks in the core, match reference models
+#   4. sim/sys: the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and Super Sega feature test
 #      ROMs, and for the VDP-height and I/O test ROMs in Game Gear mode
-#   4. sim/pocket: through the Pocket platform layer the frames match the machine
+#   5. sim/pocket: through the Pocket platform layer the frames match the machine
 #      simulation, Pocket B reads as button 1 in Super Sega mode, and the save
 #      slot reads back the loaded file with only the bytes the ROM writes changed
 #
@@ -43,7 +45,11 @@ echo "roms/ matches tools/mk_testrom.py"
 step "2. Z80 wrapper timing (sim/z80)"
 (cd sim/z80 && ./run.sh)
 
-step "3. machine simulation against the emulator (sim/sys)"
+step "3. I/O unit against reference models (sim/io)"
+(cd sim/io && ./run.sh > "$W/io.log") || { cat "$W/io.log"; exit 1; }
+grep -v '^PASS$\|finish called' "$W/io.log"
+
+step "4. machine simulation against the emulator (sim/sys)"
 build sys
 # name | ROM | mode | frames to run | frames to compare | tb_ss options | js_dump environment
 SYS_CASES=(
@@ -80,7 +86,7 @@ for c in "${SYS_CASES[@]}"; do
 done
 [ "$fail" = 0 ]
 
-step "4. Pocket platform simulation (sim/pocket)"
+step "5. Pocket platform simulation (sim/pocket)"
 build pocket
 # name | ROM | frames to run | options and frames to dump
 POCKET_CASES=(

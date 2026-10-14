@@ -26,4 +26,5 @@ python3 wiring_audit.py ../supersega-emulator.html
 node controls_test.js ../supersega-emulator.html ../../pocket-core/roms/vdp224.sms   # needs Playwright
 cd ../../machine && python3 tools/make_profile_v7.py super_sega_machine_v7.json /tmp/p.json && cmp /tmp/p.json super_sega_machine_v7.json
 cd .. && pocket-core/sim/check.sh        # Pocket core: about four minutes
+pocket-core/pocket/build_core.sh         # Quartus build and SD-card files: about 15 minutes, needs Docker (GitHub runs it too)
 ```

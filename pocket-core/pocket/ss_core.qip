@@ -1,6 +1,4 @@
 # Super Sega core sources (machine + Pocket platform layer)
-# SYNTHESIS leaves out the simulation-only blocks (`ifndef SYNTHESIS), as Yosys does
-set_global_assignment -name VERILOG_MACRO "SYNTHESIS=1"
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) "core_top.v"]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) "core_bridge_cmd.v"]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) "ss_pocket.v"]

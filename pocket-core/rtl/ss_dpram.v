@@ -1,7 +1,12 @@
-// Super Sega - simple dual-port RAM, inferred as block RAM.
+// Super Sega - dual-port RAM, inferred as block RAM.
 // Port A: read/write. Port B: read/write. Both synchronous, one-cycle read
-// latency, read-during-write on the same port returns old data.
-// Separate clocks are allowed (clk_b may equal clk_a).
+// latency. Separate clocks are allowed (clk_b may equal clk_a).
+//
+// This is Quartus's true-dual-port RAM template, which maps onto the Cyclone V
+// M10K blocks: a write also puts the written byte on that port's output ("new
+// data"). Nothing in the core reads a port's output in the cycle after writing
+// through it. A read on one port of the address the other port is writing in
+// the same cycle returns either value ("no_rw_check").
 `default_nettype none
 
 module ss_dpram #(
@@ -22,7 +27,7 @@ module ss_dpram #(
     output reg  [DW-1:0] dout_b
 );
     /* verilator lint_off MULTIDRIVEN */
-    reg [DW-1:0] mem [0:(1<<AW)-1];
+    (* ramstyle = "no_rw_check" *) reg [DW-1:0] mem [0:(1<<AW)-1];
     /* verilator lint_on MULTIDRIVEN */
 
     // Simulation starts from zeroed memory; on the FPGA block RAM powers up
@@ -37,13 +42,19 @@ module ss_dpram #(
     end
 
     always @(posedge clk_a) begin
-        if (we_a) mem[addr_a] <= din_a;
-        dout_a <= mem[addr_a];
+        if (we_a) begin
+            mem[addr_a] <= din_a;
+            dout_a <= din_a;
+        end else
+            dout_a <= mem[addr_a];
     end
 
     always @(posedge clk_b) begin
-        if (we_b) mem[addr_b] <= din_b;
-        dout_b <= mem[addr_b];
+        if (we_b) begin
+            mem[addr_b] <= din_b;
+            dout_b <= din_b;
+        end else
+            dout_b <= mem[addr_b];
     end
 endmodule
 

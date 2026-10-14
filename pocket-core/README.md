@@ -21,10 +21,12 @@ pocket/               Analogue Pocket platform layer
   third_party/agg23/  data_loader, sound_i2s, sync_fifo, psram (MIT)
   dist/               SD-card files (core JSON, platform JSON)
   setup.sh            fetches the APF framework and assembles a Quartus project
+  build_core.sh       setup.sh, Quartus compile, SD-card files and zip
   tools/reverse_rbf.py
 sim/
   check.sh            the regression checks run on every push (see below)
   z80/                Z80 wrapper timing test (iverilog)
+  io/                 I/O unit test: keyboard ghosting and math unit against reference models (iverilog)
   sys/                machine simulation (Verilator): frames, traces, audio capture
   pocket/             platform simulation: APF bridge model, PSRAM model, saves
   ref/                Gearsystem runners used as a test oracle (sources only; see ref/README.md)
@@ -37,12 +39,13 @@ roms/                 the generated test ROMs (homebrew, made by tools/mk_testro
 
 Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check.sh` run the emulator in `../emulator/`), Python 3 with numpy and Pillow, and Yosys 0.33 for the resource estimate.
 
-`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
+`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
 
 ```sh
 python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, ssfeat, ports test ROMs
 python3 tools/check_core_json.py             # input.json/interact.json against platform limits and the RTL
 (cd sim/z80 && ./run.sh)                     # Z80 wrapper timing against the emulator's Z80
+(cd sim/io && ./run.sh)                      # keyboard ghosting and math unit against reference models
 (cd syn && yosys -q -l synth.log synth.ys)   # resource estimate; rewrites syn/synth.log
 cd sim/sys && ./build.sh && mkdir -p out
 ./obj/tb_ss ../../roms/vdp224.sms sms 40 out/v224 10 37        # frames 10 and 37 as PPM
@@ -61,13 +64,13 @@ python3 ../../tools/ppmdiff.py a.ppm b.ppm [side_by_side.png] [--tol 2]
 
 ## Building for the Pocket
 
+The easy way is to let GitHub build it: every push that changes `pocket-core/` runs the "Pocket core build" workflow (`../.github/workflows/pocket-build.yml`), and its run page has the SD-card files under Artifacts. To build locally:
+
 ```sh
-cd pocket && ./setup.sh              # needs network access to github.com/open-fpga/core-template
-# open build/src/fpga/ap_core.qpf in Quartus Prime Lite, compile, then
-python3 tools/reverse_rbf.py build/src/fpga/output_files/ap_core.rbf bitstream.rbf_r
+pocket/build_core.sh                 # about 15 minutes; needs network access and Docker or Quartus
 ```
 
-Copy `build/dist/*` to the SD card, put `bitstream.rbf_r` in `Cores/SuperSega.SuperSega/`, and ROMs in `/Assets/supersega/common/`.
+`build_core.sh` runs `setup.sh` (which fetches Analogue's framework from github.com/open-fpga/core-template and assembles a Quartus project in `pocket/build/`), compiles it with Quartus Prime Lite 18.1 (`quartus_sh` if it is on the PATH, otherwise the `raetro/quartus:pocket` Docker image), turns the bitstream into the form the Pocket loads (`tools/reverse_rbf.py`), and puts everything for the SD card, test ROMs included, in `pocket/build/sdcard/` and `pocket/build/SuperSega-pocket.zip`. `TESTING.md` explains how to install it and what to expect.
 
 ## Licences
 

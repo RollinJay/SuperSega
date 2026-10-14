@@ -5,6 +5,8 @@ pocket-core/sim/z80/tb_z80
 pocket-core/sim/z80/prog.hex
 pocket-core/sim/z80/z80_js.log
 pocket-core/sim/z80/z80_rtl.log
+pocket-core/sim/io/tb_io
+pocket-core/sim/io/tb_io.log
 emulator/tools/out/
 __pycache__/
 # Playwright for emulator/tools/controls_test.js, installed locally with npm
