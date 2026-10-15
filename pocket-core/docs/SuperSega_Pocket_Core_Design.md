@@ -188,7 +188,7 @@ The FM unit (IKAOPLL) accounts for about 720 ALMs, 1,190 registers, 5 M10K block
 
 Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 3.4 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
 
-`syn/` holds an earlier Yosys estimate of the machine alone (about 5,600 ALMs and 229 M10K blocks), useful only as a quick check where Quartus is not installed. An earlier version of the VDP read its line buffers combinationally, which turned them into 15,000 flip-flops; restructuring them as block RAM brought the flip-flop count down eightfold.
+`syn/` holds a Yosys estimate of the machine alone (`syn/synth.log`: 203 M10K blocks and about 8,400 LUTs with the FM unit), useful only as a quick check where Quartus is not installed. An earlier version of the VDP read its line buffers combinationally, which turned them into 15,000 flip-flops; restructuring them as block RAM brought the flip-flop count down eightfold.
 
 ## 13. Verification
 
