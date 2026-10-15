@@ -4,7 +4,8 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, ssfeat.sms and ports.sms. The VDP ROMs are described here; each of the
+tone.sms, ssfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
 32x32 name table at $3700 (tall modes) / 32x28 at $3800 (192), places sprites
@@ -428,6 +429,160 @@ def build_ports():
     rom[0x7FFF] = 0x4C
     return bytes(rom)
 
+
+# ---------------------------------------------------------------- TMS9918 modes
+def _shape(k, r):
+    """One of eight 8x8 shapes, row r."""
+    return [0xAA if r % 2 == 0 else 0x55,                    # checker
+            0xFF if r in (0, 7) else 0x81,                   # box
+            ((0x80 >> r) | (1 << r)) & 0xFF,                 # cross
+            0xF0 if r < 4 else 0x0F,                         # quarters
+            (0xFF >> r) & 0xFF,                              # wedge
+            0xFF if r in (3, 4) else 0x18,                   # plus
+            0x3C if 1 <= r <= 6 else 0x00,                   # block
+            0x00 if r % 2 else 0xFF][k & 7]                  # stripes
+
+
+def _ring16():
+    """A 16x16 ring as the four 8-byte quadrants of a TMS sprite: top left,
+    bottom left, top right, bottom right."""
+    rows = []
+    for y in range(16):
+        bits = 0
+        for x in range(16):
+            d = (x - 7.5) ** 2 + (y - 7.5) ** 2
+            if 20 <= d <= 60:
+                bits |= 0x8000 >> x
+        rows.append(bits)
+    left = [r >> 8 for r in rows]
+    right = [r & 0xFF for r in rows]
+    return left[0:8] + left[8:16] + right[0:8] + right[8:16]
+
+
+def build_tms(mode):
+    """SG-1000 test ROM for one TMS9918 picture mode: g1 (Graphics I), g2
+    (Graphics II), mc (Multicolor) or txt (Text). Tables: names at $3800,
+    patterns at $0000 (Multicolor: its colour blocks), colours at $2000,
+    sprite attributes at $3B00, sprite patterns at $1800. Sprites are 8x8 in
+    g1, 16x16 in g2 and 8x8 magnified in mc; Text has none. The sprites:
+      0 and 1 overlap on lines 84-87 (84-95 with 16-line sprites): 1 moves right
+        3 pixels a frame across 0,
+        so the collision flag is set on the frames where they meet, and 0
+        stays on top (the lowest-numbered sprite wins)
+      2-6 sit side by side on line 130: the fifth is not drawn and sets the
+        overflow flag
+      7 at Y = $FA shows its lower rows at the top of the screen
+      8 has the early-clock bit, so it starts 32 pixels left of its X
+      9 is transparent and overlaps 10: it draws nothing and sets no flag
+    The frame interrupt reads the status register and sets the backdrop to
+    1 + 4 x (status bits 6-5): black, then light blue (collision), light red
+    (overflow) or magenta (both)."""
+    a = Asm()
+    NT, SAT, SPG, CT = 0x3800, 0x3B00, 0x1800, 0x2000
+    r1 = {'g1': 0x80, 'g2': 0x82, 'mc': 0x89, 'txt': 0x90}[mode]
+    regs = {'g1':  [0x00, r1, 0x0E, 0x80, 0x00, 0x76, 0x03, 0x01],
+            'g2':  [0x02, r1, 0x0E, 0xFF, 0x03, 0x76, 0x03, 0x01],
+            'mc':  [0x00, r1, 0x0E, 0x80, 0x00, 0x76, 0x03, 0x01],
+            'txt': [0x00, r1, 0x0E, 0x80, 0x00, 0x76, 0x03, 0xF1]}[mode]
+
+    a.org(0x0000)
+    a.db(0xF3, 0xED, 0x56)                     # DI ; IM 1
+    a.db(0x31); a.dw(0xC3F0)                   # LD SP,$C3F0
+    a.db(0xC3); a.ref16('main')
+    a.org(0x0038)
+    a.db(0xC3); a.ref16('irq')                 # the handler is longer than the room before $0066
+    a.org(0x0066)
+    a.db(0xED, 0x45)                           # RETN
+    a.org(0x0080)
+    a.label('irq')
+    a.db(0xF5, 0xC5, 0xE5)                     # PUSH AF ; PUSH BC ; PUSH HL
+    a.db(0xDB, 0xBF)                           # IN A,($BF)   status: acknowledge, read the flags
+    a.db(0x07, 0x07, 0x07, 0xE6, 0x03)         # RLCA x3 ; AND 3    bits 6-5
+    a.db(0x87, 0x87, 0xC6, 0x01, 0xF6, 0xF0)   # x4 ; +1 ; OR $F0   (Text: white characters)
+    a.db(0xD3, 0xBF, 0x3E, 0x87, 0xD3, 0xBF)   # -> R7
+    a.db(0x21); a.dw(0xC000)                   # LD HL,$C000
+    a.db(0x34)                                 # INC (HL)     frame counter
+    if mode == 'txt':
+        a.db(0x3E, NT & 0xFF, 0xD3, 0xBF, 0x3E, 0x40 | (NT >> 8), 0xD3, 0xBF)
+        a.db(0x7E, 0xD3, 0xBE)                 # the counter as the first character
+    else:
+        a.db(0x7E, 0x87, 0x86, 0x47)           # LD A,(HL) ; ADD A,A ; ADD A,(HL) ; LD B,A   X = 3 x frame
+        a.db(0x3E, (SAT + 5) & 0xFF, 0xD3, 0xBF, 0x3E, 0x40 | ((SAT + 5) >> 8), 0xD3, 0xBF)
+        a.db(0x78, 0xD3, 0xBE)                 # sprite 1 X
+    a.db(0xE1, 0xC1, 0xF1, 0xFB, 0xED, 0x4D)   # POP HL ; POP BC ; POP AF ; EI ; RETI
+    assert a.pc <= 0x0100
+
+    a.org(0x0100)
+    a.label('main')
+    a.db(0xAF, 0x32); a.dw(0xC000)             # frame counter = 0
+    a.db(0x21); a.ref16('regs')
+    a.db(0x06, 16, 0x0E, 0xBF, 0xED, 0xB3)     # registers (display off)
+    a.db(0xAF, 0xD3, 0xBF, 0x3E, 0x40, 0xD3, 0xBF)
+    a.db(0x01); a.dw(0x4000)                   # clear 16 KB of VRAM
+    a.label('clr')
+    a.db(0xAF, 0xD3, 0xBE, 0x0B, 0x78, 0xB1, 0x20); a.rel('clr')
+    blocks = []
+
+    def block(name, addr, data):
+        blocks.append((name, addr, bytes(data)))
+        a.db(0x21); a.ref16(name)              # LD HL,data
+        a.db(0x11); a.dw(addr)                 # LD DE,vram
+        a.db(0x01); a.dw(len(data))            # LD BC,length
+        a.db(0xCD); a.ref16('copy')
+
+    if mode == 'g1':
+        block('pat', 0x0000, [_shape(n + (n >> 3), r) for n in range(256) for r in range(8)])
+        block('col', CT, [(((i * 3 + 2) % 16) << 4) | ((i * 5) % 16) for i in range(32)])
+        block('names', NT, [(row + col * 3) & 0xFF for row in range(24) for col in range(32)])
+    elif mode == 'g2':
+        block('pat', 0x0000, [_shape(n + t * 3, r) for t in range(3) for n in range(256) for r in range(8)])
+        block('col', CT, [((((n >> 2) + r + t) % 16) << 4) | ((n + t * 5 + r * 3) % 16)
+                          for t in range(3) for n in range(256) for r in range(8)])
+        block('names', NT, [(row * 32 + col) & 0xFF for row in range(24) for col in range(32)])
+    elif mode == 'mc':
+        block('pat', 0x0000, [((n * 7 + r * 0x13) * 37 >> 2) & 0xFF for n in range(256) for r in range(8)])
+        block('names', NT, [(row * 32 + col) & 0xFF for row in range(24) for col in range(32)])
+    else:
+        block('pat', 0x0000, [_shape(n, r) & 0xFC for n in range(256) for r in range(8)])
+        block('names', NT, [(row * 3 + col) & 0xFF for row in range(24) for col in range(40)])
+    if mode != 'txt':
+        block('spat', SPG, [0xFF] * 32 + _ring16())
+        sprites = [(79, 100, 0, 0x08), (83, 0, 0, 0x02),
+                   (129, 20, 4, 0x04), (129, 60, 4, 0x06), (129, 100, 4, 0x0A), (129, 140, 4, 0x0C),
+                   (129, 180, 4, 0x0D),
+                   (0xFA, 200, 0, 0x0F), (40, 28, 0, 0x8B),
+                   (59, 100, 0, 0x00), (59, 104, 4, 0x09)]
+        block('sat', SAT, [v for spr in sprites for v in spr] + [0xD0])
+    else:
+        # Text mode has no sprites. An empty list all the same, because Gearsystem
+        # (the reference) evaluates sprites in Text mode and would set the
+        # overflow flag from 32 sprites at Y = 0.
+        block('sat', SAT, [0xD0])
+    # Clear the frame flag the loading left set, so the first interrupt is a real
+    # one: the emulator raises the flag at the end of line 192 and the core at
+    # cycle 27 of line 193 (the documented event-timing difference), and a status
+    # read between the two would count an extra frame on the core.
+    a.db(0xDB, 0xBF)                           # IN A,($BF)
+    a.db(0x3E, r1 | 0x60, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)   # display on, frame interrupt on
+    a.db(0xFB)
+    a.label('loop')
+    a.db(0x18); a.rel('loop')
+
+    a.label('copy')                            # HL = data, DE = VRAM address, BC = length
+    a.db(0x7B, 0xD3, 0xBF, 0x7A, 0xF6, 0x40, 0xD3, 0xBF)
+    a.label('cl')
+    a.db(0x7E, 0xD3, 0xBE, 0x23, 0x0B, 0x78, 0xB1, 0x20); a.rel('cl')
+    a.db(0xC9)
+    a.label('regs')
+    for i, v in enumerate(regs):
+        a.db(v, 0x80 | i)
+    for name, addr, data in blocks:
+        a.label(name)
+        a.db(*data)
+    a.resolve()
+    assert a.pc <= 0x8000
+    return bytes(a.b)
+
 if __name__ == '__main__':
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
@@ -446,3 +601,6 @@ if __name__ == '__main__':
     print('wrote ssfeat.sms')
     open(os.path.join(out, 'ports.sms'), 'wb').write(build_ports())
     print('wrote ports.sms')
+    for m in ('g1', 'g2', 'mc', 'txt'):
+        open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
+        print(f'wrote tms_{m}.sg')

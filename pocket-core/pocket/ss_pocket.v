@@ -79,7 +79,9 @@ module ss_pocket (
     // $0000_0110 GG screen   0 LCD window 160x144 1 full 256x192 (boost: uncrop)
     // $0000_011C ghosting    1 = SK-1100 matrix ghosting on (stock behaviour)
     // $0000_0120 SC RAM      0 16 KB 1 32 KB cartridge RAM (SC-3000 BASIC carts)
-    // Boosts: the machine's enhancement layer, all off by default (stock):
+    // $0000_0134 TMS colours 1 = true TMS9918 colours (default), 0 = Master System approximation
+    // Boosts: the machine's enhancement layer, all off by default (stock) except
+    // TMS colours ($0000_0134, above):
     // $0000_0114 sprites     0 8 per line, 1 16 per line, 2 16 per line with the
     //                        overflow flag still set by a 9th sprite
     // $0000_0118 Start=Pause 1 = Start raises Pause (SMS, SG-1000, SC-3000)
@@ -99,6 +101,7 @@ module ss_pocket (
     reg       set_afire    = 1'b0;
     reg       set_pstereo  = 1'b0;
     reg       set_ghost    = 1'b1;
+    reg       set_tmscol   = 1'b1;     // true TMS colours: on by default (open question Q11, decided)
     reg       set_scram32  = 1'b1;
     reg [7:0] reset_req    = 8'd0;     // stretched reset request
 
@@ -120,6 +123,7 @@ module ss_pocket (
                 12'h118: set_startp  <= bridge_wr_data[0];
                 12'h11C: set_ghost   <= bridge_wr_data[0];
                 12'h120: set_scram32 <= bridge_wr_data[0];
+                12'h134: set_tmscol  <= bridge_wr_data[0];
                 default: ;
             endcase
         end
@@ -175,11 +179,13 @@ module ss_pocket (
     // Settings and download state are quasi-static: two-flop synchronisers.
     // The machine is held in reset while anything is loading.
     // field order matters only between these two blocks
-    wire [43:0] s74 = {set_system, set_region, set_pal, set_mapper, set_ggfull,     // 8
+    wire [44:0] s74 = {set_tmscol,                                                    // 1
+                       set_system, set_region, set_pal, set_mapper, set_ggfull,     // 8
                        set_spr, set_startp, set_turbo, set_vboost, set_afire,        // 8
                        set_pstereo, set_ghost, set_scram32,                          // 3
                        rom_mask_74, downloading, rom_loaded};                        // 25
-    reg  [43:0] ss1, ss2;
+    reg  [44:0] ss1, ss2;
+    wire        s_tmscol  = ss2[44];
     always @(posedge clk_sys) begin ss1 <= s74; ss2 <= ss1; end
     wire [2:0]  s_system  = ss2[43:41];
     wire        s_region  = ss2[40];
@@ -317,6 +323,7 @@ module ss_pocket (
         .gg_crop(mode == 3'd1 && !s_ggfull),
         .ael_sprlimit(s_spr != 2'd0), .ael_ovf_stock(s_spr == 2'd2), .ael_startpause(s_startp),
         .ael_turbo(s_turbo), .ael_vramboost(s_vboost), .ael_autofire(s_afire), .ael_pstereo(s_pstereo),
+        .ael_tmscol(s_tmscol),
         .rom_req(rom_req), .rom_addr(rom_addr), .rom_ack(rom_ack), .rom_data(rom_data),
         .sv_clk(clk_sys), .sv_we(sv_we), .sv_addr(sv_addr), .sv_din(sv_din), .sv_dout(sv_dout),
         .pad1(pad1), .pad2(pad2), .pause_btn(pause_btn), .reset_btn(1'b0),

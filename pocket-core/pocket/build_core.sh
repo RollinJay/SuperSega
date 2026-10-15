@@ -31,7 +31,7 @@ test -s "$RBF" || { echo "no bitstream: $RBF" >&2; exit 1; }
 SD=$OUT/sdcard
 mkdir -p "$SD/Assets/supersega/common/test-roms"
 cp -r "$OUT/dist/." "$SD/"
-cp "$HERE"/../roms/*.sms "$SD/Assets/supersega/common/test-roms/"
+cp "$HERE"/../roms/*.sms "$HERE"/../roms/*.sg "$SD/Assets/supersega/common/test-roms/"
 cp "$HERE/../TESTING.md" "$SD/Cores/$CORE/"
 python3 "$HERE/tools/reverse_rbf.py" "$RBF" "$SD/Cores/$CORE/bitstream.rbf_r"
 (cd "$SD" && rm -f ../SuperSega-pocket.zip && python3 -c "

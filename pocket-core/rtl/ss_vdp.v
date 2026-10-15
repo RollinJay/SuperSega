@@ -23,11 +23,18 @@
 // following line, so video leaves the VDP one line late. Which VRAM, CRAM and
 // register values a line uses therefore matches Gearsystem's atomic render.
 //
-// Implemented in this milestone: Mode 4 at 192/224/240 lines, Game Gear CRAM,
-// Super Sega register banks and gating, native and extended CRAM, VRAM banking,
-// 16 sprites per line. The other Super Sega render features (ESAT, 16x16 and
-// magnified sprites, window, line scroll tables, unique-cell, text window) and
-// the legacy TMS9918 modes read and write their registers but do not render yet.
+// Implemented: Mode 4 at 192/224/240 lines, Game Gear CRAM, Super Sega register
+// banks and gating, native and extended CRAM, VRAM banking, 16 sprites per line,
+// and the TMS9918 modes (Graphics I and II, Text, Multicolor) with their sprites,
+// the TMS palette or CRAM colours (Feature Enable C bit 0) and the raised sprite
+// limit (bit 1). The other Super Sega render features (ESAT, 16x16 and magnified
+// Mode 4 sprites, window, line scroll tables, unique-cell, text window) read and
+// write their registers but do not render yet.
+//
+// In the TMS modes the sprite flags follow the emulator and Gearsystem: the
+// overflow flag (a fifth sprite on a line) and the collision flag (two sprite
+// pixels meeting on the screen) are set when the line is drawn, not at the
+// Mode 4 event times.
 `default_nettype none
 
 module ss_vdp (
@@ -40,6 +47,7 @@ module ss_vdp (
     input  wire        timing_gg,     // 1 = 315-5535 event table
     input  wire        no_spr_limit,  // enhancement layer: 16 per line for stock software
     input  wire        ovf_stock,     // enhancement layer: overflow flag still set by a 9th sprite
+    input  wire        tms_true,      // enhancement layer: true TMS9918 colours, not the SMS approximation
 
     // CPU side: strobes at the I/O sample point
     input  wire        io_rd,
@@ -74,7 +82,7 @@ module ss_vdp (
     // registers
     // =====================================================================
     reg  [7:0] r [0:63];             // 4 banks x 16
-    wire [7:0] r0 = r[0], r1 = r[1], r2 = r[2], r5 = r[5], r6 = r[6], r7 = r[7];
+    wire [7:0] r0 = r[0], r1 = r[1], r2 = r[2], r3 = r[3], r4 = r[4], r5 = r[5], r6 = r[6], r7 = r[7];
     wire [7:0] r8 = r[8], r9 = r[9], r10 = r[10];
     wire [7:0] fea = r[15];
     wire       xrb = ss_mode && fea[5];
@@ -97,6 +105,14 @@ module ss_vdp (
         else if (ss_mode && feb[7:6] == 2'd2) height = 9'd240;
     end
     wire ext_height = (height != 9'd192);
+
+    // TMS9918 modes (M4 clear), numbered as the emulator does: 0 Graphics I,
+    // 1 Text, 2 Graphics II, 3 Multicolor. M2 takes precedence, then M1, then M3.
+    wire       tms   = !m4;
+    wire [1:0] tmode = m2 ? 2'd2 : m1 ? 2'd1 : m3 ? 2'd3 : 2'd0;
+    wire       ttext = tms && (tmode == 2'd1);
+    wire [7:0] fec   = xrb ? r[16+7] : 8'h00;    // Feature Enable C
+    wire       tms_cram = fec[0];               // TMS modes draw from CRAM entries 0-15
 
     // =====================================================================
     // memories
@@ -343,7 +359,13 @@ module ss_vdp (
                     if (ln == 9'd0) vs_latch <= r9;
                 end
                 if (hc == ev_flag && ln == height + 9'd1) status[7] <= 1'b1;
-                if (hc == ev_ovr && ovr_req_line) status[6] <= 1'b1;
+                if (hc == ev_ovr && ovr_req_line && !tms) status[6] <= 1'b1;
+                // TMS modes: both sprite flags when the line is drawn (emulator,
+                // Gearsystem), and only for a displayed line
+                if (tms && hc == ev_render && disp_en && ln < height) begin
+                    if (ovr_req_line) status[6] <= 1'b1;
+                    if (col_req_line) status[5] <= 1'b1;
+                end
                 if (hc == ev_hint) begin
                     if (ln <= height) begin
                         if (line_ctr == 8'd0) begin
@@ -359,7 +381,7 @@ module ss_vdp (
                 // falls at or after the render event, the flag is set at the render
                 // event instead: Gearsystem drops such late collisions, but the
                 // hardware flags a collision anywhere on the line.
-                if (col_req_line && hc <= ev_render && ({8'h00, hc} >= col_cycle_w || hc == ev_render)) begin
+                if (!tms && col_req_line && hc <= ev_render && ({8'h00, hc} >= col_cycle_w || hc == ev_render)) begin
                     status[5] <= 1'b1;
                     col_req_line <= 1'b0;
                 end
@@ -376,7 +398,7 @@ module ss_vdp (
     end
 
     assign out_fea = fea;
-    assign out_fec = xrb ? r[16+7] : 8'h00;
+    assign out_fec = fec;
     assign out_active = r1[6] && (ln < height);
     assign dbg_line = ln;
     assign dbg_hc = hc;
@@ -409,7 +431,8 @@ module ss_vdp (
 `endif
 
     localparam R_IDLE = 4'd0, R_SCAN = 4'd1, R_ATTR = 4'd2, R_PAT = 4'd3, R_DRAW = 4'd4,
-               R_BG_START = 4'd5, R_BG_FETCH = 4'd6, R_BG_PIX = 4'd7, R_COMP = 4'd8, R_DONE = 4'd9;
+               R_BG_START = 4'd5, R_BG_FETCH = 4'd6, R_BG_PIX = 4'd7, R_COMP = 4'd8, R_DONE = 4'd9,
+               R_TFETCH = 4'd10, R_TPIX = 4'd11, R_TBORDER = 4'd12;
     reg [3:0]  rs;
     reg [3:0]  rsub;
     reg [8:0]  rline;                // line whose background is drawn
@@ -453,7 +476,7 @@ module ss_vdp (
     reg  [4:0]  sdraw;
     reg  [7:0]  s_y, s_x, s_tile;
     reg  [7:0]  s_p0, s_p1, s_p2, s_p3;
-    reg  [4:0]  s_tx;
+    reg  [5:0]  s_tx;
     reg         col_found;
     reg  [7:0]  col_x_found;
     reg         ovr_found;
@@ -480,13 +503,92 @@ module ss_vdp (
                                                                            : $signed({2'b00, spr_y1});
     wire signed [10:0] spr_dy = $signed({2'b00, sline}) - spr_ystart;
     wire [3:0]  spr_row_w  = spr_zoom ? spr_dy[4:1] : spr_dy[3:0];
-    wire signed [10:0] spr_px = $signed({3'b000, s_x}) - (r0[3] ? 11'sd8 : 11'sd0) + $signed({6'd0, s_tx});
+    wire signed [10:0] spr_px = $signed({3'b000, s_x}) - (r0[3] ? 11'sd8 : 11'sd0) + $signed({5'd0, s_tx});
     wire [2:0]  spr_bit    = 3'd7 - (spr_zoom ? s_tx[3:1] : s_tx[2:0]);
     wire [3:0]  spr_c      = {s_p3[spr_bit], s_p2[spr_bit], s_p1[spr_bit], s_p0[spr_bit]};
     // The sprite buffer halves alternate per pass, not per line parity: PAL has
     // an odd line count, so line 312 and line 0 share a parity.
     reg         sb;                  // half composited this pass; the other is drawn
     wire [8:0]  spr_wa     = {~sb, spr_px[7:0]};
+
+    // TMS9918 sprites: 32 entries of 4 bytes (Y, X, pattern, attribute) at R5 x $80,
+    // patterns at R6 x $800, 8x8 or 16x16 (R1 bit 1, four 8-byte blocks: top left,
+    // bottom left, top right, bottom right), magnified by R1 bit 0. A sprite starts
+    // on line Y+1, or Y+1-256 when Y+1 is 225 or more (the emulator's rule). The
+    // attribute byte holds the early-clock bit (7: 32 pixels left) and the colour.
+    wire [13:0] tsat      = {r5[6:0], 7'b0};
+    wire [13:0] tspg      = {r6[2:0], 11'b0};
+    wire [4:0]  tms_limit = no_spr_limit ? 5'd16 : fec[1] ? spr_limit : 5'd4;
+    wire [6:0]  scan_n    = tms ? 7'd32 : 7'd64;
+    wire [7:0]  ty1       = vb_dout + 8'd1;
+    wire signed [10:0] ty_s = (ty1 >= 8'd225) ? ($signed({3'b000, ty1}) - 11'sd256) : $signed({3'b000, ty1});
+    wire        on_line_t = (sl_s >= ty_s) && (sl_s < ty_s + sh_s);
+    reg  [7:0]  s_attr;
+    wire [7:0]  tsy1      = s_y + 8'd1;
+    wire signed [10:0] tsy_s = (tsy1 >= 8'd225) ? ($signed({3'b000, tsy1}) - 11'sd256) : $signed({3'b000, tsy1});
+    wire signed [10:0] tdy   = $signed({2'b00, sline}) - tsy_s;
+    wire [3:0]  trow      = spr_zoom ? tdy[4:1] : tdy[3:0];
+    wire [3:0]  tpx       = spr_zoom ? s_tx[4:1] : s_tx[3:0];
+    wire        tbit      = tpx[3] ? s_p1[3'd7 - tpx[2:0]] : s_p0[3'd7 - tpx[2:0]];
+    wire signed [10:0] tsx = $signed({3'b000, s_x}) - (s_attr[7] ? 11'sd32 : 11'sd0) + $signed({5'd0, s_tx});
+    wire [8:0]  tspr_wa   = {~sb, tsx[7:0]};
+
+    // TMS9918 background: one fetch per column (name, then pattern and colour),
+    // then its 8 pixels (Text: 6). bg_line holds the TMS colour, 0 = transparent.
+    reg  [5:0]  tcol;                // column, 0..31 (Text 0..39)
+    reg  [2:0]  tp;                  // pixel within the column
+    reg  [7:0]  tname, tpat, tcolr;
+    wire [4:0]  trow_bg   = rline[7:3];
+    wire [13:0] tnt       = {r2[3:0], 10'b0};
+    wire [13:0] t_name_a  = ttext ? (tnt + {4'd0, trow_bg, 5'd0} + {6'd0, trow_bg, 3'd0} + {8'd0, tcol})
+                                  : (tnt + {4'd0, trow_bg, tcol[4:0]});
+    // pattern (Graphics I, Text) or colour block (Multicolor) address from the name on vb_dout
+    wire [9:0]  t2_idx_n  = {trow_bg[4:3], vb_dout};
+    wire [9:0]  t2_pidx   = t2_idx_n & {r4[1:0], 8'hFF};
+    wire [13:0] t_pat_a   = (tmode == 2'd2) ? ({r4[2], 13'b0} + {1'b0, t2_pidx, 3'b000} + {11'd0, rline[2:0]})
+                          : (tmode == 2'd3) ? ({r4[2:0], 11'b0} + {3'd0, vb_dout, 3'b000} + {11'd0, rline[4:2]})
+                          :                   ({r4[2:0], 11'b0} + {3'd0, vb_dout, 3'b000} + {11'd0, rline[2:0]});
+    // colour address from the registered name: Graphics I one byte per 8 names,
+    // Graphics II one per pattern row, its index masked by R3 bits 6-0
+    wire [9:0]  t2_cidx   = {trow_bg[4:3], tname} & {r3[6:0], 3'b111};
+    wire [13:0] t_col_a   = (tmode == 2'd2) ? ({r3[7], 13'b0} + {1'b0, t2_cidx, 3'b000} + {11'd0, rline[2:0]})
+                                            : ({r3, 6'b0} + {9'd0, tname[7:3]});
+    wire        t_on      = tpat[3'd7 - tp];
+    reg  [3:0]  tpixc;
+    always @* begin
+        case (tmode)
+        2'd1:    tpixc = t_on ? r7[7:4] : 4'd0;                   // Text: the background is the backdrop
+        2'd3:    tpixc = tp[2] ? tpat[3:0] : tpat[7:4];           // Multicolor: left and right blocks
+        default: tpixc = t_on ? tcolr[7:4] : tcolr[3:0];          // Graphics I and II
+        endcase
+    end
+
+    // TMS9918 palette as RGB444 {B,G,R}: true colours (the emulator's TMS
+    // palette to 4 bits) or the Master System approximation (2 bits per channel)
+    function [11:0] tms_rgb;
+        input [3:0] i;
+        input       tt;
+        begin
+            case (i)
+            4'd2:  tms_rgb = tt ? 12'h4C2 : 12'h5A0;
+            4'd3:  tms_rgb = tt ? 12'h7D6 : 12'h5F5;
+            4'd4:  tms_rgb = tt ? 12'hE55 : 12'hF55;
+            4'd5:  tms_rgb = tt ? 12'hF77 : 12'hF55;
+            4'd6:  tms_rgb = tt ? 12'h55C : 12'h55A;
+            4'd7:  tms_rgb = tt ? 12'hEE4 : 12'hFF5;
+            4'd8:  tms_rgb = tt ? 12'h55F : 12'h55F;
+            4'd9:  tms_rgb = tt ? 12'h77F : 12'h55F;
+            4'd10: tms_rgb = tt ? 12'h5BC : 12'h5AA;
+            4'd11: tms_rgb = tt ? 12'h8CE : 12'hAAF;
+            4'd12: tms_rgb = tt ? 12'h3A2 : 12'h5A0;
+            4'd13: tms_rgb = tt ? 12'hB5C : 12'hA5A;
+            4'd14: tms_rgb = tt ? 12'hCCC : 12'hAAA;
+            4'd15: tms_rgb = 12'hFFF;
+            default: tms_rgb = 12'h000;                           // 0 and 1: black
+            endcase
+        end
+    endfunction
+    reg  [3:0]  tidx_d2, tidx_d3;
 
     // composite pipeline: stage 0 reads the line buffers at cx, stage 1 picks
     // the CRAM entry, stage 2 reads CRAM, stage 3 writes the output line
@@ -496,6 +598,10 @@ module ss_vdp (
     reg         sv_d;                // sprite pixel present at cx_d1
     reg  [8:0]  bgc;                 // bg_line[cx], registered read
     reg  [3:0]  spc;                 // spr_pix[{sb, cx}], registered read
+    // TMS composite: sprite, else the background if not transparent, else the backdrop
+    wire [3:0]  tsel = (!rdisp || rline >= height) ? r7[3:0] :
+                       (sv_d && spc != 4'd0) ? spc :
+                       (bgc[3:0] != 4'd0) ? bgc[3:0] : r7[3:0];
     always @(posedge clk) begin
         bgc <= bg_line[cx[7:0]];
         spc <= spr_pix[{sb, cx[7:0]}];
@@ -523,33 +629,35 @@ module ss_vdp (
                     scan_end <= 1'b0;
                     ovr_found <= 1'b0;
                     col_found <= 1'b0;
-                    rs <= R_SCAN;
+                    sdraw <= 5'd0;
+                    rs <= ttext ? R_ATTR : R_SCAN;        // Text mode has no sprites
                 end
             end
 
             // ------------------------------------------------ sprite scan
             // one SAT read per cycle; the Y byte arrives two cycles later
             R_SCAN: begin
-                if (!scan_end && sidx < 7'd64) begin
-                    vb_addr <= {1'b0, sat_base} + {8'd0, sidx};
+                if (!scan_end && sidx < scan_n) begin
+                    vb_addr <= tms ? ({1'b0, tsat} + {8'd0, sidx[4:0], 2'b00})
+                                   : ({1'b0, sat_base} + {8'd0, sidx});
                     sv_d1 <= 1'b1;
                     sidx <= sidx + 7'd1;
                 end
                 if (sv_d2 && !scan_end) begin
-                    if (!ext_height && vb_dout == 8'hD0) scan_end <= 1'b1;
-                    else if (on_line) begin
-                        if (scount >= spr_limit) begin
+                    if ((tms || !ext_height) && vb_dout == 8'hD0) scan_end <= 1'b1;
+                    else if (tms ? on_line_t : on_line) begin
+                        if (scount >= (tms ? tms_limit : spr_limit)) begin
                             if (sline < height) ovr_found <= 1'b1;
                             scan_end <= 1'b1;
                         end else begin
                             // stock overflow report while the limit is raised
-                            if (ovf_stock && scount == 5'd8 && sline < height) ovr_found <= 1'b1;
+                            if (!tms && ovf_stock && scount == 5'd8 && sline < height) ovr_found <= 1'b1;
                             ssel[scount[3:0]] <= sidx_d2[5:0];
                             scount <= scount + 5'd1;
                         end
                     end
                 end
-                if ((scan_end || sidx == 7'd64) && !sv_d1 && !sv_d2) begin
+                if ((scan_end || sidx == scan_n) && !sv_d1 && !sv_d2) begin
                     sdraw <= scount;
                     rsub <= 4'd0;
                     rs <= R_ATTR;
@@ -561,6 +669,22 @@ module ss_vdp (
             R_ATTR: begin
                 if (sdraw == 5'd0) begin
                     rs <= R_BG_START;
+                end else if (tms) begin
+                    case (rsub)
+                    4'd0: begin vb_addr <= {1'b0, tsat} + {8'd0, ssel[sdraw[3:0] - 4'd1][4:0], 2'b00}; rsub <= 4'd1; end
+                    4'd1: begin vb_addr <= vb_addr + 15'd1; rsub <= 4'd2; end
+                    4'd2: begin s_y <= vb_dout; vb_addr <= vb_addr + 15'd1; rsub <= 4'd3; end
+                    4'd3: begin s_x <= vb_dout; vb_addr <= vb_addr + 15'd1; rsub <= 4'd4; end
+                    4'd4: begin s_tile <= spr_tall ? (vb_dout & 8'hFC) : vb_dout; rsub <= 4'd5; end
+                    4'd5: begin
+                        s_attr <= vb_dout;
+                        rsub <= 4'd0;
+                        // a transparent sprite draws nothing and collides with nothing
+                        if (vb_dout[3:0] == 4'd0) sdraw <= sdraw - 5'd1;
+                        else rs <= R_PAT;
+                    end
+                    default: rsub <= 4'd0;
+                    endcase
                 end else begin
                     case (rsub)
                     4'd0: begin vb_addr <= {1'b0, sat_base} + {9'd0, ssel[sdraw[3:0] - 4'd1]}; rsub <= 4'd1; end
@@ -572,7 +696,16 @@ module ss_vdp (
                     endcase
                 end
             end
-            R_PAT: begin
+            R_PAT: if (tms) begin
+                // left column of the row, then the right (16x16)
+                case (rsub)
+                4'd0: begin vb_addr <= {1'b0, tspg} + {4'd0, s_tile, 3'd0} + {11'd0, trow}; rsub <= 4'd1; end
+                4'd1: begin vb_addr <= vb_addr + 15'd16; rsub <= 4'd2; end
+                4'd2: begin s_p0 <= vb_dout; rsub <= 4'd3; end
+                4'd3: begin s_p1 <= vb_dout; s_tx <= 6'd0; rsub <= 4'd0; rs <= R_DRAW; end
+                default: rsub <= 4'd0;
+                endcase
+            end else begin
                 case (rsub)
                 4'd0: begin
                     vb_addr <= {1'b0, spr_pbase} + {2'd0, s_tile, 5'd0} + {9'd0, spr_row_w, 2'b00};
@@ -582,12 +715,30 @@ module ss_vdp (
                 4'd2: begin s_p0 <= vb_dout; vb_addr <= vb_addr + 15'd1; rsub <= 4'd3; end
                 4'd3: begin s_p1 <= vb_dout; vb_addr <= vb_addr + 15'd1; rsub <= 4'd4; end
                 4'd4: begin s_p2 <= vb_dout; rsub <= 4'd5; end
-                4'd5: begin s_p3 <= vb_dout; s_tx <= 5'd0; rsub <= 4'd0; rs <= R_DRAW; end
+                4'd5: begin s_p3 <= vb_dout; s_tx <= 6'd0; rsub <= 4'd0; rs <= R_DRAW; end
                 default: rsub <= 4'd0;
                 endcase
             end
-            R_DRAW: begin
-                if (s_tx >= (spr_zoom ? 5'd16 : 5'd8) || spr_px > 11'sd255) begin
+            R_DRAW: if (tms) begin
+                // drawn from the last selected sprite to the first; a later write
+                // wins, so the lowest-numbered sprite ends on top
+                if (s_tx >= spr_h || tsx > 11'sd255) begin
+                    sdraw <= sdraw - 5'd1;
+                    rsub <= 4'd0;
+                    rs <= R_ATTR;
+                end else begin
+                    if (tsx >= 11'sd0 && tbit) begin
+                        if (spr_valid[tspr_wa] && !col_found) begin
+                            col_found <= 1'b1;
+                            col_x_found <= tsx[7:0];
+                        end
+                        spr_valid[tspr_wa] <= 1'b1;
+                        spr_pix[tspr_wa]   <= s_attr[3:0];
+                    end
+                    s_tx <= s_tx + 6'd1;
+                end
+            end else begin
+                if (s_tx >= (spr_zoom ? 6'd16 : 6'd8) || spr_px > 11'sd255) begin
                     sdraw <= sdraw - 5'd1;
                     rsub <= 4'd0;
                     rs <= R_ATTR;
@@ -600,7 +751,7 @@ module ss_vdp (
                         spr_valid[spr_wa] <= 1'b1;
                         spr_pix[spr_wa]   <= spr_c;
                     end
-                    s_tx <= s_tx + 5'd1;
+                    s_tx <= s_tx + 6'd1;
                 end
             end
 
@@ -615,7 +766,8 @@ module ss_vdp (
                 x <= 9'd0;
                 tc_valid <= 1'b0;
                 rsub <= 4'd0;
-                if (rdisp && rline < height) rs <= R_BG_PIX;
+                tcol <= 6'd0;
+                if (rdisp && rline < height) rs <= !tms ? R_BG_PIX : ttext ? R_TBORDER : R_TFETCH;
                 else begin cx <= 9'd0; rs <= R_COMP; end
             end
             R_BG_FETCH: begin
@@ -653,6 +805,38 @@ module ss_vdp (
                 end
             end
 
+            // ------------------------------------------------ TMS9918 background
+            R_TFETCH: begin
+                case (rsub)
+                4'd0: begin vb_addr <= {1'b0, t_name_a}; rsub <= 4'd1; end
+                4'd1: rsub <= 4'd2;
+                4'd2: begin tname <= vb_dout; vb_addr <= {1'b0, t_pat_a}; rsub <= 4'd3; end
+                4'd3: begin vb_addr <= {1'b0, t_col_a}; rsub <= 4'd4; end
+                4'd4: begin tpat <= vb_dout; rsub <= 4'd5; end
+                4'd5: begin tcolr <= vb_dout; tp <= 3'd0; rsub <= 4'd0; rs <= R_TPIX; end
+                default: rsub <= 4'd0;
+                endcase
+            end
+            R_TPIX: begin
+                bg_line[x[7:0]] <= {5'd0, tpixc};
+                x <= x + 9'd1;
+                tp <= tp + 3'd1;
+                if (tp == (ttext ? 3'd5 : 3'd7)) begin
+                    tcol <= tcol + 6'd1;
+                    if (tcol == (ttext ? 6'd39 : 6'd31)) begin
+                        if (ttext) rs <= R_TBORDER;
+                        else begin cx <= 9'd0; rs <= R_COMP; end
+                    end else rs <= R_TFETCH;
+                end
+            end
+            R_TBORDER: begin
+                // Text mode: the 8-pixel borders left and right show the backdrop
+                bg_line[x[7:0]] <= 9'd0;
+                x <= x + 9'd1;
+                if (x == 9'd7) rs <= R_TFETCH;
+                else if (x == 9'd255) begin cx <= 9'd0; rs <= R_COMP; end
+            end
+
             // ------------------------------------------------ composite
             R_COMP: begin
                 // stage 0: buffers are read at cx (bgc/spc next cycle)
@@ -664,7 +848,10 @@ module ss_vdp (
                 cx_d1 <= cx; cwr_d1 <= (cx <= 9'd255);
                 // stage 1: choose the CRAM entry
                 if (cwr_d1) begin
-                    if (!rdisp || rline >= height || (r0[5] && cx_d1 < 9'd8))
+                    tidx_d2 <= tsel;
+                    if (tms)
+                        cb_addr <= {4'b0000, tsel};               // CRAM entries 0-15 (Feature Enable C bit 0)
+                    else if (!rdisp || rline >= height || (r0[5] && cx_d1 < 9'd8))
                         cb_addr <= {4'b0001, r7[3:0]};
                     else if (sv_d && !bgc[8])
                         cb_addr <= {4'b0001, spc};
@@ -673,8 +860,8 @@ module ss_vdp (
                 end
                 cx_d2 <= cx_d1; cwr_d2 <= cwr_d1;
                 // stage 2: CRAM read; stage 3: write the output line
-                cx_d3 <= cx_d2; cwr_d3 <= cwr_d2;
-                if (cwr_d3) out_line[{rline[1:0], cx_d3[7:0]}] <= cb_dout;
+                cx_d3 <= cx_d2; cwr_d3 <= cwr_d2; tidx_d3 <= tidx_d2;
+                if (cwr_d3) out_line[{rline[1:0], cx_d3[7:0]}] <= (tms && !tms_cram) ? tms_rgb(tidx_d3, tms_true) : cb_dout;
                 if (cx > 9'd255 && !cwr_d1 && !cwr_d2 && !cwr_d3) rs <= R_DONE;
             end
             R_DONE: begin sb <= ~sb; comp_line <= rline; rs <= R_IDLE; end

@@ -215,6 +215,17 @@
         "value": 1
       },
       {
+        "name": "Boost: True TMS colours",
+        "id": 27,
+        "type": "check",
+        "enabled": true,
+        "persist": true,
+        "writeonly": true,
+        "address": "0x0134",
+        "defaultval": 1,
+        "value": 1
+      },
+      {
         "name": "Game Gear screen",
         "id": 26,
         "type": "list",

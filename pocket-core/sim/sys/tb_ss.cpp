@@ -9,6 +9,7 @@
 // usage: tb_ss rom mode(sms|gg|ss) frames outprefix [options] [dumpframes...]
 //   options: -pal  -gg1 (315-5535 timing; default for all modes)  -sms2 (SMS2 timing)
 //            enhancement layer: -spr16 -ovf -turbo N -vboost -afire -pstereo
+//                            -tmsapprox (TMS modes in the SMS approximation; true TMS colours by default)
 //                            (-turbo N: N = 1-4 for 125/150/175/200 %; sms/gg only)
 //            -holdc          hold C throughout (auto-fire checks)
 //            -wav FILE       48 kHz stereo capture of the audio output
@@ -50,7 +51,7 @@ int main(int argc, char** argv) {
     bool pal = false, sms2 = false, hold_c = false;
     long trace_n = 0; FILE* trace_f = nullptr;
     int lat = 4;
-    int ael_spr = 0, ael_ovf = 0, ael_turbo = 0, ael_vboost = 0, ael_afire = 0, ael_pst = 0;
+    int ael_spr = 0, ael_ovf = 0, ael_turbo = 0, ael_vboost = 0, ael_afire = 0, ael_pst = 0, ael_tmscol = 1;
     FILE* wav_f = nullptr; std::vector<int16_t> wav; uint64_t wav_acc = 0;
     std::set<long> dumps;
     for (int i = 5; i < argc; i++) {
@@ -66,6 +67,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-afire")) ael_afire = 1;
         else if (!strcmp(argv[i], "-holdc")) hold_c = true;
         else if (!strcmp(argv[i], "-pstereo")) ael_pst = 1;
+        else if (!strcmp(argv[i], "-tmsapprox")) ael_tmscol = 0;
         else if (!strcmp(argv[i], "-wav")) wav_f = fopen(argv[++i], "wb");
         else dumps.insert(atol(argv[i]));
     }
@@ -76,7 +78,7 @@ int main(int argc, char** argv) {
     t->mapper = 0; t->pal = pal; t->jp_region = 0; t->timing_gg = !sms2; t->sc_ram32 = 0;
     t->rom_mask = pow2 - 1; t->card_present = 0; t->card_mask = 0; t->gg_crop = (mode == "gg");
     t->ael_sprlimit = ael_spr; t->ael_startpause = 0; t->ael_ovf_stock = ael_ovf; t->ael_turbo = ael_turbo;
-    t->ael_vramboost = ael_vboost; t->ael_autofire = ael_afire; t->ael_pstereo = ael_pst;
+    t->ael_vramboost = ael_vboost; t->ael_autofire = ael_afire; t->ael_pstereo = ael_pst; t->ael_tmscol = ael_tmscol;
     t->pad1 = 0; t->pad2 = 0; t->pause_btn = 0; t->reset_btn = 0; t->kb_ghosting = 1;
     for (int i = 0; i < 3; i++) t->kb_keys[i] = 0;
     t->sv_clk = 0; t->sv_we = 0; t->sv_addr = 0; t->sv_din = 0;

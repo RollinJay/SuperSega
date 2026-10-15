@@ -40,4 +40,5 @@ pocket-core/sim/ref/*.o
 *.sav
 *.wav
 !pocket-core/roms/*.sms
+!pocket-core/roms/*.sg
 !pocket-core/roms/*.sav

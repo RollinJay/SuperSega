@@ -15,7 +15,7 @@ It is split in two:
 
 The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in either.
 
-**Terms.** The *enhancement layer* (AEL) is the machine's set of optional boosts for unmodified software, such as removing sprite flicker; all are off by default (§10). The *bus synchroniser* holds the CPU when turbo makes it faster than the video chip can accept data. *ESAT* (extended sprite attributes) and *unique-cell mode* (1024 tiles, one per screen cell) are Super Sega drawing features; the Technical Reference describes them.
+**Terms.** The *enhancement layer* (AEL) is the machine's set of optional boosts for unmodified software, such as removing sprite flicker; all but True TMS colours are off by default (§10). The *bus synchroniser* holds the CPU when turbo makes it faster than the video chip can accept data. *ESAT* (extended sprite attributes) and *unique-cell mode* (1024 tiles, one per screen cell) are Super Sega drawing features; the Technical Reference describes them.
 
 ## 2. What runs in milestone 1
 
@@ -23,11 +23,11 @@ The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in eit
 |---|---|
 | Master System and Game Gear software | runs in simulation; every frame compared so far matches Gearsystem (one title, Batman Returns: SMS frames 30–1500, GG frames 200–1500, GG within Gearsystem's colour rounding) |
 | Super Sega software | register banks, native/extended CRAM, the Feature Enable B height, 16 sprites per line, turbo and the bus synchroniser give the same picture as the emulator on a feature test ROM. VRAM expansion is CPU access only. ESAT, 16×16/magnified sprites, window/text layers, line tables and unique-cell mode are accepted but **not drawn yet** |
-| SG-1000 / SC-3000 software | loads and runs, but the TMS9918 picture modes are **not drawn yet**. The keyboard is implemented but not yet tested on the core |
+| SG-1000 / SC-3000 software | runs in simulation, in all four TMS9918 picture modes (Graphics I and II, Text, Multicolor) with their sprites. Four SG-1000 test ROMs give the same pictures as the emulator and Gearsystem (within the core's 4-bit-per-channel colour output for true TMS colours). A headerless ROM of 64 KB or less starts in SG-1000 mode; SC-3000 cartridges need System set to SC-3000. The keyboard is implemented but not yet tested on the core |
 | Super Sega system registers | work RAM banking (`$0A`); the math unit (`$0C`–`$10`), with divide as the emulator does it until Q7 is decided (Q-numbers are the machine's open questions, Technical Reference §17); multitap detection (`$16`); the Game Gear serial registers (`$01`–`$05`), which hold what is written. Slot select (`$09`) and the card bank (`$0B`) are decoded, but the platform loads no card, so the card slot is always empty |
 | Sound | PSG with stereo. **No FM yet**: the core reports no FM unit, so games that check for it play their PSG music. No PCM/wavetable |
 | Saves | cartridge RAM saved to the SD card (32 KB `.sav`). Save states would be a feature of the Pocket platform layer, not of the machine, and are not planned in this milestone |
-| Enhancement-layer boosts | sprite limit, stock overflow flag, Start = Pause, turbo, VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop — all off by default, switchable in the settings menu, acting only on Master System, Game Gear, SG-1000 and SC-3000 software |
+| Enhancement-layer boosts | sprite limit (Mode 4 and the TMS modes), stock overflow flag, Start = Pause, turbo, VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop — all off by default — and True TMS colours, on by default (Q11). All are switchable in the settings menu and act only on Master System, Game Gear, SG-1000 and SC-3000 software, except True TMS colours, which also acts on Super Sega software's TMS modes |
 | Not yet | FM, PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, the PAL CPU clock (§3), sleep |
 
 ## 3. Clocks
@@ -87,7 +87,7 @@ SG-1000/SC-3000 cartridge RAM is not battery-backed and is not saved.
 | Active picture | 256 pixels from pixel 64; Game Gear window 160 × 144 (lines 24–167, pixels 48–207) |
 | Latency | the VDP draws line N into a four-line ring buffer; it leaves during VDP line N + 2 |
 | Sync | VS: one pixel at the start of VDP line *height* + 2; HS: one pixel at pixel 4 of every line |
-| Colour | RGB444 from CRAM, widened to RGB888 by repeating each nibble |
+| Colour | RGB444 from CRAM (TMS modes: the 16-entry TMS table, or CRAM entries 0–15 with Feature Enable C bit 0), widened to RGB888 by repeating each nibble |
 
 After the last pixel of each line the platform sends the APF's end-of-line word that selects the scaler mode: `rgb[23:13]` = slot, `rgb[2:0]` = 000. The slot follows the number of lines in the previous frame:
 
@@ -140,7 +140,7 @@ Docked controllers 1 and 2 are the two pads. A docked USB keyboard (APF controll
 
 ## 10. Settings menu
 
-All settings are marked to persist, so the Pocket keeps them between sessions. Boosts are the machine's enhancement layer and default off.
+All settings are marked to persist, so the Pocket keeps them between sessions. Boosts are the machine's enhancement layer and default off, except True TMS colours (Q11).
 
 | Entry | Choices |
 |---|---|
@@ -149,25 +149,27 @@ All settings are marked to persist, so the Pocket keeps them between sessions. B
 | Region | Export, Japan |
 | Video | NTSC 60 Hz, PAL 50 Hz |
 | Mapper | Sega, Codemasters, Korean, Korean MSX |
-| Boost: Sprites/line | Stock (8), 16, 16 with the stock overflow flag |
+| Boost: Sprites/line | Stock (8; 4 in the TMS modes), 16, 16 with the stock overflow flag (a ninth sprite; Mode 4 only) |
 | Boost: CPU turbo | Off, 125 %, 150 %, 175 %, 200 % (stock software; Super Sega titles set their own) |
 | Boost: VRAM speed-up | on/off |
 | Boost: Start = Pause | on/off |
 | Boost: Auto-fire | on/off (the trigger is Y unless the player moves it) |
 | Boost: Pseudo-stereo | on/off |
+| Boost: True TMS colours | on (default) / off: the TMS9918's own colours, or the Master System's approximation |
 | Game Gear screen | LCD 160×144, Full 256×192 |
 | Keyboard ghosting | on (stock) / off |
 | SC-3000 cart RAM | 16 KB, 32 KB |
 
-The APF shows at most 16 entries; 14 are used. The two left are for the true-TMS-colour and legacy-sprite-limit boosts, which arrive with the TMS modes. Controls take none: they are the Pocket's own Controls menu (§9).
+The APF shows at most 16 entries; 15 are used. Controls take none: they are the Pocket's own Controls menu (§9).
 
 ## 11. Machine RTL notes
 
 - **CPU**: tv80 (MIT, a Verilog translation of T80) behind a wrapper that runs it on clock enables and reports the exact enable at which an I/O access happens. Two lines of tv80 are changed (documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`). With an external WAIT on an I/O cycle, tv80 lingered in T2 after WAIT was released, so the wrapper saw the access twice; this was found when the turbo bus synchroniser hung the CPU, and instruction timing without WAIT is unchanged. And SP resets to `$DFF0`, the value the machine hands to software (Technical Reference §1), instead of tv80's `$FFFF`.
 - **VDP timing** follows Gearsystem's per-cycle event table (315-5535 column, §16 of the Technical Reference). The renderer draws a line at its render event: next line's sprites first (so overflow and collision flags are ready on time), then this line's background, then the composite through CRAM into the output ring. All line buffers are block RAM with one write and one registered read port; the only flip-flop array is the 512 sprite-present bits used for collisions.
-- **Enhancement layer** inputs on `ss_top`: `ael_sprlimit`, `ael_ovf_stock`, `ael_startpause`, `ael_turbo`, `ael_vramboost`, `ael_autofire`, `ael_pstereo`; Game Gear uncrop is the `gg_crop` input. Every boost is ignored in Super Sega mode, where software sets those features itself.
+- **Enhancement layer** inputs on `ss_top`: `ael_sprlimit`, `ael_ovf_stock`, `ael_startpause`, `ael_turbo`, `ael_vramboost`, `ael_autofire`, `ael_pstereo`, `ael_tmscol`; Game Gear uncrop is the `gg_crop` input. Every boost but `ael_tmscol` is ignored in Super Sega mode, where software sets those features itself; True TMS colours also acts on Super Sega software's TMS modes (Q11).
 - **Debug unit**: not in this milestone. Its control port `$FB` is written in every mode and reads back in Super Sega mode; `$FC`/`$FD` read the status of a unit with no debug host attached (`$40`). In the stock modes `$FB`–`$FF` read as the controller mirror, as on the stock machine.
 - **FM**: `ss_top` has a parameter `FM_FITTED`, 0 in milestone 1. While it is 0 the `$F2` detection latch does not answer, so software sees a console without the FM unit. With an FM core it becomes 1 and the latch answers in Master System and Super Sega modes.
+- **TMS9918 modes** share the renderer's passes with Mode 4. The background pass fetches, for each column, the name, then the pattern and colour bytes (Multicolor: the colour block; Text: 40 columns of 6 pixels between 8-pixel borders) and writes the TMS colour, 0 for transparent. The sprite pass reads the 4-byte entries, keeps the first four on the line (or the boosted limit) and draws them last to first, so the lowest-numbered ends on top; transparent sprites are skipped. The composite looks the colour up in a 16-entry TMS table (true colours rounded to 4 bits per channel, or the Master System approximation), or in CRAM entries 0–15 when Feature Enable C bit 0 is set. The overflow and collision flags are set at the render event, as the emulator and Gearsystem do (Technical Reference §3).
 - **Collision flag**: set at Gearsystem's time (22 + X × 228 ÷ 256 into the line), or at the render event if that is earlier. Gearsystem drops collisions that fall after its render event; the hardware does not.
 - **Meeting timing at 53.7 MHz.** Everything runs on the one system clock, but the CPU only advances on its clock enable, at most once every 7 clocks (200 % turbo), and never on two clocks in a row. tv80's instruction decoding is too slow for one clock, so `pocket/core_constraints.sdc` gives two clocks to paths from the CPU to itself and to the blocks that take CPU data only on an enable edge (the I/O decode, the VDP, the PSG and the wrapper's bus strobes). The memory controller acts between enable edges, so instead of a relaxed constraint it gets a register stage: it sees the CPU's bus one clock late (§4). Two calculations that were one long chain of logic now take several clocks, with the result ready long before the CPU can read it: the SC-3000 keyboard's ghosting (16 clocks) and the math unit's divide (16 clocks; the CPU's next IN comes at least 82 clocks later).
 
@@ -177,12 +179,12 @@ Quartus Prime Lite 18.1 build of the whole core (machine, Pocket platform layer 
 
 | | Used | Of |
 |---|---|---|
-| Logic (ALMs) | 4,940 (27 %) | 18,480 |
-| Registers | 6,172 | |
+| Logic (ALMs) | 5,311 (29 %) | 18,480 |
+| Registers | 5,974 | |
 | Block RAM (M10K) | 200 (65 %) | 308 |
 | DSP blocks | 2 | 66 |
 
-Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 4.7 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
+Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 3.4 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
 
 `syn/` holds an earlier Yosys estimate of the machine alone (about 5,600 ALMs and 229 M10K blocks), useful only as a quick check where Quartus is not installed. An earlier version of the VDP read its line buffers combinationally, which turned them into 15,000 flip-flops; restructuring them as block RAM brought the flip-flop count down eightfold.
 
@@ -210,6 +212,7 @@ Everything below is simulation (Verilator 5.020, iverilog) except the last row, 
 | Verilator lint of `core_top` with the APF's `core_bridge_cmd` (project tree from `pocket/setup.sh`) | elaborates; only style warnings, the substantive ones in the template's own code |
 | Identifiers used before their declaration (Quartus rejects these under `default_nettype none`) | none after fixes in `ss_top`, `ss_save_unload` and `core_top` |
 | I/O unit (`sim/io/run.sh`): SC-3000 keyboard ghosting (4,000 random key patterns) and the math unit (20,000 operand pairs) through the real port writes and reads, against reference models | match; the test catches a closure that skips ghosting and a divide one step short |
+| TMS9918 modes: four SG-1000 test ROMs (`roms/tms_*.sg`: Graphics I, Graphics II with 16×16 sprites, Multicolor with magnified sprites, Text), frames 20 to 100, with sprite priority, collision and overflow flags, the early clock, a sprite wrapping at the top and a transparent sprite | RTL = emulator exactly in the Master System colours and within 8 levels in true TMS colours; also with the sprite boost; RTL = emulator = Gearsystem (Gearsystem in true colours, RTL within its 4-bit rounding). Through the Pocket platform layer a headerless TMS ROM starts in SG-1000 mode and matches the machine simulation |
 | Quartus build (`pocket/build_core.sh`) | compiles; timing met at every corner (§12) |
 
 Not yet done: anything on hardware.
@@ -221,12 +224,11 @@ Not yet done: anything on hardware.
 ## 15. Next milestones
 
 1. **Hardware bring-up**: first boot on a Pocket (the user's hands-on testing, guided by `TESTING.md`). The Quartus build and timing are done (§12).
-2. **TMS9918 modes** (SG-1000, SC-3000), with the true-colour and sprite-limit boosts. Whether these modes raise line interrupts on Super Sega is open (Q15).
-3. **FM**: a YM2413 core. Candidates are jtopll (GPL-3) and IKAOPLL; the choice depends on the licence decision below.
-4. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
-5. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
-6. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
-7. Cartridge wait state at 200 % (Q12), PAL clock, a proper audio decimation filter.
+2. **FM**: a YM2413 core. Candidates are jtopll (GPL-3) and IKAOPLL; the choice depends on the licence decision below.
+3. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
+4. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
+5. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
+6. Cartridge wait state at 200 % (Q12), PAL clock, a proper audio decimation filter.
 
 ## 16. Decisions needed
 
@@ -235,4 +237,4 @@ Not yet done: anything on hardware.
 | Licence for the Super Sega RTL | Decides which FM core can be used (a GPL-3 core makes the combined core GPL-3) |
 | FM core | jtopll vs IKAOPLL (or writing one) |
 | Core and author name | `SuperSega.SuperSega` and the `supersega` platform are placeholders |
-| Math unit divide (Q7), mirror range (Q1), TMS-colour default (Q11), TMS-mode line interrupts (Q15), register layouts written only in the emulator (Q16), Feature Enable B height in the TMS modes (Q17) | Machine questions that block parts of later milestones |
+| Math unit divide (Q7), mirror range (Q1), TMS-mode line interrupts (Q15), register layouts written only in the emulator (Q16), Feature Enable B height in the TMS modes (Q17) | Machine questions that block parts of later milestones |

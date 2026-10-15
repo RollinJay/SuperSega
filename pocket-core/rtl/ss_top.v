@@ -33,7 +33,9 @@ module ss_top #(
     input  wire        gg_crop,
     // Enhancement layer (machine profile, AEL). All off = stock behaviour. Each
     // boost acts only on software in the stock modes (SG-1000, SC-3000, Master
-    // System, Game Gear); Super Sega software sets these features itself.
+    // System, Game Gear); Super Sega software sets these features itself. The
+    // exception is ael_tmscol, on by default, which also acts on Super Sega
+    // software's TMS modes (open question Q11, decided).
     input  wire        ael_sprlimit,   // 16 sprites per line in Mode 4
     input  wire        ael_ovf_stock,  // ... but the overflow flag still reports the 9th sprite
     input  wire        ael_startpause, // Start raises Pause (SMS, SG-1000, SC-3000)
@@ -41,6 +43,8 @@ module ss_top #(
     input  wire        ael_vramboost,  // no VDP access wait at turbo
     input  wire        ael_autofire,   // C held repeats button 2 (stock modes)
     input  wire        ael_pstereo,    // pseudo-stereo PSG until software writes $06 (stock modes)
+    input  wire        ael_tmscol,     // true TMS9918 colours in the TMS modes, not the SMS approximation
+                                       // (on by default; it also acts on Super Sega software's TMS modes)
 
     // ROM bus
     output wire        rom_req,
@@ -240,7 +244,7 @@ module ss_top #(
         .clk(clk_sys), .rst(reset), .ce_cyc(ce_base),
         .gg_mode(mode == 3'd1), .ss_mode(ss), .pal(pal), .timing_gg(timing_gg),
         // boosts are for stock software: Super Sega software sets these itself
-        .no_spr_limit(ael_sprlimit && !ss), .ovf_stock(ael_ovf_stock && !ss),
+        .no_spr_limit(ael_sprlimit && !ss), .ovf_stock(ael_ovf_stock && !ss), .tms_true(ael_tmscol),
         .io_rd(vdp_rd), .io_wr(vdp_wr), .io_port(a[7:0]), .io_din(cpu_dout), .io_dout(vdp_rdata),
         .th_latch(th_latch), .int_n(int_n),
         .ce_pix(ce_pix), .vid_rgb(vid_bgr), .vid_de(vid_de), .vid_hs(vid_hs), .vid_vs(vid_vs),

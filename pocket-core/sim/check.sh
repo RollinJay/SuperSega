@@ -9,10 +9,14 @@
 #      take several clocks in the core, match reference models
 #   4. sim/sys: the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and Super Sega feature test
-#      ROMs, and for the VDP-height and I/O test ROMs in Game Gear mode
+#      ROMs, for the VDP-height and I/O test ROMs in Game Gear mode, and for the
+#      four TMS9918-mode ROMs on the SG-1000 (Master System colours exactly, true
+#      TMS colours within the core's 4-bit rounding, and with the sprite boost)
 #   5. sim/pocket: through the Pocket platform layer the frames match the machine
-#      simulation, Pocket B reads as button 1 in Super Sega mode, and the save
-#      slot reads back the loaded file with only the bytes the ROM writes changed
+#      simulation (a headerless TMS ROM is detected as SG-1000 and drawn in true
+#      TMS colours, the default), Pocket B reads as button 1 in Super Sega mode,
+#      and the save slot reads back the loaded file with only the bytes the ROM
+#      writes changed
 #
 # usage: sim/check.sh [workdir]     (workdir defaults to a new temporary directory)
 # Needs what README.md lists for the simulations: Verilator 5, iverilog,
@@ -52,6 +56,7 @@ grep -v '^PASS$\|finish called' "$W/io.log"
 step "4. machine simulation against the emulator (sim/sys)"
 build sys
 # name | ROM | mode | frames to run | frames to compare | tb_ss options | js_dump environment
+#      | tolerance (empty: exact; the core's true TMS colours are rounded to 4 bits per channel)
 SYS_CASES=(
     "v192|vdp192.sms|sms|40|10 37||"
     "v224|vdp224.sms|sms|40|10 37||"
@@ -63,10 +68,16 @@ SYS_CASES=(
     "ssfeat|ssfeat.sms|ss|12|10 11||"
     "gg192|vdp192.sms|gg|11|10||"
     "ggports|ports.sms|gg|11|10||"
+    "tmsg1|tms_g1.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
+    "tmsg2|tms_g2.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
+    "tmsmc|tms_mc.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
+    "tmstxt|tms_txt.sg|sg|61|20 60|-tmsapprox|AEL=tmscol=0"
+    "tmsspr|tms_g1.sg|sg|47|46|-tmsapprox -spr16|AEL=tmscol=0,sprlimit"
+    "tmstrue|tms_g2.sg|sg|47|46|||8"
 )
 run_sys_case() {
-    local name rom mode n dumps topt jenv
-    IFS='|' read -r name rom mode n dumps topt jenv <<< "$1"
+    local name rom mode n dumps topt jenv tol
+    IFS='|' read -r name rom mode n dumps topt jenv tol <<< "$1"
     # shellcheck disable=SC2086  # option and frame lists are meant to split
     (cd "$PC/sim/sys" && ./obj/tb_ss "../../roms/$rom" "$mode" "$n" "$W/sys/$name" $topt $dumps) \
         > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
@@ -78,10 +89,10 @@ export -f run_sys_case
 printf '%s\0' "${SYS_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_sys_case "$1"' _
 fail=0
 for c in "${SYS_CASES[@]}"; do
-    IFS='|' read -r name rom mode n dumps topt jenv <<< "$c"
+    IFS='|' read -r name rom mode n dumps topt jenv tol <<< "$c"
     for f in $dumps; do
         printf '%-9s %-11s %-4s frame %-3s RTL vs emulator: ' "$name" "$rom" "$mode" "$f"
-        python3 tools/ppmdiff.py "$W/sys/${name}_$f.ppm" "$W/js/${name}_$f.ppm" || fail=1
+        python3 tools/ppmdiff.py "$W/sys/${name}_$f.ppm" "$W/js/${name}_$f.ppm" ${tol:+--tol "$tol"} || fail=1
     done
 done
 [ "$fail" = 0 ]
@@ -95,6 +106,7 @@ POCKET_CASES=(
     "pggports|ports.sms|11|-system 2 10"
     "pbutton|ports.sms|11|-system 3 -hold 5 10"
     "psave|save.sms|10|-save ../../roms/save_in.sav"
+    "ptms|tms_g2.sg|47|46"
 )
 run_pocket_case() {
     local name rom n args extra=()
@@ -109,7 +121,7 @@ run_pocket_case() {
 export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
 fail=0
-for pair in "p224_37 v224_37" "pss_10 ssfeat_10" "pss_11 ssfeat_11" "pggports_10 ggports_10"; do
+for pair in "p224_37 v224_37" "pss_10 ssfeat_10" "pss_11 ssfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46"; do
     set -- $pair
     printf '%-12s Pocket vs machine simulation: ' "$1"
     python3 tools/ppmdiff.py "$W/pocket/$1.ppm" "$W/sys/$2.ppm" || fail=1

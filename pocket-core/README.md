@@ -8,7 +8,7 @@ rtl/                  the machine (platform-independent)
   ss_z80.v            tv80 wrapper: clock enables, exact I/O sample point
   ss_mem.v            memory map, mappers, work RAM, cartridge RAM
   ss_io.v             port decode, Game Gear and Super Sega registers, pads, SK-1100 PPI
-  ss_vdp.v            Mode 4 VDP with the Super Sega register file
+  ss_vdp.v            VDP: Mode 4 and the TMS9918 modes, with the Super Sega register file
   ss_psg.v            SN76489 (Sega) with stereo panning
   ss_dpram.v          inferred dual-port block RAM
   third_party/tv80/   Z80 core (MIT); two local changes, see LOCAL_CHANGES.md
@@ -39,10 +39,10 @@ roms/                 the generated test ROMs (homebrew, made by tools/mk_testro
 
 Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check.sh` run the emulator in `../emulator/`), Python 3 with numpy and Pillow, and Yosys 0.33 for the resource estimate.
 
-`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
+`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear, the four TMS9918 modes), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
 
 ```sh
-python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, ssfeat, ports test ROMs
+python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, ssfeat, ports, tms_* test ROMs
 python3 tools/check_core_json.py             # input.json/interact.json against platform limits and the RTL
 (cd sim/z80 && ./run.sh)                     # Z80 wrapper timing against the emulator's Z80
 (cd sim/io && ./run.sh)                      # keyboard ghosting and math unit against reference models
@@ -51,7 +51,9 @@ cd sim/sys && ./build.sh && mkdir -p out
 ./obj/tb_ss ../../roms/vdp224.sms sms 40 out/v224 10 37        # frames 10 and 37 as PPM
 ./obj/tb_ss game.sms sms 600 out/g -pal 200 500                 # PAL
 ./obj/tb_ss game.gg gg 600 out/gg 200 500                       # Game Gear
+./obj/tb_ss ../../roms/tms_g2.sg sg 47 out/t 46                 # SG-1000 (sc: SC-3000)
 #   boosts: -spr16 -ovf -turbo N (N = 1-4: 125/150/175/200 %; sms/gg only) -vboost -afire -pstereo
+#           -tmsapprox (TMS modes in the Master System approximation; true TMS colours by default)
 #   hold C: -holdc ; audio: -wav file.wav
 ./obj/tb_ss ../../roms/ports.sms ss 11 out/io 10                # I/O decode test; decode with:
 python3 ../../tools/read_ports_ppm.py out/io_10.ppm [other.ppm]
