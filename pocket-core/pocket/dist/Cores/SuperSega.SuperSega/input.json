@@ -7,17 +7,17 @@
         "mappings": [
           {
             "id": 0,
-            "name": "Button 1 (SS: B)",
-            "key": "pad_btn_b"
-          },
-          {
-            "id": 1,
-            "name": "Button 2 (SS: C)",
+            "name": "A (button 1)",
             "key": "pad_btn_a"
           },
           {
+            "id": 1,
+            "name": "B (button 2)",
+            "key": "pad_btn_b"
+          },
+          {
             "id": 2,
-            "name": "Auto-fire (SS: A)",
+            "name": "C (auto-fire)",
             "key": "pad_btn_y"
           },
           {

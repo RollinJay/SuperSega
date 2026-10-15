@@ -546,13 +546,13 @@ p['open_questions'] = [
                 'rhythm outputs, whose mix on the console\'s board is not known either; the Pocket core uses '
                 'IKAOPLL\'s default weights (2 and 3), and the emulator has no rhythm instruments. What balance '
                 'should the machine have?')},
-    {'id': 'Q21', 'topic': 'FM register writes at turbo', 'status': 'open',
+    {'id': 'Q21', 'topic': 'FM register writes at turbo', 'status': 'resolved',
      'detail': ('The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before '
                 'it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo '
-                'steps above 100 % they can come too close. On the Pocket core a test driver that leaves the chip '
-                'little more than the minimum at 100 % played no FM at 200 %, while roms/fm.sms, which leaves '
-                'more, still played correctly. The emulator takes FM writes at once and is unaffected. The bus synchroniser '
-                'holds the CPU for the VDP; should it also hold the CPU on $F0/$F1 until the FM chip is ready?')},
+                'steps above 100 % they can come too close: on the Pocket core a test driver that leaves the chip '
+                'little more than the minimum at 100 % played no FM at 200 %. Decided by the owner in October '
+                '2026: at turbo the bus synchroniser holds the CPU on a write to $F0/$F1 until the chip can take '
+                'it, as it does for the VDP (cpu.turbo.fm_writes). Both implementations do this.')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
@@ -636,11 +636,35 @@ change(LATER + 'The four $F2 states written out (audio.fm.audio_control.write): 
 
 fm['write_timing'] = ('After an address write to $F0 the chip needs 12 master-clock (base) cycles before the data; '
                       'after a data write to $F1, 84 before the next write (YM2413 Application Manual). Software '
-                      'leaves this time itself; at turbo it may not (open question Q21).')
-p['cpu']['turbo']['fm_writes'] = ('OPEN (open question Q21): the FM chip stays at 1x, so at turbo software can '
-                                  'write its registers faster than it accepts them (audio.fm.write_timing).')
-change(LATER + 'Open question Q21 added: FM register writes at turbo, which can come faster than the YM2413 '
-       'accepts them (cpu.turbo.fm_writes). audio.fm.write_timing gives the chip\'s write timing.')
+                      'leaves this time itself at 100 %; at turbo the bus synchroniser holds the CPU until it has '
+                      'passed (cpu.turbo.fm_writes).')
+p['cpu']['turbo']['fm_writes'] = ('The FM chip stays at 1x. At turbo steps above 100 % the bus synchroniser holds '
+                                  'the CPU on a write to $F0/$F1 until 12 base cycles have passed since an address '
+                                  'write, or 84 since a data write (audio.fm.write_timing), so software written '
+                                  'for 100 % keeps its FM music. Open question Q21, decided by the owner.')
+change(LATER + 'Open question Q21 added and decided by the owner: FM register writes at turbo could come faster '
+       'than the YM2413 accepts them, so the bus synchroniser holds the CPU on $F0/$F1 until the chip is ready '
+       '(cpu.turbo.fm_writes). audio.fm.write_timing gives the chip\'s write timing.')
+
+p['input']['stock_mapping'] = (
+    'In the stock modes (Master System, Game Gear, SG-1000, SC-3000) the console presents its Mega Drive pad as '
+    'that machine\'s controller: A is button 1 (TL), B is button 2 (TR), and Start is the Game Gear\'s Start, or '
+    'the Pause button on the Master System, SG-1000 and SC-3000 (enhancement_layer start_pause, on at power-on). '
+    'C is used only by the auto-fire boost. A Mega Drive pad plugged into a Master System gives B and C as '
+    'buttons 1 and 2; the console uses A and B so that the pad\'s first two buttons are the old consoles\' two. '
+    'Super Sega software reads the pad as a Mega Drive pad (controller). Decided by the owner, October 2026.')
+p['enhancement_layer']['default'] = (
+    'Every boost but two is off at power-on, so the machine behaves as stock hardware: True TMS colours starts on, '
+    'so SG-1000 and SC-3000 software shows the colours it was made for (Q11), and Start = Pause starts on, because '
+    'the console\'s pad has no Pause button (input.stock_mapping). Each one is switched independently: on the '
+    'console from the boot menu, in the emulator from its AEL panel, on the Analogue Pocket core from the core '
+    'settings (Interact) menu.')
+p['enhancement_layer']['boosts']['start_pause'] = ('Start on the pad raises the Pause NMI (SMS, SG-1000, SC-3000 '
+                                                   'modes). On at power-on.')
+change(LATER + 'Stock-mode controller mapping decided by the owner (input.stock_mapping): the Mega Drive pad\'s A '
+       'is button 1 and B is button 2, and Start is the Game Gear\'s Start or, through Start = Pause, the Pause '
+       'button; Start = Pause is now on at power-on, the second boost that starts on. The documents said only '
+       'that the pad gives B and C with TH high, as a Mega Drive pad does; the emulator already used A and B.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

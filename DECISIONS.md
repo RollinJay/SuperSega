@@ -6,7 +6,6 @@ The owner answered these on 12 October 2026. They are **decided but not yet appl
 
 | Topic | Decision |
 |---|---|
-| Licence | MIT for the project's own files. Third-party code keeps its own licence. |
 | Name | Rename the project to **MasterDrive**, with a README that describes what the machine is and does: every capability, which console each comes from, and what combining them makes possible. This replaces the earlier choice, MasterGear, which is the name of Marat Fayzullin's long-running Master System / Game Gear emulator. A search in October 2026 found no emulator called MasterDrive; the name is used by NTI's MasterDrive (Windows virtual-drive software), a MasterDrive driving game and a Brazilian storage brand, and krikzz's Master EverDrive flash cartridge is a similar-sounding retro Sega product. An unrelated FPGA console project from Spain, shown in 2024, already calls itself SuperSega. Applying the rename changes the Pocket core's folder name (`Cores/SuperSega.SuperSega/`), so a test install has to be copied again. |
 
 ## Machine (open questions in the Technical Reference, §17)

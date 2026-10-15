@@ -11,7 +11,7 @@ Two ideas run through everything below:
 - **Stock behaviour.** At power-on every extension is off. The machine then behaves exactly like the original hardware — a Master System with the FM sound unit fitted, or a Game Gear, SG-1000 or SC-3000, depending on the mode it boots in.
 - **Opt-in extensions.** New software turns extensions on through three *Feature Enable* registers (A, B and C, described in §10). Old software never touches them, so it can never see them.
 
-A third, separate idea is the **enhancement layer** (AEL, §15): optional boosts for *old* software, such as removing sprite flicker. They are user settings, all off by default except True TMS colours (§15).
+A third, separate idea is the **enhancement layer** (AEL, §15): optional boosts for *old* software, such as removing sprite flicker. They are user settings, all off by default except True TMS colours and Start = Pause (§15).
 
 **Notation.** VDP registers come in four banks of 16 (§10). "R7" alone means bank 0 register 7, a stock register; "bank1 R3" means register 3 of bank 1, one of the Super Sega additions. The banks above 0 can only be reached once software sets **XRB** (extended register banks, Feature Enable A bit 5). **TH** and **TR** are two pins of each controller port (§6): TR is button 2, TH the light-gun and multiplexing line.
 
@@ -51,7 +51,7 @@ An `OUTI` loop takes 16 cycles, so streaming to video memory during vertical bla
 
 Cartridge ROM adds its own wait: a 250 ns ROM is fast enough up to 175 % and needs one wait state per access at 200 % (open question Q12 covers the Pocket core).
 
-The FM chip also needs time between register writes (§7), and software written for 100 % can write it too fast at turbo. Whether the synchroniser should hold the CPU for it too is open question Q21.
+The FM chip also needs time between register writes (§7): 12 base cycles after an address write, 84 after a data write. Software written for 100 % leaves that time itself, but at turbo it would write too soon, so the synchroniser also holds the CPU on a write to `$F0`/`$F1` until that time has passed (open question Q21, decided October 2026).
 
 ---
 
@@ -193,6 +193,8 @@ The Extended Sprite Attribute Table (ESAT, 2 bytes per sprite) adds per-sprite f
 
 Reset reads 1 when the button is absent. CONT reads 1 on 8-bit hardware and 0 on a Mega Drive. Super Sega uses Mega Drive 3-button pads, multiplexed by the TH line: TH high gives Up Down Left Right B C, TH low gives Up Down 0 0 A Start.
 
+**The pad in the stock modes.** In the Master System, Game Gear, SG-1000 and SC-3000 modes the console presents the pad as that machine's own controller: A is button 1 (TL), B is button 2 (TR), and Start is the Game Gear's Start, or the Pause button on the Master System, SG-1000 and SC-3000 (the Start = Pause setting, on at power-on, §15). C is used only by the auto-fire boost. A Mega Drive pad plugged into a Master System would give B and C as buttons 1 and 2; the console uses A and B so that the pad's first two buttons are the old consoles' two (decided by the owner, October 2026). Super Sega software reads the pad as a Mega Drive pad.
+
 ### Port `$3F` — I/O control
 
 | Bits | Function |
@@ -257,7 +259,7 @@ The register layouts of PCM control (`$08` write) and the wavetable are not writ
 
 **`$F2` (FM control).** Writes select which sound chips are heard, in bits 1–0: 0 the PSG only (the power-on state), 1 the FM chip only, 2 neither, 3 both (MAME, `sms_m.cpp`; Gearsystem does the same for Japanese consoles). Software that never writes `$F2` therefore keeps its PSG sound. Reads return bits 1–0 of the last value written (bits 7–5 carry a sync counter on a Japanese Master System; Super Sega returns 0 there). Japanese software disables the I/O chip (`$3E` bit 2) before reading `$F2`, so `$F2` must answer even then — that is how FM detection works.
 
-**FM write timing.** After writing a register address to `$F0` the chip needs 12 master-clock cycles (base cycles) before the data, and after writing data to `$F1` 84 before the next write (YM2413 Application Manual). Software leaves that time itself; at turbo it may not (open question Q21, §1).
+**FM write timing.** After writing a register address to `$F0` the chip needs 12 master-clock cycles (base cycles) before the data, and after writing data to `$F1` 84 before the next write (YM2413 Application Manual). Software leaves that time itself at 100 %; at turbo the bus synchroniser holds the CPU until it has passed (§1).
 
 **FM and PSG balance.** How loud the FM chip is beside the PSG on the original is not known (open question Q20). Both implementations make one FM channel at full volume peak at half a PSG channel at full volume.
 
@@ -476,7 +478,7 @@ An export Master System BIOS rejects any cartridge whose region is not 4, so reg
 
 ## 15. Enhancement Layer
 
-Optional boosts for unmodified software (the Auto-Enhancement Layer, AEL), applied by intercepting the fixed hardware interfaces rather than patching the ROM. **All but one are off at power-on**, so the machine behaves as stock hardware until the user switches one on. The exception is True TMS colours, which starts on so SG-1000 and SC-3000 software shows the colours it was made for (Q11). On the console they live in the boot menu, in the emulator in its AEL panel, and on the Analogue Pocket in the core settings menu.
+Optional boosts for unmodified software (the Auto-Enhancement Layer, AEL), applied by intercepting the fixed hardware interfaces rather than patching the ROM. **All but two are off at power-on**, so the machine behaves as stock hardware until the user switches one on. The exceptions are True TMS colours, which starts on so SG-1000 and SC-3000 software shows the colours it was made for (Q11), and Start = Pause, which starts on because the console's pad has no Pause button (§6). On the console they live in the boot menu, in the emulator in its AEL panel, and on the Analogue Pocket in the core settings menu.
 
 Explicit software intent always wins: every boost acts only on software running in the stock modes (SG-1000, SC-3000, Master System, Game Gear). Super Sega software sets these features itself and reads C as a button of its own. Pseudo-stereo also stops as soon as software writes `$06`. The TMS-colour boost is the one exception: it also acts on Super Sega software's TMS modes (Q11).
 
@@ -484,7 +486,7 @@ Explicit software intent always wins: every boost acts only on software running 
 |---|---|
 | Sprite limit | 16 sprites per line instead of 8 in Mode 4, and instead of 4 in the TMS modes — removes most flicker |
 | Stock overflow flag | with the raised limit, status bit 6 is still set by a ninth sprite, for software that reads it as logic. Mode 4 only: in the TMS modes it has no effect |
-| Start = Pause | Start on the pad raises the Pause NMI (Master System, SG-1000, SC-3000 modes) |
+| Start = Pause | Start on the pad raises the Pause NMI (Master System, SG-1000, SC-3000 modes). On at power-on |
 | Turbo | a turbo step for stock software; Super Sega software sets its own through `$F3` |
 | VRAM speed-up | no VDP access wait while turbo is active |
 | Auto-fire | while C is held, button 2 repeats (toggles every two frames: 15 Hz); releasing C leaves button 2 as the pad has it |
@@ -561,7 +563,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q18 | Two details of the sprite flags in the TMS modes (§3). What status bits 4–0 read: the TMS9918A puts the number of the fifth sprite there, Gearsystem does that whenever a TMS mode is selected (not on the Game Gear) and reads `$1F` in Mode 4, the Pocket core reads `$1F` and the emulator 0 in every mode. And whether a transparent (colour 0) sprite takes part in collisions: the TMS9918A Data Manual says it does; Gearsystem and both implementations leave it out | open |
 | Q19 | Several TMS mode bits set at once (§3). The implementations take M2 (Graphics II) first, then M1 (Text), then M3 (Multicolor); Gearsystem takes M1, then M3, then M2; on the TMS9918A such combinations give undocumented hybrid modes. Which picture should the machine show? | open |
 | Q20 | The balance of FM and PSG (§7). On the original Japanese Master System the two chips are mixed in analogue, and how loud each is is not known: MAME gives both the same gain, Gearsystem lowers the PSG to 0.8 while both play, and neither cites a measurement. Both implementations make one FM channel at full volume peak at half a PSG channel at full volume. The chip also has separate melody and rhythm outputs, whose mix on the console's board is not known either; the Pocket core uses IKAOPLL's default weights (2 and 3), and the emulator has no rhythm instruments. What balance should the machine have? | open |
-| Q21 | FM register writes at turbo (§1). The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo steps above 100 % they can come too close. On the Pocket core a test driver that leaves the chip little more than the minimum at 100 % played no FM at 200 %, while the FM test ROM, which leaves more, still played correctly. The emulator takes FM writes at once and is unaffected. The bus synchroniser holds the CPU for the VDP; should it also hold the CPU on `$F0`/`$F1` until the FM chip is ready? | open |
+| Q21 | FM register writes at turbo (§1). The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo steps above 100 % they can come too close: on the Pocket core a test driver that leaves the chip little more than the minimum at 100 % played no FM at 200 %. Should the bus synchroniser hold the CPU on `$F0`/`$F1` until the FM chip is ready, as it does for the VDP? | resolved (owner, October 2026): yes (§1). Both implementations do this, and the test driver now plays at 200 % |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in Super Sega mode, the only mode in which those registers act (§10); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
@@ -598,7 +600,7 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |
 | ESAT, 16×16 and magnified sprites, window/text layers, line tables, unique-cell | yes | registers only, not drawn |
 | TMS9918 modes (SG-1000, SC-3000) | yes | yes |
-| YM2413 FM | yes (approximate synthesis: no rhythm instruments; the user instrument, `$00`–`$07`, is not read; no envelopes, so a note holds its level until key-off; volume steps are linear, not the chip's 3 dB; the built-in instruments only resemble the chip's) | yes (IKAOPLL, a YM2413 core reverse-engineered from die shots of the chip); at turbo, writes can come too fast for it (Q21) |
+| YM2413 FM | yes (approximate synthesis: no rhythm instruments; the user instrument, `$00`–`$07`, is not read; no envelopes, so a note holds its level until key-off; volume steps are linear, not the chip's 3 dB; the built-in instruments only resemble the chip's) | yes (IKAOPLL, a YM2413 core reverse-engineered from die shots of the chip) |
 | PCM, wavetable, DMA engine | yes | not yet |
 | SF-7000, floppy, debug unit | yes | not yet |
 | PAL CPU clock (3.546893 MHz, §1) | not yet: the CPU runs at the NTSC clock in PAL too, so a PAL frame lasts 1/50.16 s of machine time instead of 1/49.70 s | the same |

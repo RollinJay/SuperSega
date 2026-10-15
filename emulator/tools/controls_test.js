@@ -36,12 +36,15 @@ const rom = path.resolve(process.argv[3]);
   await page.keyboard.up('z'); await frames(5);
   ok('keyboard A released', await page.evaluate(() => m.btn.a) === 0);
   // default pad mapping
-  await setBtn(0, true); await frames(5);
-  ok('pad bottom face -> A', await page.evaluate(() => m.btn.a) === 1);
+  await setBtn(1, true); await frames(5);
+  ok('pad right face -> A', await page.evaluate(() => m.btn.a) === 1);
   await page.keyboard.down('x'); await frames(5);
   ok('pad A and key B together', await page.evaluate(() => m.btn.a === 1 && m.btn.b === 1));
-  await page.keyboard.up('x'); await setBtn(0, false); await frames(5);
+  await page.keyboard.up('x'); await setBtn(1, false); await frames(5);
   ok('both released', await page.evaluate(() => m.btn.a === 0 && m.btn.b === 0));
+  await setBtn(0, true); await frames(5);
+  ok('pad bottom face -> B', await page.evaluate(() => m.btn.b === 1 && m.btn.a === 0));
+  await setBtn(0, false); await frames(5);
   await setBtn(3, true); await frames(5);
   ok('default C includes top face', await page.evaluate(() => m.btn.c) === 1);
   await setBtn(3, false);
@@ -61,13 +64,13 @@ const rom = path.resolve(process.argv[3]);
   ok('binding stored', (await page.evaluate(() => localStorage.getItem('ss_padbinds') || '')).includes('"a":[5]'));
   await setBtn(5, true); await frames(5);
   ok('R1 now presses A', await page.evaluate(() => m.btn.a) === 1);
-  await setBtn(5, false); await setBtn(0, true); await frames(5);
-  ok('bottom face no longer A', await page.evaluate(() => m.btn.a) === 0);
-  await setBtn(0, false);
+  await setBtn(5, false); await setBtn(1, true); await frames(5);
+  ok('right face no longer A', await page.evaluate(() => m.btn.a) === 0);
+  await setBtn(1, false);
   // Esc cancels a pad binding
   await page.evaluate(() => document.querySelector('button[data-padbind="b"]').click());
   await page.keyboard.press('Escape'); await setBtn(6, true); await frames(5); await setBtn(6, false);
-  ok('Esc cancels', await page.evaluate(() => padBindWait === null && JSON.stringify(PADBIND.b) === '[1]'));
+  ok('Esc cancels', await page.evaluate(() => padBindWait === null && JSON.stringify(PADBIND.b) === '[0]'));
   // keyboard rebinding still works
   await page.evaluate(() => document.querySelector('button[data-bind="c"]').click());
   await page.keyboard.press('v'); await frames(2);
@@ -82,7 +85,7 @@ const rom = path.resolve(process.argv[3]);
   ok('defaults stored', await page.evaluate(() => localStorage.getItem('ss_padbinds') === JSON.stringify(DEFPAD)));
   // pad unplugged: its buttons release
   await page.setInputFiles('#cart', rom); await page.waitForTimeout(200);
-  await page.click('#run'); await setBtn(0, true); await frames(5);
+  await page.click('#run'); await setBtn(1, true); await frames(5);
   ok('pad A held before unplug', await page.evaluate(() => m.btn.a) === 1);
   await page.evaluate(() => { window.__padOn = false; }); await frames(5);
   ok('unplugged pad releases its buttons', await page.evaluate(() => m.btn.a) === 0);

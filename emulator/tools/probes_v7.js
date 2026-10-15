@@ -487,6 +487,31 @@ probe('M46', '$F2 bits 1-0 select the sound chips heard: 0 PSG only (power-on), 
            note: `reset, $F2=0-3: ${st.join(' ')}; Game Gear $F2=1: ${gg}` };
 });
 
+probe('M47', 'At turbo the bus synchroniser holds an FM write until the chip can take it: 12 base cycles after an address write, 84 after a data write; no hold at 100 % (Technical Reference §1; YM2413 Application Manual)', () => {
+  const held = (turbo, gapT) => {                                  // two FM writes gapT CPU T-states apart
+    const m = sms('sms'); m.ael.turbo = turbo; m.lastFm = null;
+    m.out(0xF0, 0x10); m.cpu.tc += gapT;
+    const before = m.cpu.tc; m.out(0xF1, 0x4A); const afterData = m.cpu.tc - before;
+    m.cpu.tc += gapT; const b2 = m.cpu.tc; m.out(0xF0, 0x20); const afterAddr = m.cpu.tc - b2;
+    return [afterData, afterAddr];
+  };
+  const [d2, a2] = held(2, 4);                                     // 200 %: 2 base cycles after each write
+  const [d1, a1] = held(1, 4);                                     // 100 %
+  return { ok: d2 === 2 * (12 - 2) && a2 === 2 * (84 - 2) && d1 === 0 && a1 === 0,
+           note: `200 %: data held ${d2} T, next address ${a2} T; 100 %: ${d1}, ${a1}` };
+});
+
+probe('M48', 'The pad in the stock modes: A is button 1, B is button 2, and Start = Pause is on at power-on, so Start pauses a Master System game without any setting (Technical Reference §6, §15)', () => {
+  const m = sms('sms'); let n = 0;
+  const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
+  const on = m.ael.startpause === true;
+  m.btn.a = 1; const a = m.inp(0xDC); m.btn.a = 0; m.btn.b = 1; const b = m.inp(0xDC); m.btn.b = 0;
+  m.btn.start = 1; m.runFrame(); m.runFrame();
+  const hex = v => '$' + v.toString(16).toUpperCase().padStart(2, '0');
+  return { ok: on && n === 1 && (a & 0x30) === 0x20 && (b & 0x30) === 0x10,
+           note: `Start = Pause ${on ? 'on' : 'off'} at power-on, NMIs ${n}; A -> $DC ${hex(a)}, B -> ${hex(b)}` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

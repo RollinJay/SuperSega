@@ -98,6 +98,7 @@ module ss_top #(
 );
     localparam M_SS = 3'd5;
     wire ss = (mode == M_SS);
+    wire fm_here = FM_FITTED != 0 && (mode == 3'd0 || ss);   // the FM unit: SMS and Super Sega modes
 
     // ------------------------------------------------------------ clock enables
     reg  [3:0]  div15;
@@ -223,7 +224,7 @@ module ss_top #(
 
     ss_io u_io (
         .clk(clk_sys), .rst(reset), .mode(mode), .jp_region(jp_region),
-        .fm_present(FM_FITTED != 0 && (mode == 3'd0 || ss)),   // SMS and Super Sega modes only
+        .fm_present(fm_here),
         .io_sample(io_sample), .io_write(io_write), .port(a[7:0]), .wdata(cpu_dout), .rdata(io_rdata),
         .vdp_rdata(vdp_rdata), .vdp_rd(vdp_rd), .vdp_wr(vdp_wr), .vdp_fea(vdp_fea), .vdp_fec(vdp_fec),
         .th_latch(th_latch),
@@ -260,12 +261,31 @@ module ss_top #(
     reg  [5:0] since_vdp;
     wire [5:0] slot = vdp_active ? 6'd29 : 6'd16;
     wire       vdp_port_cycle = io_cycle && (a[7:6] == 2'b10);
-    assign sync_wait_n = !(turbo_on && !(ael_vramboost && !ss) && vdp_port_cycle && since_vdp < slot);
+    wire       vdp_hold = turbo_on && !(ael_vramboost && !ss) && vdp_port_cycle && since_vdp < slot;
     always @(posedge clk_sys) begin
         if (reset) since_vdp <= 6'd63;
         else if (io_sample && a[7:6] == 2'b10) since_vdp <= 6'd0;
         else if (ce_base && since_vdp != 6'd63) since_vdp <= since_vdp + 6'd1;
     end
+    // The FM chip takes a write only 12 base cycles after an address write and
+    // 84 after a data write (YM2413 Application Manual). Software leaves that
+    // time at 100 %; at turbo the synchroniser holds an FM write until then
+    // (Technical Reference §1).
+    wire       fm_port = fm_here && (a[7:1] == 7'b1111000);           // $F0, $F1
+    reg  [6:0] since_fm;
+    reg        fm_last_data;
+    wire       fm_hold = turbo_on && io_cycle && io_write && fm_port &&
+                         since_fm < (fm_last_data ? 7'd84 : 7'd12);
+    always @(posedge clk_sys) begin
+        if (reset) begin
+            since_fm <= 7'd127;
+            fm_last_data <= 1'b0;
+        end else if (io_sample && io_write && fm_port) begin
+            since_fm <= 7'd0;
+            fm_last_data <= a[0];
+        end else if (ce_base && since_fm != 7'd127) since_fm <= since_fm + 7'd1;
+    end
+    assign sync_wait_n = !(vdp_hold || fm_hold);
 
     // ------------------------------------------------------------ audio
     wire signed [15:0] psg_l, psg_r;
@@ -279,10 +299,9 @@ module ss_top #(
     // 72 cycles (49.7 kHz). Each OUT to $F0/$F1 becomes a chip-select and write
     // pulse 32 clocks long, so IKAOPLL's write-request input, which samples on
     // master-clock edges, catches it; the CPU's next OUT comes at least 82
-    // clocks later (11 T-states at 200 % turbo). Software must still leave the
-    // chip's own time between writes, 12 master-clock cycles after an address
-    // and 84 after data (YM2413 Application Manual); at turbo it may not (open
-    // question Q21).
+    // clocks later (11 T-states at 200 % turbo). The chip's own time between
+    // writes (12 master-clock cycles after an address, 84 after data) is left
+    // by software at 100 % and by the bus synchroniser at turbo.
     reg        fm_a0 = 1'b0;
     reg  [7:0] fm_d = 8'd0;
     reg  [5:0] fm_wcnt = 6'd0;
@@ -327,11 +346,11 @@ module ss_top #(
     // modes $F2 is never written, so the PSG alone plays. Level: one FM channel
     // at full volume peaks at half a PSG channel at full volume (x8 on the
     // chip's output, about +-510 a channel), as in the emulator; the original's
-    // balance is not known (open question Q20). FM is mono, on both sides. The
-    // sum is limited to 16 bits; 20 bits hold any sum before that. Four PSG
-    // channels at full volume already reach the 16-bit limit, so loud FM chords,
-    // or both chips loud at once, are clipped; the emulator's full scale is 6.25
-    // PSG channels, so it clips less.
+    // balance is not known (open question Q20). FM is mono, on both sides.
+    // Headroom: the sum (20 bits hold any sum) is scaled by 41/64, -3.9 dB, so
+    // the 16-bit full scale is 6.25 PSG channels at full volume, as in the
+    // emulator. Nine FM channels at full volume then fit; both chips at full
+    // volume together can still reach the limit, where the output saturates.
     wire               psg_on = (fm_ctl == 2'd0) || (fm_ctl == 2'd3);
     wire               fm_on  = fm_ctl[0];
     wire signed [19:0] fm_s   = fm_on ? {{4{fm_out[15]}}, fm_out} <<< 3 : 20'sd0;
@@ -340,9 +359,14 @@ module ss_top #(
     function [15:0] sat16(input signed [19:0] v);
         sat16 = (v > 20'sd32767) ? 16'h7FFF : (v < -20'sd32768) ? 16'h8000 : v[15:0];
     endfunction
+    reg  signed [19:0] mix_l_r = 20'sd0, mix_r_r = 20'sd0;
+    wire signed [25:0] head_l = mix_l_r * 26'sd41;      // x 41/64 below (>>> 6)
+    wire signed [25:0] head_r = mix_r_r * 26'sd41;
     always @(posedge clk_sys) begin
-        audio_l <= sat16(mix_l);
-        audio_r <= sat16(mix_r);
+        mix_l_r <= mix_l;
+        mix_r_r <= mix_r;
+        audio_l <= sat16(head_l[25:6]);
+        audio_r <= sat16(head_r[25:6]);
     end
 
 endmodule

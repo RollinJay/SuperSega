@@ -7,17 +7,16 @@ Master System and Super Sega modes, Sega, Codemasters and Korean mappers,
 cartridge saves. Super Sega titles run, but ESAT, the window and text
 layers, line tables and unique-cell mode are not drawn yet.
 
-ROMs go in /Assets/supersega/common/. Pocket B = button 1, A = button 2,
-Y = auto-fire for button 2 (with that boost on), Select = Pause. In Super
-Sega (SS) mode the pad is a Mega Drive pad: B = B, A = C, Y = A, Start =
-Start, so buttons 1 and 2 stay on B and A. To move any of these to other
-buttons, use Core Settings > Controls. A docked USB keyboard is the
-SC-3000 SK-1100 keyboard.
+ROMs go in /Assets/supersega/common/. The Pocket's buttons are the
+console's Mega Drive pad: A = A, B = B, Y = C, Start = Start. Master System
+and Game Gear games read A as button 1 and B as button 2; Start pauses
+(Game Gear: Start), Select = Pause too, and Y is auto-fire for button 2
+when that boost is on. To move any of these to other buttons, use Core
+Settings > Controls. A docked USB keyboard is the SC-3000 SK-1100 keyboard.
 
 Boost options in the core settings are the machine's enhancement layer. All
-but True TMS colours are off by default, which is stock behaviour, and they
+but True TMS colours and Start = Pause are off by default, and they
 act only on Master System, Game Gear, SG-1000 and SC-3000 software (True
-TMS colours also acts on Super Sega titles' TMS9918 modes). Leave CPU turbo
-off for games with FM music: at turbo, FM writes can be lost.
+TMS colours also acts on Super Sega titles' TMS9918 modes).
 
-Third-party licences: the LICENSE-*.txt files in this folder.
+Licence: MIT (LICENSE.txt). Third-party licences: the LICENSE-*.txt files.

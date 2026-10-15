@@ -189,7 +189,7 @@
         "persist": true,
         "writeonly": true,
         "address": "0x0118",
-        "defaultval": 0,
+        "defaultval": 1,
         "value": 1
       },
       {

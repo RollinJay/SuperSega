@@ -4,7 +4,7 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, fm.sms, ssfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, fm_tight.sms, ssfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -267,7 +267,7 @@ FM_STEPS = [(10, 1), (20, 3), (30, 2), (40, 0)]     # (frame, $F2 value) after t
 FM_SLOW = [(60, 1), (120, 3), (180, 2), (240, 0)]   # then, repeated: one second per state
 
 
-def build_fm():
+def build_fm(tight=False):
     """FM check (YM2413). Reads $F2 back after writing 1 (stored at $C010), then
     plays the PSG tone of tone.sms (440.4 Hz) and, on FM channel 0, a sine:
     the user instrument with the modulator at its lowest level (TL 63), no
@@ -278,7 +278,14 @@ def build_fm():
     a capture of those 50 frames. After them the ROM repeats the four states for
     a second each (FM_SLOW: PSG only, FM only, both, neither), slow enough to
     judge by ear on a Pocket. Register writes keep the chip's waits (12
-    master-clock cycles after an address, 84 after data)."""
+    master-clock cycles after an address, 84 after data).
+
+    tight=True (fm_tight.sms) writes the registers the way a sound driver does,
+    with little to spare at 100 %: 15 T-states from the address write to the
+    data write and about 150 from data to the next address. At 200 % turbo that
+    is 7.5 and 75 base cycles, too soon for the chip, so the FM sound is heard
+    only if the bus synchroniser holds the CPU for the FM chip (run it with the
+    turbo boost)."""
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0)             # DI ; IM 1 ; LD SP,$DFF0
@@ -310,8 +317,13 @@ def build_fm():
     a.db(0x18); a.rel('slow')
     # fmw: B (register, value) pairs from HL to $F0/$F1, with the chip's waits
     a.label('fmw')
-    a.db(0x7E, 0xD3, 0xF0, 0x23, 0xC5, 0x06, 0x02); a.label('fw1'); a.db(0x10); a.rel('fw1'); a.db(0xC1)
-    a.db(0x7E, 0xD3, 0xF1, 0x23, 0xC5, 0x06, 0x08); a.label('fw2'); a.db(0x10); a.rel('fw2'); a.db(0xC1)
+    if tight:
+        a.db(0x7E, 0x23, 0x4E, 0x23)                       # LD A,(HL) ; INC HL ; LD C,(HL) ; INC HL
+        a.db(0xD3, 0xF0, 0x79, 0xD3, 0xF1)                 # OUT ($F0),A ; LD A,C ; OUT ($F1),A
+        a.db(0xC5, 0x06, 0x06); a.label('fw1'); a.db(0x10); a.rel('fw1'); a.db(0xC1)
+    else:
+        a.db(0x7E, 0xD3, 0xF0, 0x23, 0xC5, 0x06, 0x02); a.label('fw1'); a.db(0x10); a.rel('fw1'); a.db(0xC1)
+        a.db(0x7E, 0xD3, 0xF1, 0x23, 0xC5, 0x06, 0x08); a.label('fw2'); a.db(0x10); a.rel('fw2'); a.db(0xC1)
     a.db(0x10); a.rel('fmw')
     a.db(0xC9)
     a.label('psg')
@@ -668,7 +680,8 @@ if __name__ == '__main__':
     open(os.path.join(out, 'tone.sms'), 'wb').write(build_tone())
     print('wrote tone.sms')
     open(os.path.join(out, 'fm.sms'), 'wb').write(build_fm())
-    print('wrote fm.sms')
+    open(os.path.join(out, 'fm_tight.sms'), 'wb').write(build_fm(tight=True))
+    print('wrote fm.sms, fm_tight.sms')
     open(os.path.join(out, 'ssfeat.sms'), 'wb').write(build_ss())
     print('wrote ssfeat.sms')
     open(os.path.join(out, 'ports.sms'), 'wb').write(build_ports())

@@ -95,7 +95,7 @@ module ss_pocket (
     reg [1:0] set_mapper   = 2'd0;
     reg       set_ggfull   = 1'b0;
     reg [1:0] set_spr      = 2'd0;
-    reg       set_startp   = 1'b0;
+    reg       set_startp   = 1'b1;     // Start = Pause: on at power-on (the pad has no Pause button)
     reg [2:0] set_turbo    = 3'd0;
     reg       set_vboost   = 1'b0;
     reg       set_afire    = 1'b0;
@@ -420,15 +420,14 @@ module ss_pocket (
     // =====================================================================
     // controllers
     // =====================================================================
-    // Machine pad bits, stock modes: {start, C, button 2, button 1, R, L, D, U}
-    // (C only drives the auto-fire boost). Super Sega mode, Mega Drive pad:
-    // {start, C, B, A, R, L, D, U}; with TH high the machine reads B as
-    // button 1 and C as button 2.
-    // Pocket buttons keep buttons 1 and 2 in the same place in every mode:
-    //   stock:      B = button 1, A = button 2, Y = C (auto-fire trigger)
-    //   Super Sega: B = B (button 1), A = C (button 2), Y = A
-    // Start = Start (Game Gear, Super Sega) and Pause on SMS/SG/SC (setting),
-    // Select = Pause.
+    // The Pocket's buttons are the console's Mega Drive pad in every mode:
+    // A (east) = A, B (south) = B, Y (west) = C, Start = Start. Machine pad bits
+    // {start, C, B, A, R, L, D, U}. In the stock modes the console reads A as
+    // button 1 and B as button 2 (Technical Reference §6), so the same bits are
+    // {start, C, button 2, button 1, ...} there; C only drives the auto-fire
+    // boost. In Super Sega mode software reads the pad as a Mega Drive pad (with
+    // TH high, B and C are TL and TR). Start is the Game Gear's Start, and Pause
+    // on SMS/SG/SC with the Start = Pause setting (on by default); Select = Pause.
     reg [31:0] k1_s1, k1, k2_s1, k2, k3_s1, k3, j3_s1, j3;
     reg [15:0] t3_s1, t3;
     always @(posedge clk_sys) begin
@@ -441,16 +440,14 @@ module ss_pocket (
     // APF key bits: 0-3 up/down/left/right, 4 A, 5 B, 6 X, 7 Y, 14 Select, 15 Start
     function [7:0] padmap;
         input [31:0] k;
-        input        ssmode;
         padmap = (k[31:28] == 4'h4 || k[31:28] == 4'h5) ? 8'h00 :     // keyboard / mouse
-                 ssmode ? {k[15], k[4], k[5], k[7], k[3], k[2], k[1], k[0]}
-                        : {k[15], k[7], k[4], k[5], k[3], k[2], k[1], k[0]};
+                 {k[15], k[7], k[5], k[4], k[3], k[2], k[1], k[0]};
     endfunction
     wire kb_dock = (k3[31:28] == 4'h4);
     reg  f12;
     always @(posedge clk_sys) begin
-        pad1 <= padmap(k1, mode == 3'd5);
-        pad2 <= padmap(k2, mode == 3'd5);
+        pad1 <= padmap(k1);
+        pad2 <= padmap(k2);
         // Select = the console's Pause button (NMI). The Game Gear has none, so
         // not in GG mode. Start -> Pause is the machine's enhancement-layer option.
         pause_btn <= (k1[14] || f12) && (mode != 3'd1);

@@ -36,6 +36,7 @@ cp "$HERE/../TESTING.md" "$SD/Cores/$CORE/"
 # The bitstream contains third-party code whose licences (BSD-style, MIT) ask
 # for their notices to go with it: IKAOPLL, tv80 (its notice is the header of
 # its source files) and T80, which tv80 translates, and agg23's utilities
+cp "$HERE/../../LICENSE" "$SD/Cores/$CORE/LICENSE.txt"          # the core itself (MIT)
 cp "$HERE/../rtl/third_party/ikaopll/LICENSE" "$SD/Cores/$CORE/LICENSE-IKAOPLL.txt"
 sed -n '2,23s#^// \{0,1\}##p' "$HERE/../rtl/third_party/tv80/tv80_mcode.v" > "$SD/Cores/$CORE/LICENSE-tv80.txt"
 cp "$HERE/../rtl/third_party/tv80/LICENSE-T80" "$SD/Cores/$CORE/LICENSE-T80.txt"

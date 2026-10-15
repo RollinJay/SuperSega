@@ -20,6 +20,7 @@ The zip includes the repository's own test ROMs (no commercial code), in `test-r
 | `spr12.sms` | twelve sprites on one row: with Boost: Sprites/line at Stock (8) only 8 show, at 16 all 12 (the backdrop colour shows the sprite-overflow flag) |
 | `tone.sms` | a steady 440 Hz tone (A4) |
 | `fm.sms` | a black screen and, after a quick burst of sound in the first second, a cycle of one second each, repeated: a 440 Hz buzz alone (the PSG), a purer tone of about 1 kHz alone (the FM chip), both together, then silence. If the 1 kHz tone never sounds, FM is not working |
+| `fm_tight.sms` | the same sounds as `fm.sms`, from a driver that writes the FM chip as fast as it allows. With Boost: CPU turbo at 200% it should still sound the same: the console holds the CPU until the FM chip can take each write |
 | `ports.sms` | rows of port numbers and the values read from them; holding a button changes the `$DC` row |
 | `ssfeat.sms` | a coloured pattern drawn with the Super Sega extensions (it starts in Super Sega mode by itself) |
 | `save.sms` | writes to cartridge RAM; a `.sav` file appears after you quit |
@@ -34,8 +35,8 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - **SG-1000 games:** all four picture modes and their sprites (checked with the repository's test ROMs, not yet with commercial games), in the TMS9918's own colours (Core Settings, "Boost: True TMS colours", on by default; off gives the Master System's approximation).
 - **Game Gear screen:** the 160 × 144 LCD window by default, or the full 256 × 192 picture (Core Settings, "Game Gear screen").
 - **Saves:** cartridge RAM is saved to the SD card (`.sav`).
-- **Controls:** B = button 1, A = button 2, Start, Select = Pause (no Pause on the Game Gear). Move any of them in Core Settings > Controls.
-- **Settings:** system, region, NTSC/PAL, mapper, and the boosts (more sprites per line to stop flicker, CPU turbo, auto-fire, pseudo-stereo, Start = Pause), all off by default except True TMS colours.
+- **Controls:** A = button 1, B = button 2, Start = the Game Gear's Start or the Master System's Pause, Select = Pause too (no Pause on the Game Gear). In Super Sega mode the buttons are the Mega Drive pad's: A, B, and C on Y. Move any of them in Core Settings > Controls.
+- **Settings:** system, region, NTSC/PAL, mapper, and the boosts (more sprites per line to stop flicker, CPU turbo, auto-fire, pseudo-stereo, Start = Pause), all off by default except True TMS colours and Start = Pause.
 - **Super Sega titles:** register banks, extended colours, the taller screen modes, 16 sprites per line and turbo.
 
 ## Needs a setting first
@@ -51,7 +52,6 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - PCM and wavetable sound, the DMA engine, the SF-7000 and floppy disks, cards, cassettes, the mouse and trackball, multitaps, the link cable.
 - Pocket save states (Memories) and sleep.
 - PAL games run very slightly fast (50.16 frames a second instead of 49.70).
-- **FM music with Boost: CPU turbo:** FM music can go silent or play wrong notes, because with a faster CPU the game can write to the FM chip faster than the chip accepts (open question Q21 in the Technical Reference). Leave Boost: CPU turbo Off for games with FM music.
 
 ## Unknown until it runs
 

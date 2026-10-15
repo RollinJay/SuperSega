@@ -527,11 +527,13 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
         <button id="bindreset">Reset to defaults</button>
         <span class="pill" id="padstat">no gamepad</span>
       </div>
-      <div class="note">Gamepads are detected automatically. By default the face buttons give A/B/C, Start is Start,
-      Select is Pause, and the d-pad and left stick give directions; the left stick always moves the d-pad.
-      Bindings are kept in this browser. In the Master System, Game Gear, SG-1000, SC-3000 and SF-7000 modes A is
-      button 1 and B is button 2 (C is auto-fire when that boost is on); in Super Sega mode B is button 1, C is button 2,
-      and A and Start are read through the TH multiplex, as on a Mega Drive pad. Pause does nothing in Game Gear mode.</div>
+      <div class="note">Gamepads are detected automatically. By default the right face button is A, the bottom one B,
+      the left and top ones C, Start is Start, Select is Pause, and the d-pad and left stick give directions; the left
+      stick always moves the d-pad. Bindings are kept in this browser. In the Master System, Game Gear, SG-1000,
+      SC-3000 and SF-7000 modes A is button 1 and B is button 2 (C is auto-fire when that boost is on), and Start is the
+      Game Gear's Start or, with the Start = Pause boost (on by default), Pause; in Super Sega mode B is button 1,
+      C is button 2, and A and Start are read through the TH multiplex, as on a Mega Drive pad. Pause does nothing
+      in Game Gear mode.</div>
     </div>
 
     <div class="pane" id="p-saves">
@@ -1614,7 +1616,7 @@ class Machine{
     this.waveSel=0; this.waveIdx=0;
     this.vdp.reset(); this.psg.reset(); this.fm.reset(); this.cpu.reset();
     this.budget={workEnd:0,run:0,lastBf:0,synced:false,drops:0,used:0,halted:false};
-    this.ael=this.ael||{sprlimit:false,ovf:false,tmscol:true,ggwide:false,startpause:false,autofire:false,stereo:false,vramboost:false,turbo:1};
+    this.ael=this.ael||{sprlimit:false,ovf:false,tmscol:true,ggwide:false,startpause:true,autofire:false,stereo:false,vramboost:false,turbo:1};   /* two boosts start on: True TMS colours and Start = Pause (the pad has no Pause button) */
     this.psg.pstereo=!!this.ael.stereo&&this.mode!=='ss';
     this.aelStats={extraSpr:0,ovfHidden:0};
     this.afTick=0;
@@ -2000,7 +2002,7 @@ class Machine{
           this.dbg.checkWatch(code===3?'cram':'vram',addr,v,this.frameNo,this.vdp.line); } }
       if(p&1) this.vdp.ctrlW(v); else this.vdp.dataW(v); return; }
     if(p===0xF2){ if(this.fmPresent) this.fmReg=v; return; }
-    if(p===0xF0||p===0xF1){ if(this.fmPresent) this.fm.write(p-0xF0,v); return; }
+    if(p===0xF0||p===0xF1){ if(this.fmPresent){ this.fmSync(p); this.fm.write(p-0xF0,v); } return; }
     if(p===0xFD){                                // SDSC debug console data
       if(v===10||v===13){ if(this.dbg&&this.dbg.length){log('[SDSC] '+this.dbg); this.dbg='';} }
       else if(v>=32&&v<127){ this.dbg=(this.dbg||'')+String.fromCharCode(v);
@@ -2049,6 +2051,24 @@ class Machine{
     return V.line>=0 && V.line<V.height();
   }
   vdpSlot(){ return this.vdpActive()? 29 : 16; }   // official figures
+  /* At turbo the bus synchroniser also holds an FM write until the chip can
+     take it: 12 base cycles after an address write, 84 after a data write
+     (YM2413 Application Manual; Technical Reference section 1). At 100 % the
+     software leaves that time itself. */
+  fmSync(p){
+    const mult=this.cpuMult(), now=this.cpu.tc/mult;
+    let waitCpu=0;
+    if(mult>1 && this.lastFm!=null){
+      const need=this.lastFmData?84:12, gap=now-this.lastFm;
+      if(gap>=0 && gap<need){
+        waitCpu=Math.ceil((need-gap)*mult);
+        this.cpu.tc+=waitCpu; this.syncWait=(this.syncWait||0)+waitCpu;
+        if(this.fpga) this.fpga.did('busSync');
+      }
+    }
+    this.lastFm=this.cpu.tc/mult; this.lastFmData=(p===0xF1);
+    return waitCpu;
+  }
   busSync(){
     const mult=this.cpuMult();
     if(mult<=1) return 0;                       /* at base clock the CPU cannot outrun it */
@@ -2296,7 +2316,7 @@ class Machine{
     return fb;
   }
   runFrame(){
-    this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0; this.lastVdpAccess=0;
+    this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0; this.lastVdpAccess=0; this.lastFm=null;
     if(this.fpga){ this.fpga.did('clockGen'); this.fpga.did('composite');
       this.fpga.did('asicBg'); this.fpga.did('asicInt'); this.fpga.did('shadowVdp'); }
     const r = this.dual? this.runFrameDual() : this.runFrameCore();
@@ -3423,7 +3443,7 @@ rebuildRev();
 /* Gamepad bindings: button indices of the browser's standard mapping. A binding
    may list several buttons; rebinding replaces the list with the one pressed.
    The left stick always drives the d-pad as well. */
-const DEFPAD={up:[12],down:[13],left:[14],right:[15],a:[0],b:[1],c:[2,3],start:[9],pause:[8]};
+const DEFPAD={up:[12],down:[13],left:[14],right:[15],a:[1],b:[0],c:[2,3],start:[9],pause:[8]};   /* east = A (button 1), south = B (button 2), as on the Pocket */
 const PADNAMES=['bottom face','right face','left face','top face','L1','R1','L2','R2','Select',
   'Start','L3','R3','d-pad up','d-pad down','d-pad left','d-pad right','Home'];
 const padName=i=>PADNAMES[i]||('button '+i);

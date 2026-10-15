@@ -22,10 +22,11 @@ FRAME = 262 * 228 / 3579545.0          # NTSC frame, seconds
 PSG_HZ = 3579545 / (32 * 254)          # tone period $0FE
 FM_HZ = 330 * 2 ** 5 * (3579545 / 72) / 2 ** 19   # F-number 330, block 5
 STEPS = [0, 1, 3, 2, 0]                # $F2 for frames 0-9, 10-19, ...
+HEADROOM = 41 / 64                    # the mixer's scale before the 16-bit output
 # fundamental of a full-volume PSG square (+-8191): 4/pi x 8191
-PSG_FULL = 4 / np.pi * 8191
+PSG_FULL = 4 / np.pi * 8191 * HEADROOM
 # one FM channel at full volume: +-510 from the chip, x8 in the mixer
-FM_FULL = 510 * 8
+FM_FULL = 510 * 8 * HEADROOM
 
 
 def tone(x, f, rate):
