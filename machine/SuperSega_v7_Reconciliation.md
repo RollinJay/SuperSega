@@ -26,7 +26,8 @@ Work on Super Sega has happened in several chats: the machine design itself, the
 | Lab composite and merge report | Analysis views |
 | Debug tab, self-test, FPGA-job counters | The app's own diagnostics (distinct from the machine's debug unit at $FB–$FF, which *is* a machine feature) |
 | Display filters | Presentation |
-| FM dual-run capture | Analysis tool |
+| Sound Lab: PSG → FM and FM → PSG translation, channel layers, the mixer | Listening and porting tools; they can sound both chips whatever `$F2` selects (M46) |
+| FM dual-run capture (in the Sound Lab) | Analysis tool |
 | Save states | The console has none; the Pocket core has none in this milestone |
 
 **Rule for disagreements.** Where the emulator and the machine documents disagree, the documents win and the emulator is fixed — unless the documents themselves are wrong about stock hardware, in which case both documents are corrected (and any implementation that followed them) and the change is recorded in `v7_changes`.
@@ -112,7 +113,7 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 
 - **Event timing.** The emulator resolves VDP events at line boundaries and performs I/O at the start of an instruction. The Pocket core follows Gearsystem's per-cycle event table (status flags, line interrupt, scroll latch at fixed cycle offsets; I/O 10 T-states into IN/OUT). Pictures match; mid-line raster tricks can differ. A refactor of the emulator's frame loop is the follow-up.
 - **H counter.** The emulator returns a live count that starts at 0 at its line start; the machine latches the counter when TH rises and starts the line at `$E9` (Gearsystem's model, which the Pocket core follows). Light-gun software can therefore read different values on the two.
-- **FM sound.** The emulator's FM synthesis is approximate (no rhythm instruments; the melody instruments only resemble the chip's), while the Pocket core's FM is IKAOPLL, which follows the YM2413 itself. The same music sounds different on the two.
+- **FM sound.** The emulator's FM synthesis is approximate (no rhythm instruments, no user instrument, no envelopes, linear volume steps; the built-in instruments only resemble the chip's), while the Pocket core's FM is IKAOPLL, which follows the YM2413 itself. The same music sounds different on the two.
 - **FM writes at turbo.** The emulator takes FM register writes at once; the Pocket core's FM chip needs time between them, as the original does, so software written for 100 % can lose FM writes at turbo on the core but not in the emulator (open question Q21).
 - **Not in the Pocket core yet** (Technical Reference §19): PCM and wavetable sound, the DMA engine, the SF-7000 and its floppy controller, the debug unit, the mouse and trackball, a card in the card slot (the Pocket platform loads none), and the drawing side of ESAT, 16×16 and magnified sprites, the window and text layers, line tables and unique-cell mode (their registers are there).
 - **Status bits 4–0** read 0 in the emulator and `$1F` in the Pocket core (open question Q18).
@@ -176,7 +177,7 @@ Fixes to the emulator's model of the machine. M38–M46 each have a probe in `em
 
 Also, without a probe because no program can see it: the Z80 now resets to interrupt mode 0, as the profile's `cpu.reset_state` says; the emulator takes every interrupt at `$0038` whatever the mode.
 
-Application changes: gamepad buttons can be rebound in the Controls tab like keys, and keyboard, touch and gamepad input are merged each frame (a connected gamepad used to release keys held on the keyboard). The Pause key and the gamepad's Pause do nothing in Game Gear mode, which has no Pause button. `profile_crosscheck.py` now reads every value it checks from the profile, and the claims about behaviour the profile describes in words check that the code for it is present (49 claims; before, most values were written into the script, so a wrong profile still passed), `probes_v7.js` exits with status 1 when a probe fails, and `controls_test.js` checks the bindings in a browser.
+Application changes: save states keep `$F2`, so a state saved during FM music plays FM again when loaded (older states load with the power-on setting, PSG only); gamepad buttons can be rebound in the Controls tab like keys, and keyboard, touch and gamepad input are merged each frame (a connected gamepad used to release keys held on the keyboard). The Pause key and the gamepad's Pause do nothing in Game Gear mode, which has no Pause button. `profile_crosscheck.py` now reads every value it checks from the profile, and the claims about behaviour the profile describes in words check that the code for it is present (49 claims; before, most values were written into the script, so a wrong profile still passed), `probes_v7.js` exits with status 1 when a probe fails, and `controls_test.js` checks the bindings in a browser.
 
 ### Pocket core
 

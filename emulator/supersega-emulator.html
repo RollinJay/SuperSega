@@ -2451,7 +2451,7 @@ function saveState(m){
     psg:{tone:P.tone.slice(),vol:P.vol.slice(),noise:P.noise,lat:P.lat,type:P.type,
       cnt:P.cnt.slice(),out:P.out.slice(),sr:P.sr,stereo:P.stereo,stereoSet:P.stereoSet||0},
     ram:b64(m.ram), page:m.page.slice(), ramSel:m.ramSel, memCtl:m.memCtl, ioCtl:m.ioCtl,
-    slotSel:m.slotSel, cardBank:m.cardBank, wramBank:m.wramBank, turbo:m.turbo,
+    slotSel:m.slotSel, cardBank:m.cardBank, wramBank:m.wramBank, turbo:m.turbo, fmReg:m.fmReg,
     ggReg:Array.from(m.ggReg), dma:Array.from(m.dma), mathRes:m.mathRes,
     wram:b64(m.wram), eiPend:C.eiPend, lineCarry:m.lineCarry||0,
     hsLatch:V.hsLatch, vsLatch:V.vsLatch};
@@ -2460,6 +2460,7 @@ function loadState(m,st){
   if(!st||st.v!==1) throw new Error('bad state');
   const C=m.cpu,V=m.vdp,P=m.psg;
   m.mode=st.mode;
+  m.fmPresent=(m.mode==='sms'||m.mode==='ss'); m.fmReg=st.fmReg??0;   /* $F2: which chips are heard; older states have none (power-on) */
   C.R.set(st.cpu.R); C.S.set(st.cpu.S);
   Object.assign(C,{PC:st.cpu.PC,SP:st.cpu.SP,I:st.cpu.I,Rr:st.cpu.Rr,
     IFF1:st.cpu.IFF1,IFF2:st.cpu.IFF2,IM:st.cpu.IM,halt:st.cpu.halt,tc:st.cpu.tc});

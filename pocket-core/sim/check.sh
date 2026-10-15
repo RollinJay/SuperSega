@@ -97,6 +97,7 @@ FM_CASES=("fmsms|sms|" "fmss|ss|" "fmgg|gg|--no-fm")
 run_fm_case() {
     local name mode opt
     IFS='|' read -r name mode opt <<< "$1"
+    rm -f "$W/sys/$name.wav" "$W/sys/$name.txt"   # a reused work directory must not show an old result
     (cd "$PC/sim/sys" && ./obj/tb_ss ../../roms/fm.sms "$mode" 50 "$W/sys/$name" -wav "$W/sys/$name.wav") \
         > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
     # shellcheck disable=SC2086  # opt is empty or one flag

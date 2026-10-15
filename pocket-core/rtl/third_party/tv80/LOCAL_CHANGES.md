@@ -17,3 +17,7 @@ is vendored here unchanged except for two lines in `tv80_core.v`, each marked
   it (machine profile `cpu.reset_state`); the emulator and Gearsystem start
   there too, so the three can be compared by instruction trace from the first
   instruction (pocket-core/tools/cmp_trace.py).
+
+One file is added, not changed: `LICENSE-T80`, the licence notice of T80, which tv80 translates.
+T80's licence asks for its notice to go with synthesized forms, so `pocket/build_core.sh` puts it
+in the SD-card files with tv80's own notice (the header of its source files).

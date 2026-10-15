@@ -277,18 +277,19 @@ module ss_top #(
     // FM: the YM2413, as IKAOPLL (third_party/ikaopll, BSD-2), on the base
     // cycle like the chip's 3.579545 MHz master clock; it makes a sample every
     // 72 cycles (49.7 kHz). Each OUT to $F0/$F1 becomes a chip-select and write
-    // pulse 32 clocks long, so the chip's bus synchroniser sees it on a
-    // master-clock edge; the CPU's next OUT comes at least 82 clocks later
-    // (11 T-states at 200 % turbo). Software must still leave the chip's own
-    // time between writes, 12 master-clock cycles after an address and 84 after
-    // data (YM2413 Application Manual); at turbo it may not (open question Q21).
+    // pulse 32 clocks long, so IKAOPLL's write-request input, which samples on
+    // master-clock edges, catches it; the CPU's next OUT comes at least 82
+    // clocks later (11 T-states at 200 % turbo). Software must still leave the
+    // chip's own time between writes, 12 master-clock cycles after an address
+    // and 84 after data (YM2413 Application Manual); at turbo it may not (open
+    // question Q21).
     reg        fm_a0 = 1'b0;
     reg  [7:0] fm_d = 8'd0;
     reg  [5:0] fm_wcnt = 6'd0;
-    // The chip's reset (IC) must last 80 master-clock cycles (YM2413 data sheet;
-    // IKAOPLL needs 72 to clear its pipelines). The machine reset can be shorter,
-    // so IC stays low for 96 base cycles after it (27 us). Writes in that time
-    // are lost.
+    // The YM2413 data sheet gives the reset (IC) pulse as 80 master-clock cycles
+    // (typical; it lists no minimum), and IKAOPLL needs 72 to clear its
+    // pipelines. The machine reset can be shorter, so IC stays low for 96 base
+    // cycles after it (27 us). Writes in that time are lost.
     reg  [6:0] fm_rcnt = 7'd0;
     always @(posedge clk_sys) begin
         if (reset) begin
@@ -312,7 +313,7 @@ module ss_top #(
         .i_CS_n(fm_wcnt == 6'd0), .i_WR_n(fm_wcnt == 6'd0), .i_A0(fm_a0), .i_D(fm_d),
         .o_D(), .o_D_OE(), .o_DAC_EN_MO(), .o_DAC_EN_RO(), .o_IMP_NOFLUC_SIGN(),
         .o_IMP_NOFLUC_MAG(), .o_IMP_FLUC_SIGNED_MO(), .o_IMP_FLUC_SIGNED_RO(),
-        .i_ACC_SIGNED_MOVOL(5'sd2), .i_ACC_SIGNED_ROVOL(5'sd3),   // the chip's own melody/rhythm balance
+        .i_ACC_SIGNED_MOVOL(5'sd2), .i_ACC_SIGNED_ROVOL(5'sd3),   // IKAOPLL's default melody/rhythm weights (Q20)
         .o_ACC_SIGNED_STRB(fm_strb), .o_ACC_SIGNED(fm_acc));
     reg               fm_strb_d = 1'b0;
     reg signed [15:0] fm_out = 16'sd0;
@@ -327,7 +328,10 @@ module ss_top #(
     // at full volume peaks at half a PSG channel at full volume (x8 on the
     // chip's output, about +-510 a channel), as in the emulator; the original's
     // balance is not known (open question Q20). FM is mono, on both sides. The
-    // sum is limited to 16 bits; 20 bits hold any sum before that.
+    // sum is limited to 16 bits; 20 bits hold any sum before that. Four PSG
+    // channels at full volume already reach the 16-bit limit, so loud FM chords,
+    // or both chips loud at once, are clipped; the emulator's full scale is 6.25
+    // PSG channels, so it clips less.
     wire               psg_on = (fm_ctl == 2'd0) || (fm_ctl == 2'd3);
     wire               fm_on  = fm_ctl[0];
     wire signed [19:0] fm_s   = fm_on ? {{4{fm_out[15]}}, fm_out} <<< 3 : 20'sd0;

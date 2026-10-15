@@ -75,13 +75,13 @@ The easy way is to let GitHub build it: every push that changes `pocket-core/` r
 pocket/build_core.sh                 # about 15 minutes; needs network access and Docker or Quartus
 ```
 
-`build_core.sh` runs `setup.sh` (which fetches Analogue's framework from github.com/open-fpga/core-template and assembles a Quartus project in `pocket/build/`), compiles it with Quartus Prime Lite 18.1 (`quartus_sh` if it is on the PATH, otherwise the `raetro/quartus:pocket` Docker image), turns the bitstream into the form the Pocket loads (`tools/reverse_rbf.py`), and puts everything for the SD card, test ROMs and the third-party licence notices included, in `pocket/build/sdcard/` and `pocket/build/SuperSega-pocket.zip`. `TESTING.md` explains how to install it and what to expect.
+`build_core.sh` runs `setup.sh` (which fetches Analogue's framework from github.com/open-fpga/core-template and assembles a Quartus project in `pocket/build/`), compiles it with Quartus Prime Lite 18.1 (`quartus_sh` if it is on the PATH, otherwise the `raetro/quartus:pocket` Docker image), turns the bitstream into the form the Pocket loads (`tools/reverse_rbf.py`), and puts everything for the SD card, test ROMs and the third-party licence notices (IKAOPLL, tv80, T80, agg23) included, in `pocket/build/sdcard/` and `pocket/build/SuperSega-pocket.zip`. `TESTING.md` explains how to install it and what to expect.
 
 ## Licences
 
-- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80). Two lines changed, documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`.
-- IKAOPLL: BSD 2-Clause (Sehyeon Kim). Unchanged; `rtl/third_party/ikaopll/VERSION` gives the upstream commit.
+- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80, whose BSD-style notice is in `rtl/third_party/tv80/LICENSE-T80`). Two lines changed, documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`.
+- IKAOPLL: BSD 2-Clause (Sehyeon Kim, who signs its LICENSE as Raki). Unchanged; `rtl/third_party/ikaopll/VERSION` gives the upstream commit. Its README says its 9-bit output design and VRC7 instrument set were copied from Nuked-SMS-FPGA, which is GPL-2.0-or-later (design doc §16).
 - agg23 analogue-pocket-utils: MIT (Adam Gastineau).
 - APF framework files: Analogue's licence; fetched by `setup.sh`, not included.
 - Gearsystem (GPL-3): used only as a test oracle through `sim/ref`; nothing from it is in the core.
-- Super Sega RTL: **licence not yet chosen** (see the design doc, §16).
+- Super Sega RTL: **no licence applied yet**. The owner has chosen MIT (`../DECISIONS.md`); see the design doc, §16, which also raises IKAOPLL's provenance.
