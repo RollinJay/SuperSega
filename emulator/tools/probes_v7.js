@@ -512,6 +512,14 @@ probe('M48', 'The pad in the stock modes: A is button 1, B is button 2, and Star
            note: `Start = Pause ${on ? 'on' : 'off'} at power-on, NMIs ${n}; A -> $DC ${hex(a)}, B -> ${hex(b)}` };
 });
 
+probe('M49', 'PAL runs on the PAL clock: base 3.546893 MHz, frames at 49.70 Hz (313 lines of 228 cycles); NTSC 3.579545 MHz, 59.92 Hz (Technical Reference §1)', () => {
+  const m = sms('sms');
+  m.pal = false; const nHz = m.baseHz(), nF = m.frameHz();
+  m.pal = true;  const pHz = m.baseHz(), pF = m.frameHz();
+  return { ok: nHz === 3579545 && pHz === 3546893 && Math.abs(nF - 59.92) < 0.01 && Math.abs(pF - 49.70) < 0.01,
+           note: `NTSC ${nF.toFixed(2)} Hz, PAL ${pF.toFixed(2)} Hz` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

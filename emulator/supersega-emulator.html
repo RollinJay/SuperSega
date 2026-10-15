@@ -1527,7 +1527,7 @@ class PSG{
 
 /* ---- approximate YM2413 (audible, not cycle-accurate OPLL) ---- */
 class FM{
-  constructor(){ this.reset(); }
+  constructor(){ this.fs=3579545/72; this.reset(); }   /* sample rate: the master clock / 72 (49.7 kHz NTSC, 49.3 kHz PAL) */
   reset(){ this.reg=new Uint8Array(64); this.sel=0;
     this.ch=[]; for(let i=0;i<9;i++) this.ch.push({f:0,blk:0,on:0,ph:0,mph:0,env:0,inst:0,vol:15});
     this.gain=new Array(9).fill(1); this.pan=new Array(9).fill(0); this.master=1; this.onChange=null;
@@ -1552,7 +1552,7 @@ class FM{
       const c=this.ch[i];
       if(c.env<=0.0005) continue;
       const inst=(this.instOv[i]>=0)?this.instOv[i]:c.inst;
-      const freq=(c.f*Math.pow(2,c.blk))*49716/(1<<19)*Math.pow(2,this.transpose[i]/12);
+      const freq=(c.f*Math.pow(2,c.blk))*this.fs/(1<<19)*Math.pow(2,this.transpose[i]/12);
       c.ph+=freq*dt*2*Math.PI; c.mph+=freq*dt*2*Math.PI*(1+(inst%3));
       const mod=Math.sin(c.mph)*(inst?1.6:0.6);
       const s=Math.sin(c.ph+mod);
@@ -1831,6 +1831,11 @@ class Machine{
   /* CPU clock multiplier. Super Sega software sets its own step through $F3; the
      enhancement layer's turbo step is for stock software (machine profile v7). */
   cpuMult(){ return this.mode==='ss' ? (this.turbo||1) : ((this.ael&&this.ael.turbo)||1); }
+  /* The base clock: 3.579545 MHz, or 3.546893 MHz in PAL as on a PAL Master System
+     (Technical Reference section 1). The VDP, PSG and FM chip run on it, so a PAL
+     frame (313 lines of 228 cycles) comes at 49.70 Hz and an NTSC one at 59.92 Hz. */
+  baseHz(){ return this.pal ? 3546893 : 3579545; }
+  frameHz(){ return this.baseHz()/((this.pal?313:262)*228); }
   hCounter(){
     const mult=this.cpuMult();
     const pix=Math.floor(((this.lineT||0)/mult)*1.5);       // 342 pixel clocks / 228 CPU
@@ -2100,7 +2105,7 @@ class Machine{
   romWaitStates(){
     if(this.romMode!=='cart') return 0;
     const mult=this.cpuMult();                          // turbo is a multiplier, not a step
-    const f=3579545*mult;
+    const f=this.baseHz()*mult;
     const T=1e9/f, win=2*T-50;
     let ws=0;
     while(win+ws*T < this.romNs && ws<4) ws++;
@@ -2379,10 +2384,11 @@ function initAudio(m){
   try{
     actx=new (window.AudioContext||window.webkitAudioContext)();
     node=actx.createScriptProcessor(1024,0,2);
-    const cpuHz=3579545, psgDiv=16;
+    const psgDiv=16;
     let acc=0;
     node.onaudioprocess=(e)=>{
       const L=e.outputBuffer.getChannelData(0), R=e.outputBuffer.getChannelData(1);
+      const cpuHz=m.baseHz(); m.fm.fs=cpuHz/72;            /* PAL: the PSG and FM chip run 0.9 % lower */
       const sr=actx.sampleRate, step=cpuHz/psgDiv/sr, dt=1/sr;
       /* The machine's $F2 mute states. The Sound Lab's cross-chip tools and
          dual-run capture sound both chips on purpose (emulator only). */
@@ -4723,7 +4729,7 @@ function draw(){
   cx.putImageData(img,0,0);
 }
 
-let ffOn=false;
+let ffOn=false, paceAcc=0, paceT=null;
 function loop(t){
   if(!running) return;
   pollPad();
@@ -4741,13 +4747,24 @@ function loop(t){
       fpsT=t; frames=0; refresh(); }
     raf=requestAnimationFrame(loop); return;
   }
-  for(let i=0;i<n;i++) m.runFrame();
-  draw(); frames+=n;
+  /* Run machine frames at the machine's own rate (59.92 Hz NTSC, 49.70 Hz PAL),
+     not the display's: a 50 Hz game on a 60 Hz screen, or any game on a 120 Hz
+     screen, keeps its speed. Fast-forward runs four frames per display frame. */
+  let k=n;
+  if(!ffOn){
+    if(paceT===null) paceT=t;
+    paceAcc+=Math.min(t-paceT,250); paceT=t;
+    const fp=1000/m.frameHz();
+    k=0; while(paceAcc>=fp && k<4){ paceAcc-=fp; k++; }
+    if(k===4) paceAcc=0;                          // behind by more than four frames: catch up no further
+  }
+  for(let i=0;i<k;i++) m.runFrame();
+  if(k) draw(); frames+=k;
   if(t-fpsT>500){ document.getElementById('fps').textContent=Math.round(frames*1000/(t-fpsT))+' fps';
     fpsT=t; frames=0; refresh(); }
   raf=requestAnimationFrame(loop);
 }
-function start(){ if(running)return; running=true; fpsT=performance.now(); frames=0; raf=requestAnimationFrame(loop);
+function start(){ if(running)return; running=true; fpsT=performance.now(); frames=0; paceAcc=0; paceT=null; raf=requestAnimationFrame(loop);
   document.getElementById('run').textContent='Pause'; }
 function stop(){ running=false; cancelAnimationFrame(raf); document.getElementById('run').textContent='Run'; }
 
@@ -5777,7 +5794,7 @@ function romNote(){
   const el=document.getElementById('romnote'); if(!el) return;
   const ws=m.romWaitStates();
   const mult=m.cpuMult();
-  const f=3579545*mult, T=1e9/f, win=2*T-50;
+  const f=m.baseHz()*mult, T=1e9/f, win=2*T-50;
   if(m.romMode==='shadow'){
     el.innerHTML='ROM copied into fast RAM at load, so reads never stall. '+
       'Removes the ceiling turbo would otherwise hit. A '+(m.cart?(m.cart.length/1048576).toFixed(2):'0')+
