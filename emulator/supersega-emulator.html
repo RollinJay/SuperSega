@@ -1146,7 +1146,8 @@ class VDP{
     const nt=(this.reg[2]&0x0F)*0x400;
     if(md===1){ // Text: 40 columns of 6 pixels, no sprites
       const pg=(this.reg[4]&0x07)*0x800;
-      const fg=this.tms((this.reg[7]>>4)&15), bg=this.tms(this.reg[7]&15);
+      /* colour 0 is transparent in every TMS mode: the backdrop shows through */
+      const fi=(this.reg[7]>>4)&15, fg=fi?this.tms(fi):bd, bg=bd;
       for(let x=0;x<W;x++) fb[base+x]=bg;
       for(let c=0;c<40;c++){
         const ch=V[(nt+row*40+c)&0x3FFF];
@@ -1161,7 +1162,7 @@ class VDP{
       for(let c=0;c<32;c++){
         const ch=V[(nt+row*32+c)&0x3FFF];
         const b=V[(pg+ch*8+((row&3)<<1)+((y>>2)&1))&0x3FFF];
-        const c1=this.tms((b>>4)&15), c2=this.tms(b&15);
+        const i1=(b>>4)&15, i2=b&15, c1=i1?this.tms(i1):bd, c2=i2?this.tms(i2):bd;
         for(let px=0;px<8;px++){ const sx=c*8+px; if(sx<W) fb[base+sx]=(px<4)?c1:c2; }
       }
     } else { // Graphics I (0) and Graphics II (2)
@@ -1176,7 +1177,7 @@ class VDP{
         if(md===2){
           const idx=((row>>3)<<8)|ch;
           pat=V[(pgB+((idx&pgM)*8)+fine)&0x3FFF];
-          col=V[(ctB+((idx&((ctM<<5)|0x1F))*8)+fine)&0x3FFF];
+          col=V[(ctB+((idx&ctM)*8)+fine)&0x3FFF];      // R3 bits 6-0 mask the index, as R4 bits 1-0 do for patterns
         } else { pat=V[(pgB+ch*8+fine)&0x3FFF]; col=V[(ctB+(ch>>3))&0x3FFF]; }
         const fi=(col>>4)&15, bi=col&15;
         const fg=this.tms(fi), bg2=this.tms(bi);
@@ -1191,7 +1192,12 @@ class VDP{
     const V=this.vram, fb=this.fb, base=y*W;
     const sat=(this.reg[5]&0x7F)*0x80, spg=(this.reg[6]&0x07)*0x800;
     const size=(this.reg[1]&2)?16:8, mag=(this.reg[1]&1)?2:1, hh=size*mag;
-    let drawn=0;
+    /* A pixel belongs to the first sprite that sets it, so the lowest-numbered
+       sprite is drawn on top (Technical Reference §3), and two sprites meeting
+       on a pixel set the collision flag. A transparent sprite counts towards the
+       limit but draws nothing and collides with nothing (Gearsystem; Q18). */
+    const covered=new Uint8Array(W);
+    let drawn=0, hit=0;
     for(let i=0;i<32;i++){
       let sy=V[(sat+i*4)&0x3FFF];
       if(sy===0xD0) break;
@@ -1211,9 +1217,12 @@ class VDP{
         const half=(size===16&&px>=8)?1:0, inX=px&7;
         const b=V[(spg+pat*8+(size===16?half*16+r:r))&0x3FFF];
         if(!(b&(0x80>>inX))) continue;
-        for(let z=0;z<mag;z++){ const fx=sx+px*mag+z; if(fx>=0&&fx<W) fb[base+fx]=col; }
+        for(let z=0;z<mag;z++){ const fx=sx+px*mag+z; if(fx<0||fx>=W) continue;
+          if(covered[fx]){ hit=1; continue; }
+          covered[fx]=1; fb[base+fx]=col; }
       }
     }
+    if(hit) this.status|=0x20;
     this.sprCount[y]=drawn;
   }
 
@@ -2304,7 +2313,7 @@ class Machine{
     if(typeof HACK!=='undefined'&&HACK.rs.freeze.length)
       for(const f of HACK.rs.freeze) this.wram[this.wramBank*0x2000+f.i]=f.v;
     /* Start = Pause: Master System, SG-1000 and SC-3000 (with the SF-7000) only. The
-       Game Gear has a Start of its own, and boosts never act on Super Sega software. */
+       Game Gear has a Start of its own, and boosts (bar True TMS colours) never act on Super Sega software. */
     if(this.ael.startpause && this.btn.start && !this.prevStart &&
        (this.mode==='sms'||this.mode==='sg'||this.mode==='sc'||this.mode==='sf')) this.cpu.nmi();
     this.prevStart=this.btn.start;

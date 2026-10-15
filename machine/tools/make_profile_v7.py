@@ -436,7 +436,8 @@ p['enhancement_layer'] = {
                 'PSG, pads) rather than patching the ROM. Full rationale and tiers: '
                 'SuperSega_AutoEnhancement_Layer.md (the "AEL doc" below), an earlier design document that '
                 'is not in this repository.'),
-    'default': ('Every boost is off at power-on, so the machine behaves as stock hardware. '
+    'default': ('Every boost but one is off at power-on, so the machine behaves as stock hardware: True TMS '
+                'colours starts on, so SG-1000 and SC-3000 software shows the colours it was made for (Q11). '
                 'Each one is switched independently: on the console from the boot menu, in the '
                 'emulator from its AEL panel, on the Analogue Pocket core from the core settings '
                 '(Interact) menu.'),
@@ -444,10 +445,11 @@ p['enhancement_layer'] = {
                    '(SG-1000, SC-3000, Master System, Game Gear): Super Sega software sets these features itself and '
                    'reads C as a button of its own. Pseudo-stereo also stops once software writes $06. Start = Pause '
                    'applies in the Master System, SG-1000 and SC-3000 modes (the Game Gear has a Start button of its own). '
-                   'The TMS colour boost is the exception today: see Q11.'),
+                   'The TMS colour boost is the one exception: it also acts on Super Sega software\'s TMS modes (Q11).'),
     'boosts': {
-        'sprite_limit': '16 sprites per line in Mode 4 instead of 8 (legacy modes: 4 -> 8 or 16).',
-        'overflow_stock': 'With the raised limit, status bit 6 is still set by a 9th sprite on a line, for software that reads it as logic.',
+        'sprite_limit': '16 sprites per line instead of 8 in Mode 4, and instead of 4 in the TMS modes.',
+        'overflow_stock': ('With the raised limit, status bit 6 is still set by a 9th sprite on a line, for software that '
+                           'reads it as logic. Mode 4 only: in the TMS modes it has no effect.'),
         'start_pause': 'Start on the pad raises the Pause NMI (SMS, SG-1000, SC-3000 modes).',
         'turbo': ('A turbo step (125-200 %) for stock software in the SMS, GG, SG-1000 and SC-3000 modes. '
                   'Super Sega software sets its own step through $F3.'),
@@ -496,11 +498,10 @@ p['open_questions'] = [
      'detail': 'Not readable today. Interrupt handlers that switch banks need to restore the previous one; readback or a documented RAM shadow is needed.'},
     {'id': 'Q10', 'topic': 'Reverting third-party GG2SMS layers', 'status': 'emulator workflow',
      'detail': 'A hack-maker workflow, not a machine question; listed so it is not lost.'},
-    {'id': 'Q11', 'topic': 'Default of the TMS colour boost', 'status': 'open',
-     'detail': ('The AEL rule is that every boost defaults off, but the emulator starts with true TMS9918 '
-                'colours on. Either the emulator default changes to the Master System approximation, or the '
-                'AEL doc lists TMS colours as an exception. The emulator also applies it to the legacy modes '
-                'of Super Sega software, where no other boost acts. Not changed in v7.')},
+    {'id': 'Q11', 'topic': 'Default of the TMS colour boost', 'status': 'resolved',
+     'detail': ('Decided by the owner in October 2026: true TMS9918 colours are on at power-on, the one '
+                'exception to every boost starting off, and the boost also acts on the TMS modes of Super Sega '
+                'software. The emulator already did both; the Pocket core does the same.')},
     {'id': 'Q13', 'topic': 'Feature Enable C bit 4 (ESAT 2-byte)', 'status': 'open',
      'detail': ('ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still '
                 'selects a 2-byte mode and the emulator implements a 1-byte layout when it is clear. Retire the bit, '
@@ -516,8 +517,8 @@ p['open_questions'] = [
      'detail': ('v5 made line interrupts in the legacy modes a Super Sega enhancement '
                 '(video.legacy_modes.enhancements.line_interrupts), but no enable bit was ever assigned; as stock, '
                 'TMS modes raise none (stock_behaviour.vdp.line_counter), and both implementations follow that in '
-                'the stock modes. In Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set '
-                '(the Pocket core does not draw the TMS modes yet). Should the line counter run in the legacy '
+                'the stock modes. In Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set. '
+                'Should the line counter run in the legacy '
                 'modes on Super Sega, and what enables it?')},
     {'id': 'Q16', 'topic': 'Register layouts defined only by the emulator', 'status': 'open',
      'detail': ('The bit layouts of the DMA engine ($F4-$FA), PCM control ($08 write), the wavetable ($11-$15), '
@@ -526,6 +527,17 @@ p['open_questions'] = [
                 'defined today only by the emulator\'s implementation (the Pocket core already follows it for $09). '
                 'They need writing into the profile and the Technical Reference, and checking, before the Pocket '
                 'core implements them, as v7 did for the math unit.')},
+    {'id': 'Q18', 'topic': 'TMS-mode status bits 4-0 and transparent sprites', 'status': 'open',
+     'detail': ('Two details of the sprite flags in the TMS modes are not settled for this VDP. (1) What status bits '
+                '4-0 read: the TMS9918A puts the number of the fifth sprite there; Gearsystem does that whenever a TMS '
+                'mode is selected (not on the Game Gear) and reads $1F in Mode 4; the Pocket core reads $1F and the '
+                'emulator 0 in every mode. '
+                '(2) Whether a transparent (colour 0) sprite takes part in collisions: the TMS9918A Data Manual says '
+                'it does; Gearsystem, the emulator and the Pocket core leave it out.')},
+    {'id': 'Q19', 'topic': 'Several TMS mode bits set at once', 'status': 'open',
+     'detail': ('The implementations take M2 (Graphics II) first, then M1 (Text), then M3 (Multicolor); Gearsystem '
+                'takes M1, then M3, then M2; on the TMS9918A such combinations give undocumented hybrid modes. '
+                'Which picture should the machine show?')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
@@ -561,6 +573,39 @@ p['vdp_registers']['bank_0']['14'] = 'Window Y Split; bit 7 selects side'
 change(LATER + 'Open question Q16 added: the register layouts of the DMA engine, PCM control, the wavetable, '
        'slot select, the VDP base registers and the window split are defined only by the emulator\'s '
        'implementation. vdp_registers.bank_0 R14 now gives its bit 7 (side), as the Technical Reference does.')
+
+lm = p['video']['legacy_modes']
+lm['selection'] = ('Graphics I with none of M1-M3 set, Text with M1 (R1 bit 4), Graphics II with M2 (R0 bit 1), '
+                   'Multicolor with M3 (R1 bit 3); M4 (R0 bit 2) selects Mode 4. Several of M1-M3 together: open '
+                   'question Q19.')
+lm['tables'] = ('Base addresses as on the SG-1000: name table R2 x $400, colour table R3 x $40, pattern table '
+                'R4 x $800, sprite attributes R5 x $80, sprite patterns R6 x $800. In Graphics II, R4 bit 2 and R3 '
+                'bit 7 pick the half of VRAM for the pattern and colour tables, and R4 bits 1-0 and R3 bits 6-0 mask '
+                'the pattern and colour index, so the thirds of the screen can share tables.')
+lm['transparency'] = ('Colour 0 is transparent in every TMS mode, Text and Multicolor included: the backdrop '
+                      '(R7 bits 3-0) shows through.')
+lm['sprites'] = ('32 sprites of 4 bytes (Y, X, pattern, attribute: bit 7 early clock, 32 pixels left; bits 3-0 '
+                 'colour), 8x8 or 16x16 (R1 bit 1), magnified by R1 bit 0; none in Text mode. Y = $D0 ends the '
+                 'list. A sprite starts on line Y+1, or Y+1-256 when Y+1 is 225 or more (Gearsystem: 224; the two '
+                 'differ only for Y = $DF, off a 192-line screen either way). Four per line as stock. When sprites '
+                 'overlap, the lowest-numbered is drawn on top. A transparent sprite counts towards the limit but '
+                 'draws nothing; neither implementation lets it take part in collisions, as in Gearsystem, and '
+                 'whether it should is open question Q18.')
+lm['status_flags'] = ('Status bit 6 is set by a fifth sprite on a displayed line, and status bit 5 when pixels of '
+                      'two drawn sprites meet on the screen; both when the line is drawn, not at the Mode 4 event '
+                      'times. What status bits 4-0 read is open question Q18.')
+lm['source'] = ('TMS9918A Data Manual (Texas Instruments); Gearsystem (Video.cpp, RenderBackgroundTMS9918 and '
+                'RenderSpritesTMS9918), which the emulator matches on the Pocket core\'s TMS test ROMs')
+change(LATER + 'The TMS9918 modes written down (video.legacy_modes: tables, transparency, sprites, status_flags) '
+       'as the Pocket core implements them. The emulator was corrected to them: the lowest-numbered sprite is now '
+       'drawn on top, sprites set the collision flag, colour 0 is transparent in Text and Multicolor, and R3 bits '
+       '6-0 mask the Graphics II colour index (it applied the mask shifted by five bits). video.legacy_modes.selection '
+       'gives the mode bits instead of claiming real-hardware behaviour for every combination. Open questions Q18 '
+       '(status bits 4-0, transparent sprites) and Q19 (several mode bits at once) added.')
+change(LATER + 'Q11 resolved by the owner: True TMS colours is on at power-on, the one exception to every boost '
+       'starting off, and it also acts on Super Sega software\'s TMS modes. enhancement_layer.default and '
+       'precedence say so. The sprite-limit boost now says what both implementations do in the TMS modes '
+       '(4 -> 16); it said "4 -> 8 or 16". The stock-overflow-flag boost is stated to act in Mode 4 only.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

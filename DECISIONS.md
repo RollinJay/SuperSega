@@ -8,7 +8,7 @@ The owner answered these on 12 October 2026. They are **decided but not yet appl
 |---|---|
 | Licence | MIT for the project's own files. Third-party code keeps its own licence. |
 | FM sound core for the Pocket | IKAOPLL (BSD 2-Clause), which suits an MIT project. |
-| Name | Rename the project to **MasterGear**, with a README that describes what the machine is and does: every capability, which console each comes from, and what combining them makes possible. Before renaming, note that "MasterGear" is already the name of Marat Fayzullin's long-running Master System / Game Gear emulator, and Sega's own Game Gear adapter was the "Master Gear Converter". |
+| Name | Rename the project to **MasterDrive**, with a README that describes what the machine is and does: every capability, which console each comes from, and what combining them makes possible. This replaces the earlier choice, MasterGear, which is the name of Marat Fayzullin's long-running Master System / Game Gear emulator. A search in October 2026 found no emulator called MasterDrive; the name is used by NTI's MasterDrive (Windows virtual-drive software), a MasterDrive driving game and a Brazilian storage brand, and krikzz's Master EverDrive flash cartridge is a similar-sounding retro Sega product. An unrelated FPGA console project from Spain, shown in 2024, already calls itself SuperSega. Applying the rename changes the Pocket core's folder name (`Cores/SuperSega.SuperSega/`), so a test install has to be copied again. |
 
 ## Machine (open questions in the Technical Reference, §17)
 
@@ -20,7 +20,6 @@ The owner answered these on 12 October 2026. They are **decided but not yet appl
 | Q7 math unit divide | A ÷ B, quotient in `$0F`, remainder in `$10`; divide by zero gives `$FF`/`$00`. |
 | Q8 detecting the machine | A boot-menu option that runs an export cartridge in native mode, plus a read-only machine ID register. |
 | Q9 work RAM bank readback | `$0A` becomes readable (selected bank in bits 3–0). |
-| Q11 TMS-colour boost | **On by default**, as the one exception to "every boost starts off", and it also acts on native software's TMS modes. |
 | Q12 cartridge wait state at 200 % | Kept; the Pocket core adds it. |
 | Q13 Feature Enable C bit 4 | Retired: ESAT is always 2 bytes per sprite; the emulator drops its 1-byte layout. |
 | Q14 PCM FIFO fill at `$08` | Bits 6–4 = bytes queued ÷ 8, saturating at 7. |

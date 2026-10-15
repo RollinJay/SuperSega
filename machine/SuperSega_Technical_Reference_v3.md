@@ -11,7 +11,7 @@ Two ideas run through everything below:
 - **Stock behaviour.** At power-on every extension is off. The machine then behaves exactly like the original hardware — a Master System with the FM sound unit fitted, or a Game Gear, SG-1000 or SC-3000, depending on the mode it boots in.
 - **Opt-in extensions.** New software turns extensions on through three *Feature Enable* registers (A, B and C, described in §10). Old software never touches them, so it can never see them.
 
-A third, separate idea is the **enhancement layer** (AEL, §15): optional boosts for *old* software, such as removing sprite flicker. They are user settings, all off by default.
+A third, separate idea is the **enhancement layer** (AEL, §15): optional boosts for *old* software, such as removing sprite flicker. They are user settings, all off by default except True TMS colours (§15).
 
 **Notation.** VDP registers come in four banks of 16 (§10). "R7" alone means bank 0 register 7, a stock register; "bank1 R3" means register 3 of bank 1, one of the Super Sega additions. The banks above 0 can only be reached once software sets **XRB** (extended register banks, Feature Enable A bit 5). **TH** and **TR** are two pins of each controller port (§6): TR is button 2, TH the light-gun and multiplexing line.
 
@@ -132,6 +132,26 @@ Both selection paths must work: the standard bits are how Master System and Game
 | Name-table spare bits | the top three bits of each entry are unused by the VDP; some games keep collision flags there |
 | 8×16 sprites | the low bit of the tile index is ignored |
 | Registers 11 and above | ignored by real hardware, which is why the Super Sega extensions live there |
+
+### TMS9918 modes
+
+The SG-1000 and SC-3000 picture modes draw from tables in VRAM whose base addresses come from registers 2 to 6, as on the SG-1000: the *name table* (which character goes in each screen cell) at R2 × `$400`, the *colour table* at R3 × `$40`, the *pattern table* (the characters' pixels) at R4 × `$800`, the sprite attributes at R5 × `$80` and the sprite patterns at R6 × `$800`.
+
+The mode bits defined above select the mode: Graphics I with none of M1–M3 set, Text with M1, Graphics II with M2, Multicolor with M3 (M4 selects Mode 4). Which mode several of them together give is open (Q19).
+
+| Mode | Picture |
+|---|---|
+| Graphics I | 32 × 24 characters of 8 × 8 pixels; one colour byte (foreground and background) for each group of 8 characters |
+| Graphics II | 32 × 24 characters; each third of the screen has its own 256 patterns, and every pattern row its own colour byte. R4 bit 2 and R3 bit 7 pick the half of VRAM for the pattern and colour tables; R4 bits 1–0 and R3 bits 6–0 mask the pattern and colour index, so the thirds can share tables |
+| Multicolor | 64 × 48 blocks of 4 × 4 pixels, each one colour |
+| Text | 40 columns of 6 × 8 characters between 8-pixel borders, in the two colours of R7; no sprites |
+
+- **Colour 0 is transparent** in every mode, Text and Multicolor included: the backdrop colour (R7 bits 3–0) shows through.
+- **Sprites:** 32, each 4 bytes (Y, X, pattern, and an attribute byte: bit 7 *early clock*, which moves the sprite 32 pixels left; bits 3–0 its one colour), 8 × 8 or 16 × 16 (R1 bit 1), magnified to double size by R1 bit 0. Y = `$D0` ends the list. A sprite starts on line *Y* + 1, or *Y* + 1 − 256 when *Y* + 1 is 225 or more. Four per line as stock. When sprites overlap, the lowest-numbered is drawn on top. A transparent (colour 0) sprite counts towards the limit but draws nothing. Neither implementation lets it take part in collisions, as in Gearsystem; whether it should is open (Q18).
+- **Flags:** status bit 6 is set by a fifth sprite on a displayed line, and status bit 5 when pixels of two drawn sprites meet on the screen. Both are set when the line is drawn, not at the Mode 4 event times (§16). What status bits 4–0 read is open (Q18).
+- **Colours:** the TMS9918's own colours, or the Master System's 2-bit approximation of them (the enhancement layer's *True TMS colours* boost, on at power-on, §15). Super Sega software can make them CRAM entries 0–15 instead (Feature Enable C bit 0).
+
+Sources: TMS9918A Data Manual (Texas Instruments); Gearsystem (`RenderBackgroundTMS9918`, `RenderSpritesTMS9918`), which gives the same pictures as the emulator on the Pocket core's four TMS test ROMs.
 
 ---
 
@@ -450,21 +470,21 @@ An export Master System BIOS rejects any cartridge whose region is not 4, so reg
 
 ## 15. Enhancement Layer
 
-Optional boosts for unmodified software (the Auto-Enhancement Layer, AEL), applied by intercepting the fixed hardware interfaces rather than patching the ROM. **All are off at power-on**, so the machine behaves as stock hardware until the user switches one on. On the console they live in the boot menu, in the emulator in its AEL panel, and on the Analogue Pocket in the core settings menu.
+Optional boosts for unmodified software (the Auto-Enhancement Layer, AEL), applied by intercepting the fixed hardware interfaces rather than patching the ROM. **All but one are off at power-on**, so the machine behaves as stock hardware until the user switches one on. The exception is True TMS colours, which starts on so SG-1000 and SC-3000 software shows the colours it was made for (Q11). On the console they live in the boot menu, in the emulator in its AEL panel, and on the Analogue Pocket in the core settings menu.
 
-Explicit software intent always wins: every boost acts only on software running in the stock modes (SG-1000, SC-3000, Master System, Game Gear). Super Sega software sets these features itself and reads C as a button of its own. Pseudo-stereo also stops as soon as software writes `$06`. The TMS-colour boost is the one exception today (Q11).
+Explicit software intent always wins: every boost acts only on software running in the stock modes (SG-1000, SC-3000, Master System, Game Gear). Super Sega software sets these features itself and reads C as a button of its own. Pseudo-stereo also stops as soon as software writes `$06`. The TMS-colour boost is the one exception: it also acts on Super Sega software's TMS modes (Q11).
 
 | Boost | Effect |
 |---|---|
-| Sprite limit | 16 sprites per line instead of 8 (legacy modes 4 → 8/16) — removes most flicker |
-| Stock overflow flag | with the raised limit, status bit 6 is still set by a ninth sprite, for software that reads it as logic |
+| Sprite limit | 16 sprites per line instead of 8 in Mode 4, and instead of 4 in the TMS modes — removes most flicker |
+| Stock overflow flag | with the raised limit, status bit 6 is still set by a ninth sprite, for software that reads it as logic. Mode 4 only: in the TMS modes it has no effect |
 | Start = Pause | Start on the pad raises the Pause NMI (Master System, SG-1000, SC-3000 modes) |
 | Turbo | a turbo step for stock software; Super Sega software sets its own through `$F3` |
 | VRAM speed-up | no VDP access wait while turbo is active |
 | Auto-fire | while C is held, button 2 repeats (toggles every two frames: 15 Hz); releasing C leaves button 2 as the pad has it |
 | Pseudo-stereo | until software writes `$06`: tone 0 left, tone 1 right, tone 2 and noise centre |
 | Game Gear uncrop | show the full 256 × 192 picture the Game Gear VDP draws, instead of the 160 × 144 window |
-| True TMS colours | SG-1000/SC-3000 picture modes use the TMS9918's own colours instead of the Master System's approximation |
+| True TMS colours | SG-1000/SC-3000 picture modes use the TMS9918's own colours instead of the Master System's approximation. On at power-on |
 
 The FM unit being present is inherent to the machine, not a switch. Two items of the enhancement-layer design have no switch of their own: *VRAM write reliability* (the emulator and the Pocket core never drop a VDP write, so it is always in effect) and *region speed correction*, which is the machine's 50/60 Hz video setting. Tiers, risks and the per-game override database are in `SuperSega_AutoEnhancement_Layer.md`, an earlier design document that is not in this repository (written against profile v5; where it differs, this section and profile v7 apply).
 
@@ -525,13 +545,15 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q8 | Run-time detection of a Super Sega by a single ROM | open (§14) |
 | Q9 | Work RAM bank readback at `$0A` | open |
 | Q10 | Reverting third-party GG-to-SMS patches | an emulator workflow, not a machine question |
-| Q11 | Should the true-TMS-colours boost default off like every other boost, and act only in the stock modes? The emulator defaults it on and also applies it to Super Sega software's legacy modes | open |
+| Q11 | Should the true-TMS-colours boost default off like every other boost, and act only in the stock modes? | resolved (owner, October 2026): on at power-on, the one exception, and it also acts on Super Sega software's TMS modes (§15). Both implementations do this |
 | Q12 | One cartridge wait state at 200 % turbo: the emulator applies it; the Pocket core does not yet | open |
 | Q13 | Feature Enable C bit 4 (ESAT 2-byte) contradicts ESAT being 2 bytes per sprite (Q4); the emulator still has a 1-byte layout when the bit is clear. Retire the bit or document the 1-byte layout | open |
 | Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | open |
-| Q15 | Line interrupts in the TMS9918 modes. The machine profile lists them as a Super Sega enhancement for SG-1000-style software (line interrupts are a Master System addition) but defines no bit that enables them. As stock the TMS modes raise none, and both implementations follow that in the stock modes; in Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set (the Pocket core does not draw the TMS modes yet). Should the line counter run in the TMS modes on Super Sega, and what enables it? | open |
+| Q15 | Line interrupts in the TMS9918 modes. The machine profile lists them as a Super Sega enhancement for SG-1000-style software (line interrupts are a Master System addition) but defines no bit that enables them. As stock the TMS modes raise none, and both implementations follow that in the stock modes; in Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set. Should the line counter run in the TMS modes on Super Sega, and what enables it? | open |
 | Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the window split (bank 0 R13 and R14) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | open |
 | Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for Super Sega software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192? | open |
+| Q18 | Two details of the sprite flags in the TMS modes (§3). What status bits 4–0 read: the TMS9918A puts the number of the fifth sprite there, Gearsystem does that whenever a TMS mode is selected (not on the Game Gear) and reads `$1F` in Mode 4, the Pocket core reads `$1F` and the emulator 0 in every mode. And whether a transparent (colour 0) sprite takes part in collisions: the TMS9918A Data Manual says it does; Gearsystem and both implementations leave it out | open |
+| Q19 | Several TMS mode bits set at once (§3). The implementations take M2 (Graphics II) first, then M1 (Text), then M3 (Multicolor); Gearsystem takes M1, then M3, then M2; on the TMS9918A such combinations give undocumented hybrid modes. Which picture should the machine show? | open |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in Super Sega mode, the only mode in which those registers act (§10); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
@@ -567,11 +589,11 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Card slot: slot select (`$09`) and card bank (`$0B`) | yes | registers and memory decode only: the Pocket platform loads no card, so the slot is always empty |
 | VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |
 | ESAT, 16×16 and magnified sprites, window/text layers, line tables, unique-cell | yes | registers only, not drawn |
-| TMS9918 modes (SG-1000, SC-3000) | yes | not yet |
+| TMS9918 modes (SG-1000, SC-3000) | yes | yes |
 | YM2413 FM | yes (approximate synthesis) | not yet; the core reports no FM unit so software uses its PSG music |
 | PCM, wavetable, DMA engine | yes | not yet |
 | SF-7000, floppy, debug unit | yes | not yet |
 | PAL CPU clock (3.546893 MHz, §1) | not yet: the CPU runs at the NTSC clock in PAL too, so a PAL frame lasts 1/50.16 s of machine time instead of 1/49.70 s | the same |
-| Enhancement layer | all | all except true TMS colours and the legacy-mode sprite limit, which come with the TMS9918 modes |
+| Enhancement layer | all | all |
 
-**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a Super Sega feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and Super Sega modes and gets the same values on both, apart from the two differences the implementations are meant to have: the core has no FM unit yet (`$F2`), and no debug host is attached to it (`$FC`/`$FD` bit 7). Nothing has run on a Pocket yet.
+**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a Super Sega feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and Super Sega modes and gets the same values on both, apart from the two differences the implementations are meant to have: the core has no FM unit yet (`$F2`), and no debug host is attached to it (`$FC`/`$FD` bit 7). Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Nothing has run on a Pocket yet.

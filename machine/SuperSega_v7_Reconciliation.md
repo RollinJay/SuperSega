@@ -2,7 +2,7 @@
 
 October 2026. Companion to `super_sega_machine_v7.json` and `SuperSega_Technical_Reference_v3.md`. Paths below are relative to the top of the repository (`machine/`, `emulator/`, `pocket-core/`). The *October 2026 package* is the set of files (these documents, the emulator and the Pocket core) this repository was first imported from; §7 lists what has changed since.
 
-**Terms used below.** *Feature Enable A, B, C* are the three registers through which new software opts into Super Sega features (VDP bank 0 R15, bank 1 R2 and R7; "bank1 R3" is register 3 of the extension register bank 1). The *enhancement layer* (AEL) is the set of optional boosts for unmodified software, all off by default. The *bus synchroniser* holds the CPU when turbo runs it faster than the video chip can accept data. The Technical Reference explains each in full.
+**Terms used below.** *Feature Enable A, B, C* are the three registers through which new software opts into Super Sega features (VDP bank 0 R15, bank 1 R2 and R7; "bank1 R3" is register 3 of the extension register bank 1). The *enhancement layer* (AEL) is the set of optional boosts for unmodified software, all off by default except True TMS colours. The *bus synchroniser* holds the CPU when turbo runs it faster than the video chip can accept data. The Technical Reference explains each in full.
 
 ## 1. The boundary
 
@@ -52,7 +52,7 @@ All are recorded in the profile's `v7_changes` (20 entries in the package, 37 no
 | FM detection latch only in Master System and Super Sega modes | review | fixed | yes (the core reports no FM until it has an FM core) |
 | Stock-hardware behaviour (CPU, VDP, PSG, I/O) listed in `stock_behaviour` | SML DX port, Gearsystem | fixed | yes |
 
-Open items are in the profile's `open_questions` (Q1–Q14 in the package; Q15–Q17 were added since, §7). New in this round: **Q11**, whether the TMS-colour boost should default off like every other boost (the emulator defaults it on); **Q12**, the one-wait-state cartridge access at 200 % turbo (emulator has it, Pocket core does not yet); **Q13**, Feature Enable C bit 4 (ESAT 2-byte) contradicting the 2-byte ESAT decision; **Q14**, the PCM FIFO fill reading at `$08`, which cannot encode a 64-byte FIFO in three bits.
+Open items are in the profile's `open_questions` (Q1–Q14 in the package; Q15–Q19 were added since, §7). New in this round: **Q11**, whether the TMS-colour boost should default off like every other boost (the emulator defaults it on; since resolved, §7); **Q12**, the one-wait-state cartridge access at 200 % turbo (emulator has it, Pocket core does not yet); **Q13**, Feature Enable C bit 4 (ESAT 2-byte) contradicting the 2-byte ESAT decision; **Q14**, the PCM FIFO fill reading at `$08`, which cannot encode a 64-byte FIFO in three bits.
 
 ## 3. Emulator machine-model fixes
 
@@ -100,7 +100,7 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 
 | Check | Result |
 |---|---|
-| Behavioural probes (`emulator/tools/probes_v7.js`) for 41 behaviours, each citing its hardware source. The probes are named after the patch's MODEL fixes (M1–M37 in `emulator/fix_emulator_v7.py`); four fixes have no probe of their own. M11 (Game Gear `$01`–`$06` power-on values) shows only in the I/O test ROM comparison below, in Game Gear mode. M13 (cartridge wait states lengthen the access) is exercised by no check: headless runs use the emulator's default ROM access, a copy in fast RAM, and even with its other setting, cartridge timing, a wait state arises only at the 200 % turbo step. M15 (SG-1000/SC-3000/SF-7000 writes to `$00`–`$06` do nothing) is exercised by no check. M17 (T-states lost during ED/CB instructions) is caught by the bus-synchroniser probe (M12) | 41 of 41 pass on the fixed page, 0 of 41 on the original (four more since, M38–M41, §7; 45 of 45 pass) |
+| Behavioural probes (`emulator/tools/probes_v7.js`) for 41 behaviours, each citing its hardware source. The probes are named after the patch's MODEL fixes (M1–M37 in `emulator/fix_emulator_v7.py`); four fixes have no probe of their own. M11 (Game Gear `$01`–`$06` power-on values) shows only in the I/O test ROM comparison below, in Game Gear mode. M13 (cartridge wait states lengthen the access) is exercised by no check: headless runs use the emulator's default ROM access, a copy in fast RAM, and even with its other setting, cartridge timing, a wait state arises only at the 200 % turbo step. M15 (SG-1000/SC-3000/SF-7000 writes to `$00`–`$06` do nothing) is exercised by no check. M17 (T-states lost during ED/CB instructions) is caught by the bus-synchroniser probe (M12) | 41 of 41 pass on the fixed page, 0 of 41 on the original (eight more since, M38–M45, §7; 49 of 49 pass) |
 | The page's own self-test, run headless | 29 of 29 |
 | Gearsystem as an independent oracle: Batman Returns SMS (PAL) frames 30, 60, 120, 200, 500, 900, 1500 and GG frames 200, 500, 900, 1500 | identical (GG within Gearsystem's colour rounding: it expands channel value 5 to 86, not 85) |
 | `emulator/tools/profile_crosscheck.py` (an earlier chat's check that the emulator implements what the profile claims; its height check updated to the v7 rule) | 47 of 47 claims on the fixed page; the original page fails the height rule (the script has since been rewritten to read every value from the profile: §7) |
@@ -112,9 +112,8 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 
 - **Event timing.** The emulator resolves VDP events at line boundaries and performs I/O at the start of an instruction. The Pocket core follows Gearsystem's per-cycle event table (status flags, line interrupt, scroll latch at fixed cycle offsets; I/O 10 T-states into IN/OUT). Pictures match; mid-line raster tricks can differ. A refactor of the emulator's frame loop is the follow-up.
 - **H counter.** The emulator returns a live count that starts at 0 at its line start; the machine latches the counter when TH rises and starts the line at `$E9` (Gearsystem's model, which the Pocket core follows). Light-gun software can therefore read different values on the two.
-- **TMS9918 modes** render in the emulator but not yet in the Pocket core.
 - **Not in the Pocket core yet** (Technical Reference §19): the FM unit, PCM and wavetable sound, the DMA engine, the SF-7000 and its floppy controller, the debug unit, the mouse and trackball, a card in the card slot (the Pocket platform loads none), and the drawing side of ESAT, 16×16 and magnified sprites, the window and text layers, line tables and unique-cell mode (their registers are there).
-- The TMS-colour boost default (Q11) is left as it is until decided.
+- **Status bits 4–0** read 0 in the emulator and `$1F` in the Pocket core (open question Q18).
 
 ## 6. Project documents checked against v7
 
@@ -154,15 +153,21 @@ The repository corrected the following after the package was imported; each mach
 17. Both documents give the standard port mirrors both implementations decode: the PSG (and on the Master System and Game Gear the V and H counters) across `$40`–`$7F`, the VDP across `$80`–`$BF`.
 18. Whether Feature Enable B's 224- and 240-line heights apply in the TMS modes is recorded as open question Q17.
 19. Both documents say that the SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers, so writes to `$00`–`$3F` do nothing in those modes (the emulator now follows this: M39).
+20. The TMS9918 modes are written down in both documents (Technical Reference §3, profile `video.legacy_modes`): table addresses and Graphics II masks, colour 0 transparent in every mode, the sprite rules (32 sprites, four per line, the lowest-numbered on top, transparent sprites draw and collide with nothing) and when the overflow and collision flags are set. The emulator was corrected to them (M42–M45). Both documents also say which mode bits select which TMS mode. Open question Q18 records what status bits 4–0 read and whether transparent sprites should collide, and Q19 which mode several mode bits together give.
+21. Q11 is resolved by the owner: True TMS colours is on at power-on, the one exception to every boost starting off, and it also acts on Super Sega software's TMS modes. The sprite-limit boost now says what both implementations do in the TMS modes (4 → 16), and the stock-overflow-flag boost that it acts in Mode 4 only.
 
 ### Emulator
 
-Fixes to the emulator's model of the machine. M38–M41 each have a probe in `emulator/tools/probes_v7.js` that fails on the page as it was:
+Fixes to the emulator's model of the machine. M38–M45 each have a probe in `emulator/tools/probes_v7.js` that fails on the page as it was:
 
 - **M38.** In Super Sega mode, writes to the read-only ports `$0F`, `$10` (math result) and `$16` (multitap) fell through to the `$3E`/`$3F` mirror and changed the memory and I/O control registers. Super Sega decodes `$07`–`$16` itself, as the Pocket core already did.
 - **M39.** In the SG-1000, SC-3000 and SF-7000 modes, writes to `$07`–`$3F` changed the I/O control value, which affects what TH and TR read back. Those machines have no `$3E`/`$3F` registers, and the Pocket core already ignored the writes.
 - **M40.** In the TMS9918 modes the line interrupt was raised in every machine mode. As stock only Mode 4 raises it; in Super Sega mode the question is open (Q15), and the emulator keeps raising it there.
-- **M41.** The Start = Pause boost raised Pause in every mode. It now acts only in the Master System, SG-1000 and SC-3000 modes, as the profile's enhancement layer says: the Game Gear has a Start button of its own, and boosts never act on Super Sega software.
+- **M41.** The Start = Pause boost raised Pause in every mode. It now acts only in the Master System, SG-1000 and SC-3000 modes, as the profile's enhancement layer says: the Game Gear has a Start button of its own, and boosts other than True TMS colours never act on Super Sega software.
+- **M42.** In the TMS9918 modes, where sprites overlapped, the highest-numbered was drawn on top. The lowest-numbered is now (Technical Reference §3, Gearsystem).
+- **M43.** In the TMS9918 modes, sprites never set the collision flag. Two sprites meeting on a pixel now set it, when the line is drawn.
+- **M44.** In Text and Multicolor, colour 0 was drawn black instead of transparent. It now shows the backdrop, as in the other modes and on the TMS9918.
+- **M45.** In Graphics II the colour-table mask from R3 bits 6–0 was applied shifted by five bits, so R3 bits 1–0 masked the screen third and bits 6–2 masked nothing. It now masks the colour index as R4 bits 1–0 mask the pattern index. Software that keeps R3 at `$FF`, as most does, saw no difference.
 
 Also, without a probe because no program can see it: the Z80 now resets to interrupt mode 0, as the profile's `cpu.reset_state` says; the emulator takes every interrupt at `$0038` whatever the mode.
 
@@ -174,3 +179,5 @@ Application changes: gamepad buttons can be rebound in the Controls tab like key
 - In the stock machine modes only Mode 4 now raises the line interrupt, as on stock hardware; in Super Sega mode the TMS modes still raise it (open question Q15). The same change as M40.
 - The controls players remap in the Pocket's Core Settings > Controls menu are labelled correctly in every mode, and `tools/check_core_json.py` checks the core's definition files against the platform's limits and the RTL.
 - `pocket/setup.sh` fetches the Analogue core template at the release `core_top.v` was written against (v1.3.0).
+- The TMS9918 modes are drawn: Graphics I and II, Text and Multicolor, their sprites, the TMS colours or the Master System approximation, and CRAM colours and the raised sprite limit for Super Sega software (Feature Enable C bits 0 and 1). SG-1000 and SC-3000 software is no longer a blank screen. Four SG-1000 test ROMs (`roms/tms_*.sg`) compare the core with the emulator in `sim/check.sh`; they also match Gearsystem.
+- The core settings menu has the True TMS colours boost, on by default (Q11), so the enhancement layer is complete in the core.

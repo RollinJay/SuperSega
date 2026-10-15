@@ -423,6 +423,61 @@ probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-la
            note: `SMS x${ma}, SS x${ms} (x${ms2} after $F3), waits: SMS ${w1}, SMS+boost ${w2}, SS+boost ${w3}` };
 });
 
+// ---------------------------------------------------------------- TMS9918 modes
+// Graphics I on an SG-1000: name table $3800, patterns $0000, colours $2000,
+// sprite attributes $3B00, sprite patterns $1800. Sprite pattern 0 is solid.
+function tmsSetup(m) {
+  const V = m.vdp;
+  V.vram.fill(0);
+  V.reg[0] = 0x00; V.reg[1] = 0x40; V.reg[2] = 0x0E; V.reg[3] = 0x80; V.reg[4] = 0x00;
+  V.reg[5] = 0x76; V.reg[6] = 0x03; V.reg[7] = 0x04;               // backdrop: dark blue
+  for (let r = 0; r < 8; r++) V.vram[0x1800 + r] = 0xFF;
+  V.vram[0x3B00] = 0xD0;
+  return V;
+}
+const u32 = v => v >>> 0;                                          // framebuffer values are unsigned
+function tmsSprite(V, i, y, x, colour) { const a = 0x3B00 + i * 4; V.vram[a] = y; V.vram[a + 1] = x; V.vram[a + 2] = 0; V.vram[a + 3] = colour; V.vram[a + 4] = 0xD0; }
+probe('M42', 'TMS9918 modes: when sprites overlap, the lowest-numbered sprite is drawn on top (Technical Reference §3; TMS9918A Data Manual; Gearsystem)', () => {
+  const m = sms('sg'); const V = tmsSetup(m);
+  tmsSprite(V, 0, 9, 40, 0x08); tmsSprite(V, 1, 9, 44, 0x02);      // red over green, 4 pixels apart
+  V.renderLine(10);
+  const at = x => u32(V.fb[10 * 256 + x]), red = u32(V.tms(8)), green = u32(V.tms(2));
+  return { ok: at(44) === red && at(47) === red && at(48) === green,
+           note: `x44-47 ${at(44) === red && at(47) === red ? 'sprite 0' : 'sprite 1'}, x48 ${at(48) === green ? 'sprite 1' : '?'}` };
+});
+probe('M43', 'TMS9918 modes: two sprites meeting on a pixel set the collision flag (status bit 5); sprites side by side do not (Technical Reference §3; TMS9918A Data Manual; Gearsystem)', () => {
+  const m = sms('sg'); const V = tmsSetup(m);
+  tmsSprite(V, 0, 9, 40, 0x08); tmsSprite(V, 1, 9, 48, 0x02);      // touching, not overlapping
+  V.status = 0; V.renderLine(10); const apart = V.status & 0x20;
+  tmsSprite(V, 1, 9, 47, 0x02);                                    // one column overlaps
+  V.status = 0; V.renderLine(10); const over = V.status & 0x20;
+  return { ok: !apart && !!over, note: `side by side ${apart ? 'set' : 'clear'}, overlapping ${over ? 'set' : 'clear'}` };
+});
+probe('M44', 'TMS9918 modes: colour 0 is transparent in Text and Multicolor too, showing the backdrop (TMS9918A Data Manual; Gearsystem)', () => {
+  const m = sms('sg'); const V = tmsSetup(m);
+  V.reg[7] = 0x04;                                                 // Text: foreground 0, backdrop 4
+  V.reg[1] = 0x50; V.vram[0x0000] = 0xFC;                          // character 0: left 6 pixels set
+  V.renderLine(0); const txt = u32(V.fb[8]);
+  V.reg[1] = 0x48; V.vram[0x0000] = 0x05;                          // Multicolor: left block 0, right block 5
+  V.renderLine(0); const mcl = u32(V.fb[0]), mcr = u32(V.fb[4]);
+  const bd = u32(V.tms(4));
+  return { ok: txt === bd && mcl === bd && mcr === u32(V.tms(5)),
+           note: `text fg 0 ${txt === bd ? 'backdrop' : 'not backdrop'}, multicolor 0 ${mcl === bd ? 'backdrop' : 'not backdrop'}` };
+});
+
+probe('M45', 'Graphics II: R3 bits 6-0 mask the colour-table index the way R4 bits 1-0 mask the pattern table (TMS9918A Data Manual; Gearsystem)', () => {
+  const m = sms('sg'); const V = m.vdp; V.vram.fill(0);
+  V.reg[0] = 0x02; V.reg[1] = 0x40; V.reg[2] = 0x0E; V.reg[4] = 0x03; V.reg[5] = 0x76; V.reg[7] = 0x01;
+  V.vram[0x3B00] = 0xD0;
+  V.vram[0x3800 + 8 * 32] = 0x00;                                  // row 8 (second third), name 0: index $100
+  V.vram[0x0800] = 0xFF;                                           // its pattern row 0: all foreground
+  V.vram[0x2000] = 0x20; V.vram[0x2800] = 0x80;                    // colour index $000: green; $100: red
+  V.reg[3] = 0xFF; V.renderLine(64); const full = u32(V.fb[64 * 256]);
+  V.reg[3] = 0x9F; V.renderLine(64); const masked = u32(V.fb[64 * 256]);  // mask $0FF: index $100 -> $000
+  return { ok: full === u32(V.tms(8)) && masked === u32(V.tms(2)),
+           note: `R3=$FF ${full === u32(V.tms(8)) ? 'red' : '?'}, R3=$9F ${masked === u32(V.tms(2)) ? 'green (masked)' : 'not masked'}` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);
