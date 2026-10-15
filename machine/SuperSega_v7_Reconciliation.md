@@ -33,7 +33,7 @@ Work on Super Sega has happened in several chats: the machine design itself, the
 
 ## 2. Machine changes in v7
 
-All are recorded in the profile's `v7_changes` (20 entries in the package, 37 now; §7 lists the later changes). The ones that change behaviour:
+All are recorded in the profile's `v7_changes` (20 entries in the package, 41 now; §7 lists the later changes). The ones that change behaviour:
 
 | Change | Source | Emulator | Pocket RTL |
 |---|---|---|---|
@@ -52,7 +52,7 @@ All are recorded in the profile's `v7_changes` (20 entries in the package, 37 no
 | FM detection latch only in Master System and Super Sega modes | review | fixed | yes |
 | Stock-hardware behaviour (CPU, VDP, PSG, I/O) listed in `stock_behaviour` | SML DX port, Gearsystem | fixed | yes |
 
-Open items are in the profile's `open_questions` (Q1–Q14 in the package; Q15–Q20 were added since, §7). New in this round: **Q11**, whether the TMS-colour boost should default off like every other boost (the emulator defaults it on; since resolved, §7); **Q12**, the one-wait-state cartridge access at 200 % turbo (emulator has it, Pocket core does not yet); **Q13**, Feature Enable C bit 4 (ESAT 2-byte) contradicting the 2-byte ESAT decision; **Q14**, the PCM FIFO fill reading at `$08`, which cannot encode a 64-byte FIFO in three bits.
+Open items are in the profile's `open_questions` (Q1–Q14 in the package; Q15–Q21 were added since, §7). New in this round: **Q11**, whether the TMS-colour boost should default off like every other boost (the emulator defaults it on; since resolved, §7); **Q12**, the one-wait-state cartridge access at 200 % turbo (emulator has it, Pocket core does not yet); **Q13**, Feature Enable C bit 4 (ESAT 2-byte) contradicting the 2-byte ESAT decision; **Q14**, the PCM FIFO fill reading at `$08`, which cannot encode a 64-byte FIFO in three bits.
 
 ## 3. Emulator machine-model fixes
 
@@ -113,6 +113,7 @@ Save states and the FM dual-run snapshot now hold work RAM and the new timing st
 - **Event timing.** The emulator resolves VDP events at line boundaries and performs I/O at the start of an instruction. The Pocket core follows Gearsystem's per-cycle event table (status flags, line interrupt, scroll latch at fixed cycle offsets; I/O 10 T-states into IN/OUT). Pictures match; mid-line raster tricks can differ. A refactor of the emulator's frame loop is the follow-up.
 - **H counter.** The emulator returns a live count that starts at 0 at its line start; the machine latches the counter when TH rises and starts the line at `$E9` (Gearsystem's model, which the Pocket core follows). Light-gun software can therefore read different values on the two.
 - **FM sound.** The emulator's FM synthesis is approximate (no rhythm instruments; the melody instruments only resemble the chip's), while the Pocket core's FM is IKAOPLL, which follows the YM2413 itself. The same music sounds different on the two.
+- **FM writes at turbo.** The emulator takes FM register writes at once; the Pocket core's FM chip needs time between them, as the original does, so software written for 100 % can lose FM writes at turbo on the core but not in the emulator (open question Q21).
 - **Not in the Pocket core yet** (Technical Reference §19): PCM and wavetable sound, the DMA engine, the SF-7000 and its floppy controller, the debug unit, the mouse and trackball, a card in the card slot (the Pocket platform loads none), and the drawing side of ESAT, 16×16 and magnified sprites, the window and text layers, line tables and unique-cell mode (their registers are there).
 - **Status bits 4–0** read 0 in the emulator and `$1F` in the Pocket core (open question Q18).
 
@@ -157,6 +158,7 @@ The repository corrected the following after the package was imported; each mach
 20. The TMS9918 modes are written down in both documents (Technical Reference §3, profile `video.legacy_modes`): table addresses and Graphics II masks, colour 0 transparent in every mode, the sprite rules (32 sprites, four per line, the lowest-numbered on top, transparent sprites draw and collide with nothing) and when the overflow and collision flags are set. The emulator was corrected to them (M42–M45). Both documents also say which mode bits select which TMS mode. Open question Q18 records what status bits 4–0 read and whether transparent sprites should collide, and Q19 which mode several mode bits together give.
 21. Q11 is resolved by the owner: True TMS colours is on at power-on, the one exception to every boost starting off, and it also acts on Super Sega software's TMS modes. The sprite-limit boost now says what both implementations do in the TMS modes (4 → 16), and the stock-overflow-flag boost that it acts in Mode 4 only.
 22. Both documents give the four `$F2` states (0 PSG only, the power-on state; 1 FM only; 2 neither; 3 both), from MAME's `sms_m.cpp`; they said only that bits 1–0 select a mute state. The emulator was corrected to them (M46). Open question Q20 records that the balance of FM and PSG on the original is not known; both implementations make one FM channel at full volume peak at half a PSG channel at full volume.
+23. Open question Q21 records that at turbo, software written for 100 % can write the FM chip faster than it accepts writes (12 master-clock cycles after an address, 84 after data), and asks whether the bus synchroniser should hold the CPU for it as it does for the VDP. Both documents give the chip's write timing (Technical Reference §7).
 
 ### Emulator
 
@@ -170,7 +172,7 @@ Fixes to the emulator's model of the machine. M38–M46 each have a probe in `em
 - **M43.** In the TMS9918 modes, sprites never set the collision flag. Two sprites meeting on a pixel now set it, when the line is drawn.
 - **M44.** In Text and Multicolor, colour 0 was drawn black instead of transparent. It now shows the backdrop, as in the other modes and on the TMS9918.
 - **M45.** In Graphics II the colour-table mask from R3 bits 6–0 was applied shifted by five bits, so R3 bits 1–0 masked the screen third and bits 6–2 masked nothing. It now masks the colour index as R4 bits 1–0 mask the pattern index. Software that keeps R3 at `$FF`, as most does, saw no difference.
-- **M46.** The emulator mixed the PSG and the FM chip whatever `$F2` held. It now plays what `$F2` selects: the PSG only, FM only, neither or both (Technical Reference §7). The Sound Lab's cross-chip tools and dual-run capture, which are emulator-only and sound both chips on purpose, still do.
+- **M46.** The emulator mixed the PSG and the FM chip whatever `$F2` held. It now plays what `$F2` selects: the PSG only, FM only, neither or both (Technical Reference §7). The Sound Lab's cross-chip tools and dual-run capture, which are emulator-only and sound both chips on purpose, still do. An FM channel at full volume now peaks at half a PSG channel at full volume, the balance both implementations use until Q20 is decided (it was 0.47 of one).
 
 Also, without a probe because no program can see it: the Z80 now resets to interrupt mode 0, as the profile's `cpu.reset_state` says; the emulator takes every interrupt at `$0038` whatever the mode.
 

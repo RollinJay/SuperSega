@@ -53,7 +53,8 @@
   "(after the October 2026 package) Open question Q16 added: the register layouts of the DMA engine, PCM control, the wavetable, slot select, the VDP base registers and the window split are defined only by the emulator's implementation. vdp_registers.bank_0 R14 now gives its bit 7 (side), as the Technical Reference does.",
   "(after the October 2026 package) The TMS9918 modes written down (video.legacy_modes: tables, transparency, sprites, status_flags) as the Pocket core implements them. The emulator was corrected to them: the lowest-numbered sprite is now drawn on top, sprites set the collision flag, colour 0 is transparent in Text and Multicolor, and R3 bits 6-0 mask the Graphics II colour index (it applied the mask shifted by five bits). video.legacy_modes.selection gives the mode bits instead of claiming real-hardware behaviour for every combination. Open questions Q18 (status bits 4-0, transparent sprites) and Q19 (several mode bits at once) added.",
   "(after the October 2026 package) Q11 resolved by the owner: True TMS colours is on at power-on, the one exception to every boost starting off, and it also acts on Super Sega software's TMS modes. enhancement_layer.default and precedence say so. The sprite-limit boost now says what both implementations do in the TMS modes (4 -> 16); it said \"4 -> 8 or 16\". The stock-overflow-flag boost is stated to act in Mode 4 only.",
-  "(after the October 2026 package) The four $F2 states written out (audio.fm.audio_control.write): 0 PSG only, 1 FM only, 2 neither, 3 both. The profile said only that bits 1-0 \"select the mute/enable state\"; the emulator mixed both chips whatever $F2 held, so software that selected FM only still had its PSG heard. The source is MAME sms_m.cpp, not sms.cpp. Open question Q20 added: the balance of FM and PSG."
+  "(after the October 2026 package) The four $F2 states written out (audio.fm.audio_control.write): 0 PSG only, 1 FM only, 2 neither, 3 both. The profile said only that bits 1-0 \"select the mute/enable state\"; the emulator mixed both chips whatever $F2 held, so software that selected FM only still had its PSG heard. The source is MAME sms_m.cpp, not sms.cpp. Open question Q20 added: the balance of FM and PSG.",
+  "(after the October 2026 package) Open question Q21 added: FM register writes at turbo, which can come faster than the YM2413 accepts them (cpu.turbo.fm_writes). audio.fm.write_timing gives the chip's write timing."
  ],
  "v5_changes": [
   "SG-series capability recovery: features the TMS9918 had and the SMS/GG Mode 4 VDP dropped are restored.",
@@ -194,7 +195,8 @@
    "frame_rate_governance": "the game's existing VBlank wait",
    "enable": "Feature Enable A bit 6 - off at reset. A write to $F3 takes effect only while it is set, so unmodified SMS/GG software can never change the clock; the step stays in force until $F3 is written again.",
    "cartridge_wait": "A 250 ns cartridge ROM is fast enough up to 175 %; at 200 % each cartridge access takes one wait state (open question Q12 covers the Pocket core).",
-   "v5_error": "v5 placed this on port 0x3F bits 6-4, which are the TR output levels for controller ports A and B. Any title driving TR would have changed the clock."
+   "v5_error": "v5 placed this on port 0x3F bits 6-4, which are the TR output levels for controller ports A and B. Any title driving TR would have changed the clock.",
+   "fm_writes": "OPEN (open question Q21): the FM chip stays at 1x, so at turbo software can write its registers faster than it accepts them (audio.fm.write_timing)."
   },
   "bus_synchroniser": {
    "purpose": "Holds the CPU until the VDP reaches a safe access point, since the CPU clock is decoupled from the VDP under turbo.",
@@ -526,7 +528,8 @@
     "detection": "Software disables the I/O chip ($3E bit 2) before reading $F2 so the controller decode does not drive the bus; the FM latch must still answer.",
     "source": "MAME sms_m.cpp (smsj_audio_control_r, smsj_set_audio_control); Gearsystem (Audio.h) does the same for Japanese consoles"
    },
-   "level": "OPEN: the balance of FM and PSG on the original (open question Q20). Both implementations make one FM channel at full volume peak at half a PSG channel at full volume."
+   "level": "OPEN: the balance of FM and PSG on the original (open question Q20). Both implementations make one FM channel at full volume peak at half a PSG channel at full volume.",
+   "write_timing": "After an address write to $F0 the chip needs 12 master-clock (base) cycles before the data; after a data write to $F1, 84 before the next address (YM2413 Application Manual). Software leaves this time itself; at turbo it may not (open question Q21)."
   },
   "pcm": {
    "fifo_bytes": 64,
@@ -1039,6 +1042,12 @@
    "topic": "Balance of FM and PSG",
    "status": "open",
    "detail": "How loud the FM chip is beside the PSG on the original Japanese Master System, where the two are mixed in analogue, is not known: MAME gives both chips the same gain, Gearsystem lowers the PSG to 0.8 while both play, and neither cites a measurement. Both implementations make one FM channel at full volume peak at half a PSG channel at full volume. What balance should the machine have?"
+  },
+  {
+   "id": "Q21",
+   "topic": "FM register writes at turbo",
+   "status": "open",
+   "detail": "The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo steps above 100 % they can come too close: on the Pocket core a driver that is correct at 100 % plays no FM at 200 %. The emulator takes FM writes at once and is unaffected. The bus synchroniser holds the CPU for the VDP; should it also hold the CPU on $F0/$F1 until the FM chip is ready?"
   }
  ]
 }

@@ -33,6 +33,12 @@ mkdir -p "$SD/Assets/supersega/common/test-roms"
 cp -r "$OUT/dist/." "$SD/"
 cp "$HERE"/../roms/*.sms "$HERE"/../roms/*.sg "$SD/Assets/supersega/common/test-roms/"
 cp "$HERE/../TESTING.md" "$SD/Cores/$CORE/"
+# The bitstream contains third-party code whose licences (BSD 2-Clause, MIT) ask
+# for their notices to go with it
+cp "$HERE/../rtl/third_party/ikaopll/LICENSE" "$SD/Cores/$CORE/LICENSE-IKAOPLL.txt"
+{ echo "TV80 8-Bit Microprocessor Core"; echo "Copyright (c) 2004 Guy Hutchison"; echo
+  sed 's#^// \{0,1\}##' "$HERE/../rtl/third_party/tv80/LICENSE"; } > "$SD/Cores/$CORE/LICENSE-tv80.txt"
+cp "$HERE/third_party/agg23/LICENSE" "$SD/Cores/$CORE/LICENSE-analogue-pocket-utils.txt"
 python3 "$HERE/tools/reverse_rbf.py" "$RBF" "$SD/Cores/$CORE/bitstream.rbf_r"
 (cd "$SD" && rm -f ../SuperSega-pocket.zip && python3 -c "
 import os, zipfile

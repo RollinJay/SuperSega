@@ -544,6 +544,12 @@ p['open_questions'] = [
                 '0.8 while both play, and neither cites a measurement. Both implementations make one FM channel '
                 'at full volume peak at half a PSG channel at full volume. What balance should the machine '
                 'have?')},
+    {'id': 'Q21', 'topic': 'FM register writes at turbo', 'status': 'open',
+     'detail': ('The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before '
+                'it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo '
+                'steps above 100 % they can come too close: on the Pocket core a driver that is correct at 100 % '
+                'plays no FM at 200 %. The emulator takes FM writes at once and is unaffected. The bus synchroniser '
+                'holds the CPU for the VDP; should it also hold the CPU on $F0/$F1 until the FM chip is ready?')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
@@ -624,6 +630,14 @@ change(LATER + 'The four $F2 states written out (audio.fm.audio_control.write): 
        '3 both. The profile said only that bits 1-0 "select the mute/enable state"; the emulator mixed both chips '
        'whatever $F2 held, so software that selected FM only still had its PSG heard. The source is MAME '
        'sms_m.cpp, not sms.cpp. Open question Q20 added: the balance of FM and PSG.')
+
+fm['write_timing'] = ('After an address write to $F0 the chip needs 12 master-clock (base) cycles before the data; '
+                      'after a data write to $F1, 84 before the next address (YM2413 Application Manual). Software '
+                      'leaves this time itself; at turbo it may not (open question Q21).')
+p['cpu']['turbo']['fm_writes'] = ('OPEN (open question Q21): the FM chip stays at 1x, so at turbo software can '
+                                  'write its registers faster than it accepts them (audio.fm.write_timing).')
+change(LATER + 'Open question Q21 added: FM register writes at turbo, which can come faster than the YM2413 '
+       'accepts them (cpu.turbo.fm_writes). audio.fm.write_timing gives the chip\'s write timing.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

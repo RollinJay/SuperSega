@@ -1555,7 +1555,7 @@ class FM{
       const mod=Math.sin(c.mph)*(inst?1.6:0.6);
       const s=Math.sin(c.ph+mod);
       if(!this.audible(i)){ if(!c.on) c.env*=Math.pow(0.0006,dt); continue; }
-      const v=s*c.env*((15-c.vol)/15)*0.075*this.gain[i]*this.master;
+      const v=s*c.env*((15-c.vol)/15)*0.08*this.gain[i]*this.master;   /* full volume: half a PSG channel (0.16), open question Q20 */
       const p=this.pan[i];
       L+=v*Math.min(1,1-p); R+=v*Math.min(1,1+p);
       if(!c.on) c.env*=Math.pow(0.0006,dt); else c.env*= (c.env<1?1.0002:1);

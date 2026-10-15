@@ -280,13 +280,15 @@ module ss_top #(
     // pulse 32 clocks long, so the chip's bus synchroniser sees it on a
     // master-clock edge; the CPU's next OUT comes at least 82 clocks later
     // (11 T-states at 200 % turbo). Software must still leave the chip's own
-    // time between writes, as on the original (YM2413 data sheet).
+    // time between writes, 12 master-clock cycles after an address and 84 after
+    // data (YM2413 Application Manual); at turbo it may not (open question Q21).
     reg        fm_a0 = 1'b0;
     reg  [7:0] fm_d = 8'd0;
     reg  [5:0] fm_wcnt = 6'd0;
-    // The chip needs its reset (IC) held for at least 72 master-clock cycles to
-    // clear its pipelines; the machine reset can be shorter, so IC stays low for
-    // 96 base cycles after it (27 us). Writes in that time are lost.
+    // The chip's reset (IC) must last 80 master-clock cycles (YM2413 data sheet;
+    // IKAOPLL needs 72 to clear its pipelines). The machine reset can be shorter,
+    // so IC stays low for 96 base cycles after it (27 us). Writes in that time
+    // are lost.
     reg  [6:0] fm_rcnt = 7'd0;
     always @(posedge clk_sys) begin
         if (reset) begin

@@ -106,7 +106,11 @@ run_fm_case() {
 export -f run_fm_case
 printf '%s\0' "${FM_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_fm_case "$1"' _ &
 fm_pid=$!
-printf '%s\0' "${SYS_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_sys_case "$1"' _
+sys_ok=1
+printf '%s\0' "${SYS_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_sys_case "$1"' _ || sys_ok=0
+fm_ok=1
+wait "$fm_pid" || fm_ok=0                     # never leave the FM runs behind
+[ "$sys_ok" = 1 ] || exit 1                   # the failing case has printed its log
 fail=0
 for c in "${SYS_CASES[@]}"; do
     IFS='|' read -r name rom mode n dumps topt jenv tol <<< "$c"
@@ -115,7 +119,7 @@ for c in "${SYS_CASES[@]}"; do
         python3 tools/ppmdiff.py "$W/sys/${name}_$f.ppm" "$W/js/${name}_$f.ppm" ${tol:+--tol "$tol"} || fail=1
     done
 done
-wait "$fm_pid" || fail=1
+[ "$fm_ok" = 1 ] || fail=1
 for c in "${FM_CASES[@]}"; do
     IFS='|' read -r name mode opt <<< "$c"
     printf '%-9s %-11s %-4s FM sound ($F2 states, pitch, level): ' "$name" fm.sms "$mode"

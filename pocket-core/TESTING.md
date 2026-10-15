@@ -51,6 +51,7 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - PCM and wavetable sound, the DMA engine, the SF-7000 and floppy disks, cards, cassettes, the mouse and trackball, multitaps, the link cable.
 - Pocket save states (Memories) and sleep.
 - PAL games run very slightly fast (50.16 frames a second instead of 49.70).
+- **FM music with Boost: CPU turbo:** FM music can go silent or play wrong notes, because with a faster CPU the game can write to the FM chip faster than the chip accepts (open question Q21 in the Technical Reference). Leave Boost: CPU turbo Off for games with FM music.
 
 ## Unknown until it runs
 

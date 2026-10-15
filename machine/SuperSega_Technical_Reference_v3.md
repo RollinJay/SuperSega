@@ -51,6 +51,8 @@ An `OUTI` loop takes 16 cycles, so streaming to video memory during vertical bla
 
 Cartridge ROM adds its own wait: a 250 ns ROM is fast enough up to 175 % and needs one wait state per access at 200 % (open question Q12 covers the Pocket core).
 
+The FM chip also needs time between register writes (§7), and software written for 100 % can write it too fast at turbo. Whether the synchroniser should hold the CPU for it too is open question Q21.
+
 ---
 
 ## 2. Memory
@@ -254,6 +256,8 @@ The register layouts of PCM control (`$08` write) and the wavetable are not writ
 **PSG details.** Tone counters run at the CPU clock ÷ 16 and flip their output on reaching zero; a period of 0 behaves as 1. The noise counter (rate `$10`, `$20`, `$40`, or tone 2's period) flips a flip-flop, and the 16-bit noise shift register advances on its rising edge — once per two counter periods. White noise taps bits 0 and 3; writing the noise register resets the shift register to `$8000`. Volume is attenuation in 2 dB steps; 15 is silent.
 
 **`$F2` (FM control).** Writes select which sound chips are heard, in bits 1–0: 0 the PSG only (the power-on state), 1 the FM chip only, 2 neither, 3 both (MAME, `sms_m.cpp`; Gearsystem does the same for Japanese consoles). Software that never writes `$F2` therefore keeps its PSG sound. Reads return bits 1–0 of the last value written (bits 7–5 carry a sync counter on a Japanese Master System; Super Sega returns 0 there). Japanese software disables the I/O chip (`$3E` bit 2) before reading `$F2`, so `$F2` must answer even then — that is how FM detection works.
+
+**FM write timing.** After writing a register address to `$F0` the chip needs 12 master-clock cycles (base cycles) before the data, and after writing data to `$F1` 84 before the next address (YM2413 Application Manual). Software leaves that time itself; at turbo it may not (open question Q21, §1).
 
 **FM and PSG balance.** How loud the FM chip is beside the PSG on the original is not known (open question Q20). Both implementations make one FM channel at full volume peak at half a PSG channel at full volume.
 
@@ -556,6 +560,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for Super Sega software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192? | open |
 | Q18 | Two details of the sprite flags in the TMS modes (§3). What status bits 4–0 read: the TMS9918A puts the number of the fifth sprite there, Gearsystem does that whenever a TMS mode is selected (not on the Game Gear) and reads `$1F` in Mode 4, the Pocket core reads `$1F` and the emulator 0 in every mode. And whether a transparent (colour 0) sprite takes part in collisions: the TMS9918A Data Manual says it does; Gearsystem and both implementations leave it out | open |
 | Q19 | Several TMS mode bits set at once (§3). The implementations take M2 (Graphics II) first, then M1 (Text), then M3 (Multicolor); Gearsystem takes M1, then M3, then M2; on the TMS9918A such combinations give undocumented hybrid modes. Which picture should the machine show? | open |
+| Q21 | FM register writes at turbo (§1). The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo steps above 100 % they can come too close: on the Pocket core a driver that is correct at 100 % plays no FM at 200 %. The emulator takes FM writes at once and is unaffected. The bus synchroniser holds the CPU for the VDP; should it also hold the CPU on `$F0`/`$F1` until the FM chip is ready? | open |
 | Q20 | The balance of FM and PSG (§7). On the original Japanese Master System the two chips are mixed in analogue, and how loud each is is not known: MAME gives both the same gain, Gearsystem lowers the PSG to 0.8 while both play, and neither cites a measurement. Both implementations make one FM channel at full volume peak at half a PSG channel at full volume. What balance should the machine have? | open |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in Super Sega mode, the only mode in which those registers act (§10); and the keyboard's active-low polarity rests on a single source that contradicts itself.
@@ -593,7 +598,7 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |
 | ESAT, 16×16 and magnified sprites, window/text layers, line tables, unique-cell | yes | registers only, not drawn |
 | TMS9918 modes (SG-1000, SC-3000) | yes | yes |
-| YM2413 FM | yes (approximate synthesis: no rhythm instruments, and the melody instruments only resemble the chip's) | yes (IKAOPLL, a YM2413 core reverse-engineered from die shots of the chip) |
+| YM2413 FM | yes (approximate synthesis: no rhythm instruments, and the melody instruments only resemble the chip's) | yes (IKAOPLL, a YM2413 core reverse-engineered from die shots of the chip); at turbo, writes can come too fast for it (Q21) |
 | PCM, wavetable, DMA engine | yes | not yet |
 | SF-7000, floppy, debug unit | yes | not yet |
 | PAL CPU clock (3.546893 MHz, §1) | not yet: the CPU runs at the NTSC clock in PAL too, so a PAL frame lasts 1/50.16 s of machine time instead of 1/49.70 s | the same |
