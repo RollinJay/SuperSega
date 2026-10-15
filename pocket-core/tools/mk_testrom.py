@@ -4,7 +4,7 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, ssfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, ssfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -254,6 +254,76 @@ def build_tone():
     a.label('loop'); a.db(0x18); a.rel('loop')
     a.label('psg')
     a.db(0x8E, 0x0F, 0x90, 0xBF, 0xDF, 0xFF, 0xFF)   # tone0 = $0FE, vol0 = 0, others off
+    a.resolve()
+    rom = a.b
+    rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
+    cs = sum(rom[0:0x7FF0]) & 0xFFFF
+    rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
+    rom[0x7FFF] = 0x4C
+    return bytes(rom)
+
+
+FM_STEPS = [(10, 1), (20, 3), (30, 2), (40, 0)]     # (frame, $F2 value) after the start in state 0
+FM_SLOW = [(60, 1), (120, 3), (180, 2), (240, 0)]   # then, repeated: one second per state
+
+
+def build_fm():
+    """FM check (YM2413). Reads $F2 back after writing 1 (stored at $C010), then
+    plays the PSG tone of tone.sms (440.4 Hz) and, on FM channel 0, a sine:
+    the user instrument with the modulator at its lowest level (TL 63), no
+    feedback, instant attack, sustained at full level, F-number 330 in block 5
+    (330 x 2^5 x 49716 / 2^19 = 1001.4 Hz) at volume 0 (loudest). $F2 starts at
+    0 (PSG only), then takes the values in FM_STEPS at those frame counts:
+    1 FM only, 3 both, 2 neither, 0 PSG only again. tools/check_fm_wav.py checks
+    a capture of those 50 frames. After them the ROM repeats the four states for
+    a second each (FM_SLOW: PSG only, FM only, both, neither), slow enough to
+    judge by ear on a Pocket. Register writes keep the chip's waits (12
+    master-clock cycles after an address, 84 after data)."""
+    a = Asm()
+    a.org(0x0000)
+    a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0)             # DI ; IM 1 ; LD SP,$DFF0
+    a.db(0xC3); a.ref16('main')
+    a.org(0x0038)                                          # frame IRQ: count frames at $C000
+    a.db(0xF5, 0xDB, 0xBF, 0x3A); a.dw(0xC000); a.db(0x3C, 0x32); a.dw(0xC000)
+    a.db(0xF1, 0xFB, 0xED, 0x4D)
+    a.org(0x0066)
+    a.db(0xED, 0x45)                                       # RETN (Pause)
+    a.org(0x0080)
+    a.label('main')
+    a.db(0xAF, 0x32); a.dw(0xC000)                         # frame count 0
+    a.db(0x3E, 0x04, 0xD3, 0xBF, 0x3E, 0x80, 0xD3, 0xBF)  # R0 = $04: Mode 4
+    a.db(0x3E, 0x20, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)  # R1 = $20: frame IRQ on, display off
+    a.db(0x3E, 0x01, 0xD3, 0xF2, 0xDB, 0xF2, 0xE6, 0x03, 0x32); a.dw(0xC010)   # FM detection read-back
+    a.db(0xAF, 0xD3, 0xF2)                                 # $F2 = 0: PSG only
+    a.db(0x21); a.ref16('psg'); a.db(0x06, 7, 0x0E, 0x7F, 0xED, 0xB3)   # PSG tone 0
+    a.db(0x21); a.ref16('fmregs'); a.db(0x06, 12, 0xCD); a.ref16('fmw')
+    a.db(0xDB, 0xBF, 0xFB)                                 # clear a pending frame flag ; EI
+    for i, (frame, value) in enumerate(FM_STEPS):
+        a.label(f'w{i}')
+        a.db(0x3A); a.dw(0xC000); a.db(0xFE, frame, 0x38); a.rel(f'w{i}')   # wait for the frame count
+        a.db(0x3E, value, 0xD3, 0xF2)
+    a.label('slow'); a.db(0xAF, 0x32); a.dw(0xC000)        # frame count 0, $F2 still 0
+    for i, (frame, value) in enumerate(FM_SLOW):
+        a.label(f's{i}')
+        a.db(0x3A); a.dw(0xC000); a.db(0xFE, frame, 0x38); a.rel(f's{i}')
+        a.db(0x3E, value, 0xD3, 0xF2)
+    a.db(0x18); a.rel('slow')
+    # fmw: B (register, value) pairs from HL to $F0/$F1, with the chip's waits
+    a.label('fmw')
+    a.db(0x7E, 0xD3, 0xF0, 0x23, 0xC5, 0x06, 0x02); a.label('fw1'); a.db(0x10); a.rel('fw1'); a.db(0xC1)
+    a.db(0x7E, 0xD3, 0xF1, 0x23, 0xC5, 0x06, 0x08); a.label('fw2'); a.db(0x10); a.rel('fw2'); a.db(0xC1)
+    a.db(0x10); a.rel('fmw')
+    a.db(0xC9)
+    a.label('psg')
+    a.db(0x8E, 0x0F, 0x90, 0xBF, 0xDF, 0xFF, 0xFF)         # tone0 = $0FE, vol0 = 0, others off
+    a.label('fmregs')
+    a.db(0x00, 0x21, 0x01, 0x21,                           # modulator, carrier: sustained, MUL 1
+         0x02, 0x3F, 0x03, 0x00,                           # modulator TL 63 ; carrier KSL 0, no feedback
+         0x04, 0xF0, 0x05, 0xF0,                           # attack 15, decay 0
+         0x06, 0x00, 0x07, 0x00,                           # sustain level 0, release 0
+         0x0E, 0x00,                                       # rhythm off
+         0x10, 0x4A, 0x30, 0x00,                           # channel 0: F-number low $4A ; user instrument, volume 0
+         0x20, 0x1B)                                       # key on, block 5, F-number bit 8
     a.resolve()
     rom = a.b
     rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
@@ -597,6 +667,8 @@ if __name__ == '__main__':
     print('wrote spr12.sms')
     open(os.path.join(out, 'tone.sms'), 'wb').write(build_tone())
     print('wrote tone.sms')
+    open(os.path.join(out, 'fm.sms'), 'wb').write(build_fm())
+    print('wrote fm.sms')
     open(os.path.join(out, 'ssfeat.sms'), 'wb').write(build_ss())
     print('wrote ssfeat.sms')
     open(os.path.join(out, 'ports.sms'), 'wb').write(build_ports())

@@ -538,6 +538,12 @@ p['open_questions'] = [
      'detail': ('The implementations take M2 (Graphics II) first, then M1 (Text), then M3 (Multicolor); Gearsystem '
                 'takes M1, then M3, then M2; on the TMS9918A such combinations give undocumented hybrid modes. '
                 'Which picture should the machine show?')},
+    {'id': 'Q20', 'topic': 'Balance of FM and PSG', 'status': 'open',
+     'detail': ('How loud the FM chip is beside the PSG on the original Japanese Master System, where the two are '
+                'mixed in analogue, is not known: MAME gives both chips the same gain, Gearsystem lowers the PSG to '
+                '0.8 while both play, and neither cites a measurement. Both implementations make one FM channel '
+                'at full volume peak at half a PSG channel at full volume. What balance should the machine '
+                'have?')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
@@ -606,6 +612,18 @@ change(LATER + 'Q11 resolved by the owner: True TMS colours is on at power-on, t
        'starting off, and it also acts on Super Sega software\'s TMS modes. enhancement_layer.default and '
        'precedence say so. The sprite-limit boost now says what both implementations do in the TMS modes '
        '(4 -> 16); it said "4 -> 8 or 16". The stock-overflow-flag boost is stated to act in Mode 4 only.')
+
+fm = p['audio']['fm']
+fm['audio_control']['write'] = ('$F2 bits 1-0 select which sound chips are heard: 0 the PSG only (the power-on '
+                                'state), 1 the FM chip only, 2 neither, 3 both')
+fm['audio_control']['source'] = ('MAME sms_m.cpp (smsj_audio_control_r, smsj_set_audio_control); Gearsystem '
+                                 '(Audio.h) does the same for Japanese consoles')
+fm['level'] = ('OPEN: the balance of FM and PSG on the original (open question Q20). Both implementations make '
+               'one FM channel at full volume peak at half a PSG channel at full volume.')
+change(LATER + 'The four $F2 states written out (audio.fm.audio_control.write): 0 PSG only, 1 FM only, 2 neither, '
+       '3 both. The profile said only that bits 1-0 "select the mute/enable state"; the emulator mixed both chips '
+       'whatever $F2 held, so software that selected FM only still had its PSG heard. The source is MAME '
+       'sms_m.cpp, not sms.cpp. Open question Q20 added: the balance of FM and PSG.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

@@ -5,7 +5,8 @@
 // bus, controller state, and takes video and audio out.
 //
 //   clocks   all logic runs on clk_sys with clock enables:
-//            base cycle 3.579545 MHz = sys/15 (VDP timing, PSG = base/16)
+//            base cycle 3.579545 MHz = sys/15 (VDP timing, PSG = base/16,
+//            YM2413 master clock)
 //            CPU 100/125/150/175/200 % of base (turbo, Super Sega only)
 //            pixel 5.369318 MHz = sys/10
 //   bus sync at turbo steps above 100 % the CPU is held on VDP port accesses
@@ -14,10 +15,10 @@
 `default_nettype none
 
 module ss_top #(
-    // The FM unit is part of the machine, but milestone 1 has no YM2413 core.
-    // While FM_FITTED is 0 the $F2 detection latch does not answer, so software
+    // The FM unit is part of the machine (a YM2413, IKAOPLL here). FM_FITTED = 0
+    // leaves it out: the $F2 detection latch then does not answer, so software
     // that probes for FM falls back to its PSG music instead of playing silence.
-    parameter FM_FITTED = 0
+    parameter FM_FITTED = 1
 ) (
     input  wire        clk_sys,
     input  wire        reset,
@@ -272,11 +273,70 @@ module ss_top #(
         .clk(clk_sys), .rst(reset), .ce_psg(ce_psg), .wr(psg_wr), .din(cpu_dout),
         .stereo_wr(stereo_wr), .stereo_din(cpu_dout), .pstereo(ael_pstereo && !ss),
         .out_l(psg_l), .out_r(psg_r));
-    // FM: not in this milestone. A Japanese-SMS FM unit mutes the PSG when bit 0
-    // of $F2 is set; with no FM core yet the PSG stays audible.
+
+    // FM: the YM2413, as IKAOPLL (third_party/ikaopll, BSD-2), on the base
+    // cycle like the chip's 3.579545 MHz master clock; it makes a sample every
+    // 72 cycles (49.7 kHz). Each OUT to $F0/$F1 becomes a chip-select and write
+    // pulse 32 clocks long, so the chip's bus synchroniser sees it on a
+    // master-clock edge; the CPU's next OUT comes at least 82 clocks later
+    // (11 T-states at 200 % turbo). Software must still leave the chip's own
+    // time between writes, as on the original (YM2413 data sheet).
+    reg        fm_a0 = 1'b0;
+    reg  [7:0] fm_d = 8'd0;
+    reg  [5:0] fm_wcnt = 6'd0;
+    // The chip needs its reset (IC) held for at least 72 master-clock cycles to
+    // clear its pipelines; the machine reset can be shorter, so IC stays low for
+    // 96 base cycles after it (27 us). Writes in that time are lost.
+    reg  [6:0] fm_rcnt = 7'd0;
     always @(posedge clk_sys) begin
-        audio_l <= psg_l;
-        audio_r <= psg_r;
+        if (reset) begin
+            fm_wcnt <= 6'd0;
+            fm_rcnt <= 7'd0;
+        end else begin
+            if (fm_wr) begin
+                fm_a0 <= fm_addr;
+                fm_d <= cpu_dout;
+                fm_wcnt <= 6'd32;
+            end else if (fm_wcnt != 6'd0) fm_wcnt <= fm_wcnt - 6'd1;
+            if (ce_base && fm_rcnt != 7'd96) fm_rcnt <= fm_rcnt + 7'd1;
+        end
+    end
+    wire               fm_strb;
+    wire signed [15:0] fm_acc;
+    IKAOPLL #(.FULLY_SYNCHRONOUS(1), .FAST_RESET(0), .ALTPATCH_CONFIG_MODE(0),
+              .USE_PIPELINED_MULTIPLIER(1)) u_fm (
+        .i_XIN_EMUCLK(clk_sys), .o_XOUT(), .i_phiM_PCEN_n(!ce_base),
+        .i_IC_n(fm_rcnt == 7'd96), .i_ALTPATCH_EN(1'b0),
+        .i_CS_n(fm_wcnt == 6'd0), .i_WR_n(fm_wcnt == 6'd0), .i_A0(fm_a0), .i_D(fm_d),
+        .o_D(), .o_D_OE(), .o_DAC_EN_MO(), .o_DAC_EN_RO(), .o_IMP_NOFLUC_SIGN(),
+        .o_IMP_NOFLUC_MAG(), .o_IMP_FLUC_SIGNED_MO(), .o_IMP_FLUC_SIGNED_RO(),
+        .i_ACC_SIGNED_MOVOL(5'sd2), .i_ACC_SIGNED_ROVOL(5'sd3),   // the chip's own melody/rhythm balance
+        .o_ACC_SIGNED_STRB(fm_strb), .o_ACC_SIGNED(fm_acc));
+    reg               fm_strb_d = 1'b0;
+    reg signed [15:0] fm_out = 16'sd0;
+    always @(posedge clk_sys) begin
+        fm_strb_d <= fm_strb;
+        if (fm_strb && !fm_strb_d) fm_out <= fm_acc;
+    end
+
+    // Mix. $F2 bits 1-0 (Japanese Master System): 0 PSG only (power-on),
+    // 1 FM only, 2 both muted, 3 both. Outside the Master System and Super Sega
+    // modes $F2 is never written, so the PSG alone plays. Level: one FM channel
+    // at full volume peaks at half a PSG channel at full volume (x8 on the
+    // chip's output, about +-510 a channel), as in the emulator; the original's
+    // balance is not known (open question Q20). FM is mono, on both sides. The
+    // sum is limited to 16 bits; 20 bits hold any sum before that.
+    wire               psg_on = (fm_ctl == 2'd0) || (fm_ctl == 2'd3);
+    wire               fm_on  = fm_ctl[0];
+    wire signed [19:0] fm_s   = fm_on ? {{4{fm_out[15]}}, fm_out} <<< 3 : 20'sd0;
+    wire signed [19:0] mix_l  = (psg_on ? {{4{psg_l[15]}}, psg_l} : 20'sd0) + fm_s;
+    wire signed [19:0] mix_r  = (psg_on ? {{4{psg_r[15]}}, psg_r} : 20'sd0) + fm_s;
+    function [15:0] sat16(input signed [19:0] v);
+        sat16 = (v > 20'sd32767) ? 16'h7FFF : (v < -20'sd32768) ? 16'h8000 : v[15:0];
+    endfunction
+    always @(posedge clk_sys) begin
+        audio_l <= sat16(mix_l);
+        audio_r <= sat16(mix_r);
     end
 
 endmodule

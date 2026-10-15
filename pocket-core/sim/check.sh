@@ -9,9 +9,12 @@
 #      take several clocks in the core, match reference models
 #   4. sim/sys: the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and Super Sega feature test
-#      ROMs, for the VDP-height and I/O test ROMs in Game Gear mode, and for the
-#      four TMS9918-mode ROMs on the SG-1000 (Master System colours exactly, true
-#      TMS colours within the core's 4-bit rounding, and with the sprite boost)
+#      ROMs, for the I/O test ROM in Master System and Game Gear modes, for the
+#      VDP-height ROM in Game Gear mode, and for the four TMS9918-mode ROMs on the
+#      SG-1000 (Master System colours exactly, true TMS colours within the core's
+#      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
+#      follows the $F2 mute states with the right FM pitch and level (Master
+#      System and Super Sega modes) and has no FM in Game Gear mode
 #   5. sim/pocket: through the Pocket platform layer the frames match the machine
 #      simulation (a headerless TMS ROM is detected as SG-1000 and drawn in true
 #      TMS colours, the default), Pocket B reads as button 1 in Super Sega mode,
@@ -67,6 +70,7 @@ SYS_CASES=(
     "spr16ovf|spr12.sms|sms|11|10|-spr16 -ovf|AEL=sprlimit,ovf"
     "ssfeat|ssfeat.sms|ss|12|10 11||"
     "gg192|vdp192.sms|gg|11|10||"
+    "smsports|ports.sms|sms|11|10||"
     "ggports|ports.sms|gg|11|10||"
     "tmsg1|tms_g1.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsg2|tms_g2.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
@@ -86,6 +90,22 @@ run_sys_case() {
         > "$W/js/$name.log" 2>&1 || { echo "js_dump $name failed:"; cat "$W/js/$name.log"; return 1; }
 }
 export -f run_sys_case
+# FM sound: roms/fm.sms captured as audio and checked by tools/check_fm_wav.py,
+# in the two modes with the FM unit and in one without it; run alongside the
+# frame cases
+FM_CASES=("fmsms|sms|" "fmss|ss|" "fmgg|gg|--no-fm")
+run_fm_case() {
+    local name mode opt
+    IFS='|' read -r name mode opt <<< "$1"
+    (cd "$PC/sim/sys" && ./obj/tb_ss ../../roms/fm.sms "$mode" 50 "$W/sys/$name" -wav "$W/sys/$name.wav") \
+        > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
+    # shellcheck disable=SC2086  # opt is empty or one flag
+    python3 "$PC/tools/check_fm_wav.py" "$W/sys/$name.wav" $opt > "$W/sys/$name.txt" 2>&1 \
+        || { echo "$name: FM sound check failed:"; cat "$W/sys/$name.txt"; return 1; }
+}
+export -f run_fm_case
+printf '%s\0' "${FM_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_fm_case "$1"' _ &
+fm_pid=$!
 printf '%s\0' "${SYS_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_sys_case "$1"' _
 fail=0
 for c in "${SYS_CASES[@]}"; do
@@ -94,6 +114,12 @@ for c in "${SYS_CASES[@]}"; do
         printf '%-9s %-11s %-4s frame %-3s RTL vs emulator: ' "$name" "$rom" "$mode" "$f"
         python3 tools/ppmdiff.py "$W/sys/${name}_$f.ppm" "$W/js/${name}_$f.ppm" ${tol:+--tol "$tol"} || fail=1
     done
+done
+wait "$fm_pid" || fail=1
+for c in "${FM_CASES[@]}"; do
+    IFS='|' read -r name mode opt <<< "$c"
+    printf '%-9s %-11s %-4s FM sound ($F2 states, pitch, level): ' "$name" fm.sms "$mode"
+    tail -n 1 "$W/sys/$name.txt" 2>/dev/null || echo "no result"
 done
 [ "$fail" = 0 ]
 

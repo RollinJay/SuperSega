@@ -2,7 +2,7 @@
 
 Covers Golden Axe Warrior (SMS) and Ax Battler: A Legend of Golden Axe (Game Gear), retargeted from stock hardware to the Super Sega profile.
 
-Feature references follow the Super Sega machine profile v7 (`../machine/super_sega_machine_v7.json`) and Technical Reference v3 (`../machine/SuperSega_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q19).
+Feature references follow the Super Sega machine profile v7 (`../machine/super_sega_machine_v7.json`) and Technical Reference v3 (`../machine/SuperSega_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q20).
 
 Related: the ROM hack maker framework specification (`super-sega-rom-hack-maker.md`), which covers how mods for these and the other roster titles are made, tested and distributed.
 
@@ -102,7 +102,7 @@ Rationale: GAW requires no viewport work and no reverting of a third-party patch
 
 ## 6. Machine questions and v7's answers
 
-The plan listed these as open against the v5 document. Machine profile v7 answers them as follows; two answers leave a part open, as noted (the profile's open questions are numbered Q1–Q19):
+The plan listed these as open against the v5 document. Machine profile v7 answers them as follows; two answers leave a part open, as noted (the profile's open questions are numbered Q1–Q20):
 
 - **Maximum ROM size and mapper register layout for expanded images.** Up to 4 MB with the stock Sega mapper registers; the layout above 4 MB is still open (Q2).
 - **ESAT entry format, and whether H-flip is per-sprite or per-tile.** 2 bytes per sprite, with H-flip and V-flip per sprite (Q4, resolved in v6). One loose end: Feature Enable C bit 4 still selects a "2-byte" mode, and the emulator uses a 1-byte layout while that bit is clear. Either the bit is retired or the 1-byte layout is documented (Q13); a conversion should set the bit until then.

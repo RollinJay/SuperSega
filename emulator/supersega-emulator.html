@@ -1910,6 +1910,10 @@ class Machine{
   /* GG Start sits on its own port ($00) — it could not be fitted into the
      existing controller scheme. */
   ggStart(){ return this.btn.start? 0x7F : 0xFF; }
+  /* Which sound chips are heard. $F2 bits 1-0 (Japanese Master System, MAME
+     sms_m.cpp): 0 PSG only (power-on), 1 FM only, 2 neither, 3 both. Without
+     the FM unit $F2 is never written and the PSG alone plays. */
+  soundOn(){ const c=this.fmPresent?(this.fmReg&3):0; return {psg:c===0||c===3, fm:(c&1)===1}; }
   out(port,v){
     const p=port&0xFF;
     /* The FPGA debug unit is present regardless of which machine is being
@@ -2360,11 +2364,15 @@ function initAudio(m){
     node.onaudioprocess=(e)=>{
       const L=e.outputBuffer.getChannelData(0), R=e.outputBuffer.getChannelData(1);
       const sr=actx.sampleRate, step=cpuHz/psgDiv/sr, dt=1/sr;
+      /* The machine's $F2 mute states. The Sound Lab's cross-chip tools and
+         dual-run capture sound both chips on purpose (emulator only). */
+      const lab=m.lab, both=m.dual||(lab&&(lab.psg2fm||lab.fm2psg||lab.layers.some(y=>y.on&&y.srcT!==y.dstT)));
+      const on=both?{psg:true,fm:true}:m.soundOn();
       for(let i=0;i<L.length;i++){
         const s=m.psg.sample(step);
-        let l=s[0],r=s[1];
+        let l=on.psg?s[0]:0, r=on.psg?s[1]:0;
         if(m.dual&&m.psgShadow){ const sh=m.psgShadow.sample(step); l+=sh[0]; r+=sh[1]; }
-        { const f=m.fm.sample(dt); l+=f[0]; r+=f[1]; }
+        { const f=m.fm.sample(dt); if(on.fm){ l+=f[0]; r+=f[1]; } }
         for(const w of m.wave){ if(w.en&&w.f){
           w.ph=(w.ph||0)+ (w.f*3.2*dt); const v=(w.ram[Math.floor(w.ph*32)%32]-8)/8*(w.vol/15)*0.12;
           if(w.pan&2)l+=v; if(w.pan&1)r+=v; } }

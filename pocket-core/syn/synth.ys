@@ -3,6 +3,7 @@
 # packing and retiming. Used only to check the design fits the Pocket's
 # 5CEBA4F23C8 (18,480 ALMs, 308 M10K) with margin.
 read_verilog -DSYNTHESIS -I../rtl -I../rtl/third_party/tv80 ../rtl/third_party/tv80/tv80_core.v ../rtl/third_party/tv80/tv80_alu.v ../rtl/third_party/tv80/tv80_mcode.v ../rtl/third_party/tv80/tv80_reg.v
+read_verilog -DSYNTHESIS ../rtl/third_party/ikaopll/IKAOPLL.v ../rtl/third_party/ikaopll/IKAOPLL_dac.v ../rtl/third_party/ikaopll/IKAOPLL_eg.v ../rtl/third_party/ikaopll/IKAOPLL_lfo.v ../rtl/third_party/ikaopll/IKAOPLL_op.v ../rtl/third_party/ikaopll/IKAOPLL_pg.v ../rtl/third_party/ikaopll/IKAOPLL_primitives.v ../rtl/third_party/ikaopll/IKAOPLL_reg.v ../rtl/third_party/ikaopll/IKAOPLL_timinggen.v
 read_verilog -DSYNTHESIS -I../rtl ../rtl/ss_dpram.v ../rtl/ss_z80.v ../rtl/ss_mem.v ../rtl/ss_io.v ../rtl/ss_vdp.v ../rtl/ss_psg.v ../rtl/ss_top.v
 synth_intel_alm -family cyclonev -top ss_top
 stat

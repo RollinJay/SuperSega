@@ -10,7 +10,7 @@ It is split in two:
 
 | Layer | Files | Role |
 |---|---|---|
-| **Machine** | `rtl/` | The console: Z80, VDP, PSG, memory map, I/O. Platform-independent — it knows nothing about the Pocket |
+| **Machine** | `rtl/` | The console: Z80, VDP, PSG, FM chip, memory map, I/O. Platform-independent — it knows nothing about the Pocket |
 | **Pocket platform** | `pocket/` | Everything between the Pocket's framework (APF) and the machine: clocks, ROM loading, saves, controllers, video and audio output, the settings menu |
 
 The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in either.
@@ -25,10 +25,10 @@ The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in eit
 | Super Sega software | register banks, native/extended CRAM, the Feature Enable B height, 16 sprites per line, turbo and the bus synchroniser give the same picture as the emulator on a feature test ROM. VRAM expansion is CPU access only. ESAT, 16×16/magnified sprites, window/text layers, line tables and unique-cell mode are accepted but **not drawn yet** |
 | SG-1000 / SC-3000 software | runs in simulation, in all four TMS9918 picture modes (Graphics I and II, Text, Multicolor) with their sprites. Four SG-1000 test ROMs give the same pictures as the emulator and Gearsystem (within the core's 4-bit-per-channel colour output for true TMS colours). A headerless ROM of 64 KB or less starts in SG-1000 mode; SC-3000 cartridges need System set to SC-3000. The keyboard is implemented but not yet tested on the core |
 | Super Sega system registers | work RAM banking (`$0A`); the math unit (`$0C`–`$10`), with divide as the emulator does it until Q7 is decided (Q-numbers are the machine's open questions, Technical Reference §17); multitap detection (`$16`); the Game Gear serial registers (`$01`–`$05`), which hold what is written. Slot select (`$09`) and the card bank (`$0B`) are decoded, but the platform loads no card, so the card slot is always empty |
-| Sound | PSG with stereo. **No FM yet**: the core reports no FM unit, so games that check for it play their PSG music. No PCM/wavetable |
+| Sound | PSG with stereo, and the FM unit (the YM2413, as IKAOPLL) in Master System and Super Sega modes, with the four `$F2` states (PSG only, FM only, neither, both). Games that check for FM find it and play their FM music. FM is checked with a test ROM in simulation, not yet with games. No PCM/wavetable |
 | Saves | cartridge RAM saved to the SD card (32 KB `.sav`). Save states would be a feature of the Pocket platform layer, not of the machine, and are not planned in this milestone |
 | Enhancement-layer boosts | sprite limit (Mode 4 and the TMS modes), stock overflow flag, Start = Pause, turbo, VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop — all off by default — and True TMS colours, on by default (Q11). All are switchable in the settings menu and act only on Master System, Game Gear, SG-1000 and SC-3000 software, except True TMS colours, which also acts on Super Sega software's TMS modes |
-| Not yet | FM, PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, the PAL CPU clock (§3), sleep |
+| Not yet | PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, the PAL CPU clock (§3), sleep |
 
 ## 3. Clocks
 
@@ -40,7 +40,7 @@ One PLL from the Pocket's 74.25 MHz reference makes three clocks from a single V
 | `clk_vid` | 5.369318 MHz | video to the Pocket's scaler |
 | `clk_vid_90` | 5.369318 MHz, +90° | the scaler's capture clock |
 
-Inside the machine everything runs on `clk_sys` with clock enables: the CPU enable (every 15 clocks at 100 %, or a fractional accumulator for the turbo steps), the base-cycle enable for the VDP's timing, the PSG enable (÷16), and the pixel enable (÷10). Because the three PLL outputs share a VCO, the video stage samples the machine's video registers directly; the constraints keep the three clocks in one group so those paths are timed rather than cut.
+Inside the machine everything runs on `clk_sys` with clock enables: the CPU enable (every 15 clocks at 100 %, or a fractional accumulator for the turbo steps), the base-cycle enable for the VDP's timing and the FM chip's master clock, the PSG enable (÷16), and the pixel enable (÷10). Because the three PLL outputs share a VCO, the video stage samples the machine's video registers directly; the constraints keep the three clocks in one group so those paths are timed rather than cut.
 
 **PAL.** The machine's PAL CPU clock is 3.546893 MHz (Technical Reference §1). The Pocket core uses the NTSC master clock in PAL mode too, so PAL frames run at 50.16 Hz instead of the PAL console's 49.70 Hz (0.9 % fast). A second PLL setting would fix it; not done.
 
@@ -100,7 +100,7 @@ After the last pixel of each line the platform sends the APF's end-of-line word 
 
 ## 8. Audio
 
-The machine's PSG output (signed 16-bit, stereo) passes through two one-pole low-pass stages (about 21 kHz together) and is sampled at 48 kHz by agg23's `sound_i2s`. It is not a full decimation filter: PSG tones above ~24 kHz still alias, about 10 dB down. A proper filter can come with the FM mixer.
+The machine's sound (signed 16-bit, stereo: the PSG and the FM chip, mixed as §11 describes) passes through two one-pole low-pass stages (about 21 kHz together) and is sampled at 48 kHz by agg23's `sound_i2s`. It is not a full decimation filter: PSG tones above ~24 kHz still alias, about 10 dB down. The FM chip makes a sample every 49.7 kHz and the machine holds it until the next, so the images of FM sound near 49.7 kHz are reduced only by the same two stages.
 
 ## 9. Controls
 
@@ -168,7 +168,7 @@ The APF shows at most 16 entries; 15 are used. Controls take none: they are the 
 - **VDP timing** follows Gearsystem's per-cycle event table (315-5535 column, §16 of the Technical Reference). The renderer draws a line at its render event: next line's sprites first (so overflow and collision flags are ready on time), then this line's background, then the composite through CRAM into the output ring. All line buffers are block RAM with one write and one registered read port; the only flip-flop array is the 512 sprite-present bits used for collisions.
 - **Enhancement layer** inputs on `ss_top`: `ael_sprlimit`, `ael_ovf_stock`, `ael_startpause`, `ael_turbo`, `ael_vramboost`, `ael_autofire`, `ael_pstereo`, `ael_tmscol`; Game Gear uncrop is the `gg_crop` input. Every boost but `ael_tmscol` is ignored in Super Sega mode, where software sets those features itself; True TMS colours also acts on Super Sega software's TMS modes (Q11).
 - **Debug unit**: not in this milestone. Its control port `$FB` is written in every mode and reads back in Super Sega mode; `$FC`/`$FD` read the status of a unit with no debug host attached (`$40`). In the stock modes `$FB`–`$FF` read as the controller mirror, as on the stock machine.
-- **FM**: `ss_top` has a parameter `FM_FITTED`, 0 in milestone 1. While it is 0 the `$F2` detection latch does not answer, so software sees a console without the FM unit. With an FM core it becomes 1 and the latch answers in Master System and Super Sega modes.
+- **FM**: IKAOPLL (BSD 2-Clause, Sehyeon Kim; `rtl/third_party/ikaopll`, unchanged, upstream commit in its `VERSION` file), a YM2413 core reverse-engineered from die shots of the chip, runs on the base-cycle enable as the chip's 3.579545 MHz master clock, so it makes a sample every 72 cycles (49.7 kHz). Each `OUT` to `$F0`/`$F1` becomes a chip-select and write pulse 32 clocks long, so the chip's bus synchroniser sees it on a master-clock edge; the CPU's next `OUT` comes at least 82 clocks later. The chip needs its reset held for 72 master-clock cycles, longer than the machine reset may be, so its reset is held 96 base cycles (27 µs) after the machine's; a write in that time is lost. The mix follows `$F2` bits 1–0 (0 PSG only, the power-on state; 1 FM only; 2 neither; 3 both, Technical Reference §7) and puts the FM output, which is mono, on both sides at 8 times the chip's level, so one FM channel at full volume peaks at half a PSG channel at full volume (the original's balance is open question Q20); the sum is limited to 16 bits. `ss_top`'s parameter `FM_FITTED` (1) can leave the FM unit out, in which case the `$F2` latch does not answer either.
 - **TMS9918 modes** share the renderer's passes with Mode 4. The background pass fetches, for each column, the name, then the pattern and colour bytes (Multicolor: the colour block; Text: 40 columns of 6 pixels between 8-pixel borders) and writes the TMS colour, 0 for transparent. The sprite pass reads the 4-byte entries, keeps the first four on the line (or the boosted limit) and draws them last to first, so the lowest-numbered ends on top; transparent sprites are skipped. The composite looks the colour up in a 16-entry TMS table (true colours rounded to 4 bits per channel, or the Master System approximation), or in CRAM entries 0–15 when Feature Enable C bit 0 is set. The overflow and collision flags are set at the render event, as the emulator and Gearsystem do (Technical Reference §3).
 - **Collision flag**: set at Gearsystem's time (22 + X × 228 ÷ 256 into the line), or at the render event if that is earlier. Gearsystem drops collisions that fall after its render event; the hardware does not.
 - **Meeting timing at 53.7 MHz.** Everything runs on the one system clock, but the CPU only advances on its clock enable, at most once every 7 clocks (200 % turbo), and never on two clocks in a row. tv80's instruction decoding is too slow for one clock, so `pocket/core_constraints.sdc` gives two clocks to paths from the CPU to itself and to the blocks that take CPU data only on an enable edge (the I/O decode, the VDP, the PSG and the wrapper's bus strobes). The memory controller acts between enable edges, so instead of a relaxed constraint it gets a register stage: it sees the CPU's bus one clock late (§4). Two calculations that were one long chain of logic now take several clocks, with the result ready long before the CPU can read it: the SC-3000 keyboard's ghosting (16 clocks) and the math unit's divide (16 clocks; the CPU's next IN comes at least 82 clocks later).
@@ -179,10 +179,12 @@ Quartus Prime Lite 18.1 build of the whole core (machine, Pocket platform layer 
 
 | | Used | Of |
 |---|---|---|
-| Logic (ALMs) | 5,311 (29 %) | 18,480 |
-| Registers | 5,974 | |
-| Block RAM (M10K) | 200 (65 %) | 308 |
-| DSP blocks | 2 | 66 |
+| Logic (ALMs) | 6,030 (33 %) | 18,480 |
+| Registers | 7,160 | |
+| Block RAM (M10K) | 205 (67 %) | 308 |
+| DSP blocks | 5 | 66 |
+
+The FM unit (IKAOPLL) accounts for about 720 ALMs, 1,190 registers, 5 M10K blocks and 3 DSP blocks: the difference from the build before it.
 
 Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 3.4 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
 
@@ -206,7 +208,8 @@ Everything below is simulation (Verilator 5.020, iverilog) except the last row, 
 | **Pocket platform** (bridge model → loader → PSRAM model → machine → video at the pixel clock) | Batman SMS frames 200/500 and GG 200/500 identical to Gearsystem; scaler slot words correct on every line |
 | Cartridge load at the APF's maximum bridge rate | passes |
 | Save slot: load a file, game writes cartridge RAM, read back | byte-exact |
-| I/O test ROM (`roms/ports.sms`): 18 ports read in Master System, Game Gear and Super Sega modes, idle and with button 1 held | RTL = emulator, except `$F2` (no FM unit in the core) and `$FC`/`$FD` bit 7 in Super Sega mode (no debug host) |
+| I/O test ROM (`roms/ports.sms`): 18 ports read in Master System, Game Gear and Super Sega modes, idle and with button 1 held | RTL = emulator, except `$FC`/`$FD` bit 7 in Super Sega mode (no debug host) |
+| FM test ROM (`roms/fm.sms`): a PSG tone (440.4 Hz) and an FM sine (user instrument, 1001.4 Hz) while `$F2` steps through 0, 1, 3, 2, 0, captured at 48 kHz and checked by `tools/check_fm_wav.py` | each chip heard exactly in the `$F2` states that select it, on both sides; FM pitch 1001.4 Hz; FM ÷ PSG fundamental 0.390 (planned 0.391); in Game Gear mode the PSG alone in every state |
 | Auto-fire with C held (`-afire -holdc`) | button 2 toggles every two frames in Master System mode; no effect in Super Sega mode |
 | Pocket buttons B, A and Y held, Master System and Super Sega modes (`tb_pocket -hold`) | B reads as button 1 and A as button 2 in both modes; Y is C (stock) or A (Super Sega) |
 | Verilator lint of `core_top` with the APF's `core_bridge_cmd` (project tree from `pocket/setup.sh`) | elaborates; only style warnings, the substantive ones in the template's own code |
@@ -224,17 +227,15 @@ Not yet done: anything on hardware.
 ## 15. Next milestones
 
 1. **Hardware bring-up**: first boot on a Pocket (the user's hands-on testing, guided by `TESTING.md`). The Quartus build and timing are done (§12).
-2. **FM**: a YM2413 core. Candidates are jtopll (GPL-3) and IKAOPLL; the choice depends on the licence decision below.
-3. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
-4. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
-5. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
-6. Cartridge wait state at 200 % (Q12), PAL clock, a proper audio decimation filter.
+2. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
+3. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
+4. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
+5. Cartridge wait state at 200 % (Q12), PAL clock, a proper audio decimation filter.
 
 ## 16. Decisions needed
 
 | Decision | Why it matters |
 |---|---|
-| Licence for the Super Sega RTL | Decides which FM core can be used (a GPL-3 core makes the combined core GPL-3) |
-| FM core | jtopll vs IKAOPLL (or writing one) |
+| Licence for the Super Sega RTL | The repository is public with no licence, so others may not reuse it yet. The owner has chosen MIT (`../../DECISIONS.md`), not yet applied; the third-party parts (tv80 and agg23 MIT, IKAOPLL BSD 2-Clause) suit it |
 | Core and author name | `SuperSega.SuperSega` and the `supersega` platform are placeholders |
 | Math unit divide (Q7), mirror range (Q1), TMS-mode line interrupts (Q15), register layouts written only in the emulator (Q16), Feature Enable B height in the TMS modes (Q17) | Machine questions that block parts of later milestones |

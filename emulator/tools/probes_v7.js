@@ -478,6 +478,15 @@ probe('M45', 'Graphics II: R3 bits 6-0 mask the colour-table index the way R4 bi
            note: `R3=$FF ${full === u32(V.tms(8)) ? 'red' : '?'}, R3=$9F ${masked === u32(V.tms(2)) ? 'green (masked)' : 'not masked'}` };
 });
 
+probe('M46', '$F2 bits 1-0 select the sound chips heard: 0 PSG only (power-on), 1 FM only, 2 neither, 3 both; with no FM unit the PSG alone plays (Technical Reference §7; MAME sms_m.cpp)', () => {
+  const tag = o => (o.psg ? 'P' : '-') + (o.fm ? 'F' : '-');
+  const m = sms('sms'); const st = [tag(m.soundOn())];
+  for (const v of [0, 1, 2, 3]) { m.out(0xF2, v); st.push(tag(m.soundOn())); }
+  const g = sms('gg'); g.out(0xF2, 1); const gg = tag(g.soundOn());
+  return { ok: st.join(' ') === 'P- P- -F -- PF' && gg === 'P-',
+           note: `reset, $F2=0-3: ${st.join(' ')}; Game Gear $F2=1: ${gg}` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);
