@@ -5,7 +5,8 @@ usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
 tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, romwait.sms, tms_g2_224.sms, tms_g2_240.sms,
-tms_txt_240.sms (the TMS9918 modes at 224 and 240 lines, build_tms_tall), and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tms_txt_240.sms (the TMS9918 modes at 224 and 240 lines, build_tms_tall), mdrgfx.sms and mdrtext.sms (the MasterDrive
+picture extensions, build_mdrgfx), gfxfuzz*.sms (random pictures, build_gfxfuzz), and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -888,6 +889,236 @@ def build_tms_tall(height, mode='g2'):
     return bytes(rom)
 
 
+
+_F_GLYPH = [0xFE, 0xC0, 0xC0, 0xFC, 0xC0, 0xC0, 0xC1, 0x03]     # an F with a dot: shows both flips
+
+
+def _spr_tile(t, r):
+    """Sprite tile t, row r, as four bit planes: an F in colour (t % 15) + 1 and
+    a diagonal in its complement, so flips and colours both show."""
+    c1 = (t % 15) + 1
+    c2 = 15 - (t % 15)
+    f = _F_GLYPH[r]
+    d = (0x80 >> r) & ~f & 0xFF
+    return [(f if (c1 >> k) & 1 else 0) | (d if (c2 >> k) & 1 else 0) for k in range(4)]
+
+
+def _bg_tile(t, r):
+    """Background tile t, row r: one of the eight shapes in colour (t % 7) + 1;
+    the rest, and always the left two columns, colour 0, so sprite priority can
+    be seen against both."""
+    c = (t % 7) + 1
+    sh = _shape(t, r) & 0x3F
+    return [sh if (c >> k) & 1 else 0 for k in range(4)]
+
+
+def build_mdrgfx(variant):
+    """MasterDrive picture extensions (Technical Reference sections 3 and 5),
+    for comparing the core's renderer with the emulator's. Both variants start
+    in MasterDrive mode (region 8), write everything with the display off, then
+    turn it on and loop.
+
+    'a' (mdrgfx.sms), 192 lines: the ESAT (both flips, 16x16, magnify, 16x16
+    magnified, early clock, an ESAT palette with extended CRAM, an unwritten
+    palette that shows as palette 1, priority behind the background), the line
+    scroll and vertical-offset tables with R0's top-row and right-column locks,
+    a tile window above row 5 from x = 176 with sprites over it, unique-cell
+    tiles 512-519 from the upper 16 KB of VRAM, extended palettes and the
+    priority bit in the name table, and a magnified sprite cut by the left edge.
+
+    'b' (mdrtext.sms), 224 lines: the text window from row 20 down and from
+    x = 16, every sprite 16x16 (Feature Enable B bit 2) and magnified by R1
+    bit 0, one also by its ESAT (four times in all), sprites over the text
+    window, one with ESAT priority (text pixels are never opaque), and the
+    renderer's worst line: 16 sprites of 64 x 64 pixels side by side."""
+    a = Asm()
+    tall = variant == 'b'
+    a.org(0x0000)
+    a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0)
+    a.db(0xC3); a.ref16('main')
+    a.org(0x0038)
+    a.db(0xF5, 0xDB, 0xBF, 0xF1, 0xFB, 0xED, 0x4D)
+    a.org(0x0066)
+    a.db(0xED, 0x45)
+    a.org(0x0100)
+    a.label('main')
+    a.db(0x21); a.ref16('regs'); a.db(0x06, 0, 0x0E, 0xBF)      # B patched below
+    regs_len_at = a.pc - 3
+    a.db(0xED, 0xB3)
+    blocks = []
+
+    def block(name, addr, data, cram=False):
+        blocks.append((name, bytes(data)))
+        a.db(0x21); a.ref16(name); a.db(0x11); a.dw(addr | (0xC000 if cram else 0x4000))
+        a.db(0x01); a.dw(len(data)); a.db(0xCD); a.ref16('copy')
+
+    # CRAM, native (two bytes per entry): palettes 0-8; 9-15 stay unwritten
+    pal = []
+    for p in range(9):
+        for c in range(16):
+            r, g, b = (c + p * 5) & 15, (c * 3 + p * 7) & 15, (15 - c + p * 3) & 15
+            pal += [(g << 4) | r, b]
+    block('cram', 0x0000, pal, cram=True)
+    # background tiles 0-127
+    block('bgt', 0x0000, [v for t in range(128) for r in range(8) for v in _bg_tile(t, r)])
+    # sprite tiles 0-63 at $2000
+    block('spt', 0x2000, [v for t in range(64) for r in range(8) for v in _spr_tile(t, r)])
+    if not tall:
+        # line scroll table $1800, vertical-offset table $1900
+        block('lineh', 0x1800, [(6 * (y % 24) // 12 if y % 24 < 12 else 6 * (24 - y % 24) // 12) & 0xFF
+                                for y in range(256)])                 # a triangle wave of 6 pixels
+        block('linev', 0x1900, [4 if 96 <= y < 128 else 0 for y in range(256)])
+        # window tilemap $1000: 32 x 32
+        block('wmap', 0x1000, [v for rr in range(32) for c in range(32)
+                               for v in (((rr * 3 + c) % 128), 0x20 | (0x10 if c % 4 == 0 else 0))])
+        # name table $3800: 32 x 28
+        nt = []
+        for rr in range(28):
+            for c in range(32):
+                lo = (rr * 5 + c) % 128
+                hi = (0x02 if c % 5 == 1 else 0) | (0x04 if rr % 3 == 1 else 0)
+                hi |= ((rr & 1) << 3) | (((c >> 2) & 3) << 5)
+                if 9 <= rr <= 11 and c < 8:
+                    hi |= 0x10                                   # priority over sprites
+                if rr == 12 and c < 8:
+                    lo, hi = c, 0x80 | (hi & 0x0E)               # unique-cell tiles 512-519
+                nt += [lo, hi]
+        block('nt', 0x3800, nt)
+        # sprites: (Y, X, tile, ESAT byte 0, ESAT byte 1)
+        spr = [(20, 16, 1, 0x00, 0), (20, 40, 2, 0x02, 0), (20, 64, 3, 0x01, 0), (20, 88, 4, 0x08, 0),
+               (20, 120, 6, 0x10, 0), (20, 140, 8, 0x18, 0), (20, 20, 10, 0x20, 0), (20, 200, 11, 0x00, 5),
+               (20, 224, 12, 0x00, 9), (72, 4, 13, 0x04, 0), (72, 30, 14, 0x00, 0), (120, 3, 15, 0x30, 0),
+               (150, 100, 16, 0x08, 2), (154, 108, 18, 0x00, 3), (0xD0, 0, 0, 0, 0)]
+    else:
+        # text font $2800: 256 characters
+        block('font', 0x2800, [_shape(ch, r) ^ ((ch << 2) & 0xFC) if r == 7 else _shape(ch, r)
+                               for ch in range(256) for r in range(8)])
+        # text window name table $1000: 40 bytes a row, from the window's top edge
+        block('tmap', 0x1000, [(rr * 40 + c) & 0xFF for rr in range(8) for c in range(40)])
+        # name table $3700: 32 x 32 (224 lines)
+        block('nt', 0x3700, [v for rr in range(32) for c in range(32)
+                             for v in (((rr * 7 + c) % 128), ((rr & 1) << 3) | (0x02 if c % 3 == 0 else 0))])
+        spr = [(30, 20, 20, 0x00, 0), (40, 60, 24, 0x10, 0), (100, 10, 28, 0x20, 0),
+               (150, 150, 32, 0x00, 0), (170, 200, 36, 0x04, 0), (0xF0, 120, 40, 0x00, 0)]
+        # the renderer's worst line: 16 sprites of 64 x 64 pixels on lines 81-144
+        spr += [(80, 8 + 15 * k, 4 * (k % 8), 0x10 | (0x02 if k & 1 else 0), 0) for k in range(16)]
+    sat = [s[0] for s in spr] + [0xE0 if tall else 0xD0] * (64 - len(spr))
+    block('saty', 0x3F00, sat)
+    block('satxt', 0x3F80, [v for s in spr for v in (s[1], s[2])])
+    block('esat', 0x1A00, [v for s in spr for v in (s[3], s[4])])
+    if not tall:
+        # unique-cell tiles 512-519 in the upper 16 KB: bank 1 R3 = 1 for the CPU, then 0
+        a.db(0x3E, 0x01, 0xD3, 0xBF, 0x3E, 0x93, 0xD3, 0xBF)
+        block('uct', 0x0000, [v for t in range(8) for r in range(8)
+                              for v in [0xFF if (r + t) & 1 else 0x0F, 0xF0, 0x3C if t & 1 else 0xC3, 0xFF]])
+        a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0x93, 0xD3, 0xBF)
+    # Feature Enable A last, then the display on
+    a.db(0x3E, 0x3D if tall else 0x3F, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)
+    a.db(0x3E, 0x41 if tall else 0x40, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)
+    a.label('loop'); a.db(0x18); a.rel('loop')
+    a.label('copy')                                         # HL -> port $BE, DE = address, BC = count
+    a.db(0x7B, 0xD3, 0xBF, 0x7A, 0xD3, 0xBF)
+    a.label('cl'); a.db(0x7E, 0xD3, 0xBE, 0x23, 0x0B, 0x78, 0xB1, 0x20); a.rel('cl'); a.db(0xC9)
+    a.label('regs')
+    # R15 = $21 first (XRB, native CRAM) so bank 1 and the CRAM writes take effect
+    stock = [0xC6, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x03, 0x00, 0x10, 0xFF] if not tall else \
+            [0x06, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x03, 0x00, 0x00, 0xFF]
+    regs = [(0x21, 0x8F)] + [(v, 0x80 | i) for i, v in enumerate(stock)]
+    if not tall:
+        regs += [(0x18, 0x8B), (0x1A, 0x8C), (22, 0x8D), (0x85, 0x8E),
+                 (0x10, 0x90), (0x19, 0x91), (0x13, 0x92), (0x00, 0x93), (0x08, 0x97)]
+    else:
+        regs += [(0x00, 0x8B), (0x1A, 0x8C), (2, 0x8D), (20, 0x8E),
+                 (0x10, 0x90), (0x44, 0x92), (0x04, 0x97), (0x28, 0x98), (0x5A, 0x99)]
+    for v, r in regs:
+        a.db(v, r)
+    a.b[regs_len_at] = 2 * len(regs)
+    for name, data in blocks:
+        a.label(name); a.db(*data)
+    a.resolve()
+    rom = a.b
+    assert a.pc <= 0x7FF0, hex(a.pc)
+    rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
+    cs = sum(rom[0:0x7FF0]) & 0xFFFF
+    rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
+    rom[0x7FFF] = 0x8C
+    return bytes(rom)
+
+
+class _Rng:
+    """xorshift32, so the fuzz ROMs do not depend on Python's random module."""
+    def __init__(self, seed):
+        self.s = (seed * 2654435761 + 1) & 0xFFFFFFFF or 1
+
+    def bits(self, n):
+        x = self.s
+        x ^= (x << 13) & 0xFFFFFFFF; x ^= x >> 17; x ^= (x << 5) & 0xFFFFFFFF
+        self.s = x
+        return x >> (32 - n)
+
+    def below(self, n):
+        return self.bits(16) % n
+
+
+GFXFUZZ_SEEDS = (1, 6, 25, 38)    # between them: both windows, the ESAT, unique-cell tiles, both line tables, 16x16 sprites, 192/224/240 lines
+
+
+def build_gfxfuzz(seed):
+    """A random MasterDrive picture for comparing the core's renderer with the
+    emulator's: every Mode 4 and MasterDrive video register from a seeded
+    generator (R0 bits 1 and 3-7, R1 bits 0-1 and 3-4, R2-R10, bank 0 R11-R14,
+    bank 1 R0, R1, R4-R6, R8, R9, Feature Enable A bits 1-4, B and C), all
+    32 KB of VRAM and part of CRAM from a xorshift generator running on the
+    Z80, and 64 sprite Y values, a few of them $D0. It writes at 200 % turbo
+    with the display off (about 35 frames), then turns the display on; compare
+    frames 70 on."""
+    r = _Rng(seed)
+    a = Asm()
+    a.org(0)
+    a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0); a.db(0xC3); a.ref16('main')
+    a.org(0x38); a.db(0xF5, 0xDB, 0xBF, 0xF1, 0xFB, 0xED, 0x4D)
+    a.org(0x66); a.db(0xED, 0x45)
+    a.org(0x100); a.label('main')
+    r0 = 0x04 | (2 * r.bits(1)) | (r.bits(1) << 3) | (r.bits(1) << 5) | (r.bits(2) << 6)
+    r1 = (r.bits(2) << 3) | r.bits(2)
+    stock = [r0, r1] + [r.bits(8) for _ in range(9)]
+    regs = [(0x61, 0x8F)] + [(v, 0x80 | i) for i, v in enumerate(stock)]
+    regs += [(r.bits(8), 0x8B + k) for k in range(4)]
+    regs += [(r.bits(8), 0x90 | n) for n in (0, 1, 4, 5, 6, 8, 9)]
+    regs += [(r.bits(8) | 0x10, 0x92), (r.bits(5), 0x97)]   # VRAM expansion while filling; no keyboard bit
+    a.db(0x21); a.ref16('regs'); a.db(0x06, 2 * len(regs), 0x0E, 0xBF, 0xED, 0xB3)
+    a.db(0x3E, 0x04, 0xD3, 0xF3)                            # 200 %
+    a.db(0x21); a.dw(r.bits(16) | 1)                        # the Z80 generator's state
+    for bank in (0, 1):
+        a.db(0x3E, bank, 0xD3, 0xBF, 0x3E, 0x93, 0xD3, 0xBF)  # bank 1 R3: the CPU's VRAM bank
+        a.db(0xAF, 0xD3, 0xBF, 0x3E, 0x40, 0xD3, 0xBF)
+        a.db(0x01); a.dw(0x4000)
+        a.label(f'v{bank}'); a.db(0xCD); a.ref16('rnd'); a.db(0xD3, 0xBE, 0x0B, 0x78, 0xB1, 0x20); a.rel(f'v{bank}')
+    a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0x93, 0xD3, 0xBF)
+    a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0x40 | ((stock[5] >> 1) & 0x3F), 0xD3, 0xBF)   # sprite Y at R5's table
+    a.db(0x21); a.ref16('saty'); a.db(0x06, 64, 0x0E, 0xBE, 0xED, 0xB3)
+    a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0xC0, 0xD3, 0xBF)
+    a.db(0x01); a.dw(32 * (1 + r.below(16)))                # CRAM bytes written: some palettes stay unwritten
+    a.label('cr'); a.db(0xCD); a.ref16('rnd'); a.db(0xD3, 0xBE, 0x0B, 0x78, 0xB1, 0x20); a.rel('cr')
+    a.db(0x3E, r.bits(8), 0xD3, 0xBF, 0x3E, 0x92, 0xD3, 0xBF)               # Feature Enable B
+    a.db(0x3E, (r.bits(5) & 0x1E) | 0x21, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)   # Feature Enable A
+    a.db(0x3E, r1 | 0x40, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)
+    a.label('loop'); a.db(0x18); a.rel('loop')
+    a.label('rnd')                                          # xorshift16 (7, 9, 8): HL, A = H
+    a.db(0x7C, 0x1F, 0x7D, 0x1F, 0xAC, 0x67, 0x7D, 0x1F, 0x7C, 0x1F, 0xAD, 0x6F, 0xAC, 0x67, 0xC9)
+    a.label('regs')
+    for v, rr in regs:
+        a.db(v, rr)
+    a.label('saty')
+    a.db(*[0xD0 if r.below(32) == 0 else r.bits(8) for _ in range(64)])
+    a.resolve()
+    rom = a.b
+    rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
+    cs = sum(rom[0:0x7FF0]) & 0xFFFF
+    rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
+    rom[0x7FFF] = 0x8C
+    return bytes(rom)
+
 if __name__ == '__main__':
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
@@ -918,6 +1149,12 @@ if __name__ == '__main__':
     for m in ('g1', 'g2', 'mc', 'txt'):
         open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
         print(f'wrote tms_{m}.sg')
+    for sd in GFXFUZZ_SEEDS:
+        open(os.path.join(out, f'gfxfuzz{sd}.sms'), 'wb').write(build_gfxfuzz(sd))
+        print(f'wrote gfxfuzz{sd}.sms')
+    for v, n in (('a', 'mdrgfx'), ('b', 'mdrtext')):
+        open(os.path.join(out, f'{n}.sms'), 'wb').write(build_mdrgfx(v))
+        print(f'wrote {n}.sms')
     for h, m in ((224, 'g2'), (240, 'g2'), (240, 'txt')):
         open(os.path.join(out, f'tms_{m}_{h}.sms'), 'wb').write(build_tms_tall(h, m))
         print(f'wrote tms_{m}_{h}.sms')

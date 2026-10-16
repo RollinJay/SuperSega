@@ -23,7 +23,11 @@
 #      4-bit rounding, and with the sprite boost), and for the TMS9918 modes at 224
 #      and 240 lines in MasterDrive mode (Q17: Graphics II at both heights, Text at
 #      240, true TMS colours at 240, and the 240-line ROM on the SG-1000, where it
-#      stays at 192 lines); and the FM test ROM's sound
+#      stays at 192 lines), and for the MasterDrive picture extensions (mdrgfx.sms:
+#      the ESAT, line tables, tile window, unique-cell tiles; mdrtext.sms: the
+#      text window, 16x16 and four-times magnified sprites, the renderer's
+#      busiest line; gfxfuzz*.sms: random registers, VRAM and CRAM); and the
+#      FM test ROM's sound
 #      follows the $F2 mute states with the right FM pitch and level (Master
 #      System and MasterDrive modes) and has no FM in Game Gear mode, and a
 #      tightly timed FM driver still plays at 200 % turbo; in PAL, frames come at
@@ -32,7 +36,7 @@
 #   5. sim/pocket: through the Pocket platform layer the frames match the machine
 #      simulation, NTSC and PAL (a headerless TMS ROM is detected as SG-1000 and
 #      drawn in true TMS colours, the default; a TMS mode at 240 lines in
-#      MasterDrive mode, the same); the video timing the scaler sees
+#      MasterDrive mode, the same; and mdrtext.sms); the video timing the scaler sees
 #      is regular (PAL lines 345 or 346 pixel clocks), also across a switch from
 #      PAL to NTSC; an export cartridge runs in MasterDrive mode with System =
 #      MasterDrive and in Master System mode with Auto (mdports.sms); Pocket A
@@ -108,6 +112,12 @@ SYS_CASES=(
     "tmstxt240|tms_txt_240.sms|ss|61|60|-tmsapprox|AEL=tmscol=0"
     "tmstallsg|tms_g2_240.sms|sg|61|60|-tmsapprox|AEL=tmscol=0"
     "tmstrue240|tms_g2_240.sms|ss|61|60|||8"
+    "mdrgfx|mdrgfx.sms|ss|21|20||"
+    "mdrtext|mdrtext.sms|ss|21|20||"
+    "gfxfuzz1|gfxfuzz1.sms|ss|71|70||"
+    "gfxfuzz6|gfxfuzz6.sms|ss|71|70||"
+    "gfxfuzz25|gfxfuzz25.sms|ss|71|70||"
+    "gfxfuzz38|gfxfuzz38.sms|ss|71|70||"
 )
 run_sys_case() {
     local name rom mode n dumps topt jenv tol
@@ -216,6 +226,7 @@ POCKET_CASES=(
     "psave|save.sms|10|-save ../../roms/save_in.sav|ntsc"
     "ptms|tms_g2.sg|47|46|ntsc"
     "ptms240|tms_g2_240.sms|61|60|ntsc"
+    "pgfx|mdrtext.sms|21|20|ntsc"
     "p224pal|vdp224.sms|40|-set 108 1 37|pal"
     "ptoggle|vdp224.sms|30|-set 108 1 -setat 20 200000 108 0|toggle"
 )
@@ -245,7 +256,7 @@ export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
 fail=0
 for pair in "p224_37 v224_37" "pss_10 mdrfeat_10" "pss_11 mdrfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
-            "ptms240_60 tmstrue240_60" "p224pal_37 v224pal_37" "pmdports_10 mdports_10" "pmdauto_10 smsmdports_10"; do
+            "ptms240_60 tmstrue240_60" "pgfx_20 mdrtext_20" "p224pal_37 v224pal_37" "pmdports_10 mdports_10" "pmdauto_10 smsmdports_10"; do
     set -- $pair
     printf '%-12s Pocket vs machine simulation: ' "$1"
     python3 tools/ppmdiff.py "$W/pocket/$1.ppm" "$W/sys/$2.ppm" || fail=1

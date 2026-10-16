@@ -31,7 +31,10 @@ test -s "$RBF" || { echo "no bitstream: $RBF" >&2; exit 1; }
 SD=$OUT/sdcard
 mkdir -p "$SD/Assets/masterdrive/common/test-roms"
 cp -r "$OUT/dist/." "$SD/"
-cp "$HERE"/../roms/*.sms "$HERE"/../roms/*.sg "$SD/Assets/masterdrive/common/test-roms/"
+# (not the random pictures gfxfuzz*.sms, which only the simulation checks use)
+for f in "$HERE"/../roms/*.sms "$HERE"/../roms/*.sg; do
+    case "$f" in */gfxfuzz*) ;; *) cp "$f" "$SD/Assets/masterdrive/common/test-roms/" ;; esac
+done
 cp "$HERE/../TESTING.md" "$SD/Cores/$CORE/"
 # The bitstream contains third-party code whose licences (BSD-style, MIT) ask
 # for their notices to go with it: IKAOPLL, tv80 (its notice is the header of

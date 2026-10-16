@@ -26,6 +26,8 @@ The zip includes the repository's own test ROMs (no commercial code), in `test-r
 | `mdrregs.sms` | rows of port numbers and values from MasterDrive's math unit and registers (it starts in MasterDrive mode by itself): 200 × 100, 200 ÷ 7, a divide by zero, the work RAM bank read back, and `$A7` at `$17` |
 | `romwait.sms` | four rows of line-counter values (it starts in MasterDrive mode by itself): the same code run from the cartridge and from work RAM at 200 % (the cartridge row reads higher: its reads take a wait state) and at 175 % (the two rows match) |
 | `mdrfeat.sms` | a coloured pattern drawn with the MasterDrive extensions (it starts in MasterDrive mode by itself) |
+| `mdrgfx.sms` | the MasterDrive picture extensions (it starts in MasterDrive mode by itself): a tile pattern scrolled in a zigzag, line by line; a fixed panel of tiles in the top right corner (the window); near the top a row of F-shaped sprites: plain, mirrored left to right, upside down, 16 × 16, doubled in size, doubled 16 × 16, one cut by the left edge, one in another palette; lower down, sprites half hidden behind the background |
+| `mdrtext.sms` | more MasterDrive picture extensions: the lower part of the screen is a panel of 40-column text in two colours (the text window); large F-shaped sprites, one four times its size; a row of sixteen large sprites side by side across the middle |
 | `save.sms` | writes four blocks to cartridge RAM, two in each 16 KB bank; a `.sav` file appears after you quit |
 | `tms_g2_224.sms`, `tms_g2_240.sms`, `tms_txt_240.sms` | the SG-1000 picture modes at the taller heights MasterDrive software can give them (they start in MasterDrive mode by themselves): a busy patterned screen, or white characters for Text, filling 224 or 240 lines. In Graphics II, a cyan ring in the upper half and, below where an SG-1000 screen ends, a white block, a red ring in front of a green block, and a row of four blocks (a fifth is hidden by the sprite limit; at 224 lines only their top edge shows); a block wrapped from the bottom shows at the top right. With System = SG-1000, `tms_g2_240.sms` stays 192 lines tall and shows no sprites: there the first sprite's Y of `$D0` ends the list |
 | `tms_g1.sg`, `tms_g2.sg`, `tms_mc.sg`, `tms_txt.sg` | the four SG-1000 picture modes: patterned screens with sprites (Graphics I, Graphics II, Multicolor) and a screen of white characters (Text). On a row lower down, four ring sprites (quarter rings in Graphics I and Multicolor) show and a fifth is hidden by the sprite limit. A green block slides right over a red one and passes behind it (the red one is sprite 0, so it stays in front). Wherever the background is transparent the backdrop colour shows, and it reports the sprite flags: with Boost: Sprites/line at Stock, light red while the limit hides a sprite (most of the time) and magenta for the few frames the two blocks touch; at 16 the fifth ring shows and the backdrop is black, light blue on contact. Text mode has no sprites, so its backdrop and borders stay black |
@@ -41,7 +43,7 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - **Saves:** cartridge RAM is saved to the SD card (`.sav`).
 - **Controls:** A = button 1, B = button 2, Start = the Game Gear's Start or the Master System's Pause, Select = Pause too (no Pause on the Game Gear). In MasterDrive mode the buttons are the Mega Drive pad's: A, B, and C on Y. Move any of them in Core Settings > Controls.
 - **Settings:** system, region, NTSC/PAL, mapper, and the boosts (more sprites per line to stop flicker, CPU turbo, auto-fire, pseudo-stereo, Start = Pause), all off by default except True TMS colours and Start = Pause.
-- **MasterDrive titles:** register banks, extended colours, the taller screen modes, 16 sprites per line and turbo.
+- **MasterDrive titles:** register banks, extended colours, the taller screen modes, 16 sprites per line, turbo, and the picture extensions (extended sprite attributes, 16 × 16 and magnified sprites, line tables, window and text layers, unique-cell tiles).
 
 ## Needs a setting first
 
@@ -52,7 +54,6 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 
 ## Won't work yet
 
-- **MasterDrive graphics extensions:** extended sprite attributes, 16 × 16 and magnified sprites in Mode 4 (the Master System's picture mode), window and text layers, line tables and unique-cell mode.
 - PCM and wavetable sound, the DMA engine, the SF-7000 and floppy disks, cards, cassettes, the mouse and trackball, multitaps, the link cable.
 - Pocket save states (Memories) and sleep.
 
