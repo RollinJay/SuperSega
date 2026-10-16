@@ -69,6 +69,17 @@ module mdr_vdp (
     output reg         vid_frame,     // first pixel of a frame, for the scaler slot write
     input  wire        gg_crop,       // show only the Game Gear 160x144 window
 
+    // the DMA engine (mdr_dma) on the CPU port, while the CPU is held
+    input  wire        dma_vwe,
+    input  wire        dma_vre,
+    input  wire [14:0] dma_vaddr,
+    input  wire [7:0]  dma_vdin,
+    output wire [7:0]  dma_vdout,
+    input  wire        dma_cwe,       // a CRAM byte, Game Gear format: even address GGGGRRRR, odd ----BBBB
+    input  wire [8:0]  dma_caddr,
+    input  wire [7:0]  dma_cdin,
+    output wire        dma_cready,
+
     // register values other blocks need
     output wire [7:0]  out_fea,       // Feature Enable A (R15)
     output wire [7:0]  out_fec,       // Feature Enable C (bank 1 R7), 0 unless reachable
@@ -154,11 +165,11 @@ module mdr_vdp (
     reg         ca_we;
     reg  [7:0]  ca_addr;
     reg  [11:0] ca_din;
-    wire [11:0] ca_dout_unused;
+    wire [11:0] ca_dout;              // read by the DMA engine's CRAM byte writes
     reg  [7:0]  cb_addr;
     wire [11:0] cb_dout;
     mdr_dpram #(.AW(8), .DW(12)) u_cram (
-        .clk_a(clk), .we_a(ca_we), .addr_a(ca_addr), .din_a(ca_din), .dout_a(ca_dout_unused),
+        .clk_a(clk), .we_a(ca_we), .addr_a(ca_addr), .din_a(ca_din), .dout_a(ca_dout),
         .clk_b(clk), .we_b(1'b0), .addr_b(cb_addr), .din_b(12'h000), .dout_b(cb_dout));
     reg [15:0] pal_written;          // per 16-entry palette, for extended-CRAM aliasing
 
@@ -246,6 +257,14 @@ module mdr_vdp (
     // IRQ
     assign int_n = ~((status[7] && r1[5]) || (line_irq && r0[4]));
 
+    // DMA: VRAM through port A; a CRAM byte by read-modify-write of its entry,
+    // marking the entry's palette written as a CPU write does
+    assign dma_vdout = va_dout;
+    reg  [1:0]  dc_st;
+    reg  [7:0]  dc_byte;
+    reg         dc_hi;
+    assign dma_cready = (dc_st == 2'd0);
+
     // CRAM write helpers
     wire [11:0] sms_col = {io_din[5:4], io_din[5:4], io_din[3:2], io_din[3:2], io_din[1:0], io_din[1:0]};
     // RGB444 from 6-bit BBGGRR: each 2-bit channel x5 -> 4 bits (0,5,10,15) = {c,c}
@@ -261,7 +280,7 @@ module mdr_vdp (
             r[5] <= 8'hFF; r[6] <= 8'hFB; r[7] <= 8'h00; r[8] <= 8'h00; r[9] <= 8'h00;
             r[10] <= 8'hFF;
             latch_first <= 1'b1; addr <= 14'd0; code <= 2'd0; rbuf <= 8'h00;
-            rbuf_fill <= 2'b00; cram_lo <= 8'h00; pal_written <= 16'h0000;
+            rbuf_fill <= 2'b00; cram_lo <= 8'h00; pal_written <= 16'h0000; dc_st <= 2'd0;
             hcount_latched <= 8'h00;
         end else begin
             // finish a read-buffer fill: address registered, then one cycle of
@@ -320,6 +339,21 @@ module mdr_vdp (
                     addr <= addr + 14'd1;
                 end
             end
+
+            // DMA (the CPU is held, so its port is free)
+            if (dma_vwe) begin va_we <= 1'b1; va_addr <= dma_vaddr; va_din <= dma_vdin; end
+            else if (dma_vre) va_addr <= dma_vaddr;
+            case (dc_st)
+            2'd0: if (dma_cwe) begin ca_addr <= dma_caddr[8:1]; dc_byte <= dma_cdin; dc_hi <= dma_caddr[0]; dc_st <= 2'd1; end
+            2'd1: dc_st <= 2'd2;
+            2'd2: begin
+                ca_we <= 1'b1;
+                ca_din <= dc_hi ? {dc_byte[3:0], ca_dout[7:0]} : {ca_dout[11:8], dc_byte};
+                pal_written[ca_addr[7:4]] <= 1'b1;
+                dc_st <= 2'd0;
+            end
+            default: dc_st <= 2'd0;
+            endcase
 
             if (io_rd && port_vdp) begin
                 latch_first <= 1'b1;

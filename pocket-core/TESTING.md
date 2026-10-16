@@ -28,6 +28,8 @@ The zip includes the repository's own test ROMs (no commercial code), in `test-r
 | `mdrfeat.sms` | a coloured pattern drawn with the MasterDrive extensions (it starts in MasterDrive mode by itself) |
 | `mdrgfx.sms` | the MasterDrive picture extensions (it starts in MasterDrive mode by itself): a tile pattern scrolled in a zigzag, line by line; a fixed panel of tiles in the top right corner (the window); near the top a row of F-shaped sprites: plain, mirrored left to right, upside down, 16 × 16, doubled in size, doubled 16 × 16, one cut by the left edge, one in another palette; lower down, sprites half hidden behind the background |
 | `mdrtext.sms` | more MasterDrive picture extensions: the lower part of the screen is a panel of 40-column text in two colours (the text window); large F-shaped sprites, one four times its size; a row of sixteen large sprites side by side across the middle |
+| `dma.sms` | a screen drawn by MasterDrive's DMA engine (it starts in MasterDrive mode by itself): eight rows of patterned tiles in three colour sets across the top (copied from the cartridge), then four bands on a blue patterned background: red and white tiles (copied from work RAM), yellow-green tiles (copied within video memory), a plain dark grey band (copied from the empty card slot) and yellow stripes (a fill that runs into the upper video memory) |
+| `pcm.sms` | MasterDrive's own sound (it starts in MasterDrive mode by itself): a blank screen and a cycle of half a second each, repeated: a 250 Hz buzz on both sides (PCM samples), a pure 400 Hz tone on both sides with an 800 Hz buzz on the left only (the two wavetable voices), all three together, then silence |
 | `save.sms` | writes four blocks to cartridge RAM, two in each 16 KB bank; a `.sav` file appears after you quit |
 | `tms_g2_224.sms`, `tms_g2_240.sms`, `tms_txt_240.sms` | the SG-1000 picture modes at the taller heights MasterDrive software can give them (they start in MasterDrive mode by themselves): a busy patterned screen, or white characters for Text, filling 224 or 240 lines. In Graphics II, a cyan ring in the upper half and, below where an SG-1000 screen ends, a white block, a red ring in front of a green block, and a row of four blocks (a fifth is hidden by the sprite limit; at 224 lines only their top edge shows); a block wrapped from the bottom shows at the top right. With System = SG-1000, `tms_g2_240.sms` stays 192 lines tall and shows no sprites: there the first sprite's Y of `$D0` ends the list |
 | `tms_g1.sg`, `tms_g2.sg`, `tms_mc.sg`, `tms_txt.sg` | the four SG-1000 picture modes: patterned screens with sprites (Graphics I, Graphics II, Multicolor) and a screen of white characters (Text). On a row lower down, four ring sprites (quarter rings in Graphics I and Multicolor) show and a fifth is hidden by the sprite limit. A green block slides right over a red one and passes behind it (the red one is sprite 0, so it stays in front). Wherever the background is transparent the backdrop colour shows, and it reports the sprite flags: with Boost: Sprites/line at Stock, light red while the limit hides a sprite (most of the time) and magenta for the few frames the two blocks touch; at 16 the fifth ring shows and the backdrop is black, light blue on contact. Text mode has no sprites, so its backdrop and borders stay black |
@@ -43,7 +45,7 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - **Saves:** cartridge RAM is saved to the SD card (`.sav`).
 - **Controls:** A = button 1, B = button 2, Start = the Game Gear's Start or the Master System's Pause, Select = Pause too (no Pause on the Game Gear). In MasterDrive mode the buttons are the Mega Drive pad's: A, B, and C on Y. Move any of them in Core Settings > Controls.
 - **Settings:** system, region, NTSC/PAL, mapper, and the boosts (more sprites per line to stop flicker, CPU turbo, auto-fire, pseudo-stereo, Start = Pause), all off by default except True TMS colours and Start = Pause.
-- **MasterDrive titles:** register banks, extended colours, the taller screen modes, 16 sprites per line, turbo, and the picture extensions (extended sprite attributes, 16 × 16 and magnified sprites, line tables, window and text layers, unique-cell tiles).
+- **MasterDrive titles:** register banks, extended colours, the taller screen modes, 16 sprites per line, turbo, and the picture extensions (extended sprite attributes, 16 × 16 and magnified sprites, line tables, window and text layers, unique-cell tiles), PCM and wavetable sound, and the DMA engine.
 
 ## Needs a setting first
 
@@ -54,7 +56,7 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 
 ## Won't work yet
 
-- PCM and wavetable sound, the DMA engine, the SF-7000 and floppy disks, cards, cassettes, the mouse and trackball, multitaps, the link cable.
+- The SF-7000 and floppy disks, cards, cassettes, the mouse and trackball, multitaps, the link cable.
 - Pocket save states (Memories) and sleep.
 
 ## Unknown until it runs
@@ -63,7 +65,7 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - Loading large ROMs (the biggest Master System games are 1 MB) from the Pocket's memory.
 - Picture scaling and aspect on the Pocket's screen and on a TV through the Dock.
 - PAL: whether the picture is steady. The core keeps the Pocket's video clock fixed and makes PAL lines slightly uneven (345 or 346 pixel clocks); the Pocket's Developer > Statistics overlay should show 49.70 frames a second in PAL and 59.92 in NTSC.
-- Audio level, clicks or pops, and whether FM music is too loud or too quiet beside the PSG (the balance is a provisional choice: open question Q20 in the Technical Reference).
+- Audio level, clicks or pops, and whether FM music is too loud or too quiet beside the PSG (the balance is a provisional choice: open question Q20 in the Technical Reference); the same for the PCM and wavetable (Q27).
 - How the Pocket's own button remapping behaves with this core.
 
 ## What to report

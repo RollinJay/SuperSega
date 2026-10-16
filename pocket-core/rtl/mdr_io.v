@@ -58,6 +58,10 @@ module mdr_io (
     output reg  [7:0]  pcm_ctl,
     output wire        pcm_wr,
     input  wire [6:0]  pcm_fill,         // bytes queued in the PCM FIFO, 0-64
+    output wire        wt_wr,            // a wavetable port ($11-$15) written
+    output wire [2:0]  wt_reg,           // which: 0 = $11 ... 4 = $15
+    output wire        dma_start,        // $FA written with bit 7 set: start a DMA transfer
+    output wire [47:0] dma_regs,         // $F9-$F4 as written
 
     // controllers: {start, c, b(2/TR), a(1/TL), right, left, down, up} active high
     input  wire [7:0]  pad1,
@@ -249,6 +253,12 @@ module mdr_io (
     assign fm_wr  = wr && fm_present && (port == 8'hF0 || port == 8'hF1);
     assign fm_addr = port[0];
     assign pcm_wr = wr && md_io && port == 8'h07;
+    assign wt_wr  = wr && md_io && port >= 8'h11 && port <= 8'h15;
+    wire [7:0] wt_off = port - 8'h11;
+    assign wt_reg = wt_off[2:0];
+    // DMA: $F4-$FA are fully decoded in MasterDrive mode (not behind the I/O gate)
+    assign dma_start = wr && ss && port == 8'hFA && wdata[7];
+    assign dma_regs  = {dma[5], dma[4], dma[3], dma[2], dma[1], dma[0]};
     always @(posedge clk) if (wr && port == 8'hFB) dbg_ctl <= wdata;
     // TH latch (Gearsystem rule): a $3F write that leaves a TH pin configured as
     // an input while raising its level bit

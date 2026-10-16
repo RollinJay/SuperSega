@@ -26,7 +26,10 @@
 #      stays at 192 lines), and for the MasterDrive picture extensions (mdrgfx.sms:
 #      the ESAT, line tables, tile window, unique-cell tiles; mdrtext.sms: the
 #      text window, 16x16 and four-times magnified sprites, the renderer's
-#      busiest line; gfxfuzz*.sms: random registers, VRAM and CRAM); and the
+#      busiest line; gfxfuzz*.sms: random registers, VRAM and CRAM), and for
+#      the DMA engine (dma.sms: fills and copies from each source into VRAM and
+#      CRAM); the PCM and wavetable ROM's sound has each tone at the emulator's
+#      pitch and level on the sides it selects (pcm.sms); and the
 #      FM test ROM's sound
 #      follows the $F2 mute states with the right FM pitch and level (Master
 #      System and MasterDrive modes) and has no FM in Game Gear mode, and a
@@ -118,6 +121,7 @@ SYS_CASES=(
     "gfxfuzz6|gfxfuzz6.sms|ss|71|70||"
     "gfxfuzz25|gfxfuzz25.sms|ss|71|70||"
     "gfxfuzz38|gfxfuzz38.sms|ss|71|70||"
+    "dma|dma.sms|ss|11|10||"
 )
 run_sys_case() {
     local name rom mode n dumps topt jenv tol
@@ -132,34 +136,38 @@ run_sys_case() {
         > "$W/js/$name.log" 2>&1 || { echo "js_dump $name failed:"; cat "$W/js/$name.log"; return 1; }
 }
 export -f run_sys_case
-# FM sound: the FM test ROMs captured as audio and checked by tools/check_fm_wav.py,
-# in the two modes with the FM unit and in one without it, the tightly timed
-# driver at 200 % turbo (the bus synchroniser must hold its writes), and both
-# ROMs again on the PAL machine (pitches at 3.546893 MHz); run alongside the
-# frame cases
-# name | ROM | mode | tb_mdr options | check_fm_wav.py options
-FM_CASES=("fmsms|fm.sms|sms||" "fmss|fm.sms|ss||" "fmgg|fm.sms|gg||--no-fm" "fmturbo|fm_tight.sms|sms|-turbo 4|"
-          "fmpal|fm.sms|sms|-pal|--pal" "fmturbopal|fm_tight.sms|sms|-pal -turbo 4|--pal")
-run_fm_case() {
-    local name rom mode topt opt
-    IFS='|' read -r name rom mode topt opt <<< "$1"
+# Sound: test ROMs captured as audio and checked by a tool. The FM test ROMs
+# (tools/check_fm_wav.py) in the two modes with the FM unit and in one without
+# it, the tightly timed driver at 200 % turbo (the bus synchroniser must hold its
+# writes), and both ROMs again on the PAL machine (pitches at 3.546893 MHz); the
+# PCM and wavetable ROM (tools/check_pcm_wav.py, four phases of 30 frames). Run
+# alongside the frame cases.
+# name | ROM | mode | frames | tb_mdr options | check tool | its options
+SOUND_CASES=("fmsms|fm.sms|sms|50||check_fm_wav.py|" "fmss|fm.sms|ss|50||check_fm_wav.py|"
+             "fmgg|fm.sms|gg|50||check_fm_wav.py|--no-fm" "fmturbo|fm_tight.sms|sms|50|-turbo 4|check_fm_wav.py|"
+             "fmpal|fm.sms|sms|50|-pal|check_fm_wav.py|--pal"
+             "fmturbopal|fm_tight.sms|sms|50|-pal -turbo 4|check_fm_wav.py|--pal"
+             "pcm|pcm.sms|ss|122||check_pcm_wav.py|")
+run_sound_case() {
+    local name rom mode n topt tool opt
+    IFS='|' read -r name rom mode n topt tool opt <<< "$1"
     rm -f "$W/sys/$name.wav" "$W/sys/$name.txt"   # a reused work directory must not show an old result
     # shellcheck disable=SC2086  # topt is empty or a list of options
-    (cd "$PC/sim/sys" && ./obj/tb_mdr "../../roms/$rom" "$mode" 50 "$W/sys/$name" -wav "$W/sys/$name.wav" $topt) \
+    (cd "$PC/sim/sys" && ./obj/tb_mdr "../../roms/$rom" "$mode" "$n" "$W/sys/$name" -wav "$W/sys/$name.wav" $topt) \
         > "$W/sys/$name.log" 2>&1 || { echo "tb_mdr $name failed:"; cat "$W/sys/$name.log"; return 1; }
     grep -q ', 0 violations' "$W/sys/$name.log" \
         || { echo "tb_mdr $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
     # shellcheck disable=SC2086  # opt is empty or one flag
-    python3 "$PC/tools/check_fm_wav.py" "$W/sys/$name.wav" $opt > "$W/sys/$name.txt" 2>&1 \
-        || { echo "$name: FM sound check failed:"; cat "$W/sys/$name.txt"; return 1; }
+    python3 "$PC/tools/$tool" "$W/sys/$name.wav" $opt > "$W/sys/$name.txt" 2>&1 \
+        || { echo "$name: sound check failed:"; cat "$W/sys/$name.txt"; return 1; }
 }
-export -f run_fm_case
-printf '%s\0' "${FM_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_fm_case "$1"' _ &
-fm_pid=$!
+export -f run_sound_case
+printf '%s\0' "${SOUND_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_sound_case "$1"' _ &
+sound_pid=$!
 sys_ok=1
 printf '%s\0' "${SYS_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_sys_case "$1"' _ || sys_ok=0
-fm_ok=1
-wait "$fm_pid" || fm_ok=0                     # never leave the FM runs behind
+sound_ok=1
+wait "$sound_pid" || sound_ok=0               # never leave the sound runs behind
 [ "$sys_ok" = 1 ] || exit 1                   # the failing case has printed its log
 fail=0
 for c in "${SYS_CASES[@]}"; do
@@ -169,10 +177,14 @@ for c in "${SYS_CASES[@]}"; do
         python3 tools/ppmdiff.py "$W/sys/${name}_$f.ppm" "$W/js/${name}_$f.ppm" ${tol:+--tol "$tol"} || fail=1
     done
 done
-[ "$fm_ok" = 1 ] || fail=1
-for c in "${FM_CASES[@]}"; do
-    IFS='|' read -r name rom mode topt opt <<< "$c"
-    printf '%-9s %-12s %-4s %-9s FM sound ($F2 states, pitch, level): ' "$name" "$rom" "$mode" "$topt"
+[ "$sound_ok" = 1 ] || fail=1
+for c in "${SOUND_CASES[@]}"; do
+    IFS='|' read -r name rom mode n topt tool opt <<< "$c"
+    case "$tool" in
+        check_fm_wav.py) what='FM sound ($F2 states, pitch, level)' ;;
+        *) what='PCM and wavetable (sides, pitch, level)' ;;
+    esac
+    printf '%-9s %-12s %-4s %-9s %s: ' "$name" "$rom" "$mode" "$topt" "$what"
     tail -n 1 "$W/sys/$name.txt" 2>/dev/null || echo "no result"
 done
 # frame timing: NTSC 262 lines of 228 base cycles (3420 clk_sys each); PAL 313

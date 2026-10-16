@@ -42,6 +42,7 @@ module mdr_mem (
     input  wire        rd_n,
     input  wire        wr_n,
     input  wire        rd_start,       // T1 of a memory read
+    input  wire [1:0]  dma_src,        // a DMA read: 1 the card (bank $0B), 2 work RAM (the selected bank)
     output reg  [7:0]  rdata,
     output wire        wait_n,
 
@@ -155,6 +156,10 @@ module mdr_mem (
         end
         default: tgt = T_OPEN;
         endcase
+        // DMA sources 1 and 2 (Technical Reference section 9) read the card or the
+        // selected work RAM bank directly, whatever the mapper, $09 and $3E say
+        if (dma_src == 2'd1) begin tgt = card_present ? T_CARD : T_OPEN; roff = {4'd0, card_bank, a[13:0]}; end
+        if (dma_src == 2'd2) begin tgt = T_WRAM; woff = {wram_bank, a[12:0]}; end
     end
 
     // ------------------------------------------------------------ RAMs

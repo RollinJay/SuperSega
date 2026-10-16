@@ -227,9 +227,10 @@ module mdr_top #(
     reg         nmi_n;
 
     wire        cart_wait_n;
+    wire        dma_busy, dma_bus;           // DMA: the CPU is held; the engine owns the memory bus
     mdr_z80 u_cpu (
         .clk(clk_sys), .reset_n(~reset), .cen(ce_cpu),
-        .wait_n(mem_wait_n && sync_wait_n && cart_wait_n), .int_n(int_n), .nmi_n(nmi_n),
+        .wait_n(mem_wait_n && sync_wait_n && cart_wait_n && !dma_busy), .int_n(int_n), .nmi_n(nmi_n),
         .a(a), .dout(cpu_dout), .din(cpu_din),
         .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
         .m1_n(m1_n), .rfsh_n(rfsh_n), .halt_n(halt_n),
@@ -258,13 +259,24 @@ module mdr_top #(
     // and that logic is too deep to reach the controller's registers within the
     // same clock; this register stage delays each access by one clock (19 ns),
     // well inside a T-state.
+    // While a DMA transfer owns the bus (the CPU is held) its reads take the
+    // CPU's place; when it ends, a read the CPU was in the middle of is made
+    // again (dma_redo), since the transfer's reads replaced its data.
     reg  [15:0] m_a = 16'd0;
     reg  [7:0]  m_dout = 8'd0;
     reg         m_mreq_n = 1'b1, m_rd_n = 1'b1, m_wr_n = 1'b1, m_rd_start = 1'b0;
+    reg  [1:0]  m_dsrc = 2'd0;
+    wire [15:0] dma_m_a;
+    wire        dma_m_rd;
+    wire [1:0]  dma_m_src;
+    reg         dma_bus_d = 1'b0;
+    wire        dma_redo = dma_bus_d && !dma_bus && !mreq_n && !rd_n;
     always @(posedge clk_sys) begin
-        m_a <= a; m_dout <= cpu_dout;
-        m_mreq_n <= mreq_n; m_rd_n <= rd_n; m_wr_n <= wr_n;
-        m_rd_start <= mem_rd_start;
+        dma_bus_d <= dma_bus;
+        m_a <= dma_bus ? dma_m_a : a; m_dout <= cpu_dout;
+        m_mreq_n <= dma_bus ? 1'b0 : mreq_n; m_rd_n <= dma_bus ? 1'b0 : rd_n; m_wr_n <= dma_bus ? 1'b1 : wr_n;
+        m_rd_start <= dma_bus ? dma_m_rd : (mem_rd_start || dma_redo);
+        m_dsrc <= dma_bus ? dma_m_src : 2'd0;
     end
     wire [7:0]  mem_rdata;
     wire [7:0]  mem_ctl, io_ctl, slot_sel;
@@ -274,7 +286,7 @@ module mdr_top #(
         .clk(clk_sys), .rst(reset), .mode(mode), .mapper(mapper), .sc_ram32(sc_ram32),
         .rom_mask(rom_mask), .card_present(card_present), .card_mask(card_mask),
         .a(m_a), .dout(m_dout), .mreq_n(m_mreq_n), .rd_n(m_rd_n), .wr_n(m_wr_n),
-        .rd_start(m_rd_start), .rdata(mem_rdata), .wait_n(mem_wait_n),
+        .rd_start(m_rd_start), .dma_src(m_dsrc), .rdata(mem_rdata), .wait_n(mem_wait_n),
         .mem_ctl(mem_ctl), .wram_bank(wram_bank), .slot_sel(slot_sel), .card_bank(card_bank),
         .rom_req(rom_req), .rom_addr(rom_addr), .rom_ack(rom_ack), .rom_data(rom_data),
         .sv_clk(sv_clk), .sv_we(sv_we), .sv_addr(sv_addr), .sv_din(sv_din), .sv_dout(sv_dout),
@@ -283,6 +295,10 @@ module mdr_top #(
     // ------------------------------------------------------------ I/O
     wire [7:0]  io_rdata, vdp_rdata;
     wire        vdp_rd, vdp_wr, th_latch, psg_wr, stereo_wr, fm_wr, fm_addr, pcm_wr;
+    wire        wt_wr, dma_start;
+    wire [2:0]  wt_reg;
+    wire [47:0] dma_regs;
+    wire [6:0]  pcm_fill;
     wire [1:0]  fm_ctl;
     wire [7:0]  pcm_ctl;
     wire [7:0]  vdp_fea, vdp_fec;
@@ -308,7 +324,7 @@ module mdr_top #(
         .psg_wr(psg_wr), .stereo_wr(stereo_wr), .fm_wr(fm_wr), .fm_addr(fm_addr), .fm_ctl(fm_ctl),
         .mem_ctl(mem_ctl), .io_ctl(io_ctl), .wram_bank(wram_bank), .slot_sel(slot_sel),
         .card_bank(card_bank), .turbo_step(turbo_step), .pcm_ctl(pcm_ctl), .pcm_wr(pcm_wr),
-        .pcm_fill(7'd0),
+        .pcm_fill(pcm_fill), .wt_wr(wt_wr), .wt_reg(wt_reg), .dma_start(dma_start), .dma_regs(dma_regs),
         .pad1(pad1_eff), .pad2(pad2_eff), .reset_btn(reset_btn), .kb_keys(kb_keys), .kb_ghosting(kb_ghosting));
 
     // CPU data in
@@ -328,9 +344,26 @@ module mdr_top #(
         .th_latch(th_latch), .int_n(int_n),
         .ce_pix(ce_pix), .vid_rgb(vid_bgr), .vid_de(vid_de), .vid_hs(vid_hs), .vid_vs(vid_vs),
         .vid_frame(vid_frame), .gg_crop(gg_crop),
+        .dma_vwe(dma_vwe), .dma_vre(dma_vre), .dma_vaddr(dma_vaddr), .dma_vdin(dma_vdin), .dma_vdout(dma_vdout),
+        .dma_cwe(dma_cwe), .dma_caddr(dma_caddr), .dma_cdin(dma_cdin), .dma_cready(dma_cready),
         .out_fea(vdp_fea), .out_fec(vdp_fec), .out_active(vdp_active),
         .dbg_line(dbg_line), .dbg_hc(dbg_hc), .dbg_status());
     assign vid_ce = ce_pix;
+
+    // ------------------------------------------------------------ DMA engine
+    wire        dma_vwe, dma_vre, dma_cwe, dma_cready;
+    wire [14:0] dma_vaddr;
+    wire [7:0]  dma_vdin, dma_vdout, dma_cdin;
+    wire [8:0]  dma_caddr;
+    mdr_dma u_dma (
+        .clk(clk_sys), .rst(reset), .ce_cpu(ce_cpu), .start(dma_start),
+        .r_f4(dma_regs[7:0]), .r_f5(dma_regs[15:8]), .r_f6(dma_regs[23:16]), .r_f7(dma_regs[31:24]),
+        .r_f8(dma_regs[39:32]), .r_f9(dma_regs[47:40]), .r_fa(cpu_dout),
+        .ws200(step_eff == 3'd4 && mode != 3'd4),
+        .busy(dma_busy), .bus(dma_bus),
+        .m_a(dma_m_a), .m_rd(dma_m_rd), .m_src(dma_m_src), .m_wait_n(mem_wait_n), .m_data(mem_rdata),
+        .v_we(dma_vwe), .v_re(dma_vre), .v_addr(dma_vaddr), .v_din(dma_vdin), .v_dout(dma_vdout),
+        .c_we(dma_cwe), .c_addr(dma_caddr), .c_din(dma_cdin), .c_ready(dma_cready));
 
     // ------------------------------------------------------------ bus synchroniser
     // Count base cycles since the last VDP port access; at turbo, an access that
@@ -445,11 +478,17 @@ module mdr_top #(
     // the 16-bit full scale is 6.25 PSG channels at full volume, as in the
     // emulator. Nine FM channels at full volume then fit; both chips at full
     // volume together can still reach the limit, where the output saturates.
+    // PCM and wavetable (MasterDrive mode; $F2 does not mute them, as in the
+    // emulator: open question Q27)
+    wire signed [15:0] pcm_l, pcm_r;
+    mdr_pcm u_pcm (
+        .clk(clk_sys), .rst(reset), .pcm_wr(pcm_wr), .din(cpu_dout), .rate(pcm_ctl[1:0]), .fill(pcm_fill),
+        .wt_wr(wt_wr), .wt_reg(wt_reg), .out_l(pcm_l), .out_r(pcm_r));
     wire               psg_on = (fm_ctl == 2'd0) || (fm_ctl == 2'd3);
     wire               fm_on  = fm_ctl[0];
     wire signed [19:0] fm_s   = fm_on ? {{4{fm_out[15]}}, fm_out} <<< 3 : 20'sd0;
-    wire signed [19:0] mix_l  = (psg_on ? {{4{psg_l[15]}}, psg_l} : 20'sd0) + fm_s;
-    wire signed [19:0] mix_r  = (psg_on ? {{4{psg_r[15]}}, psg_r} : 20'sd0) + fm_s;
+    wire signed [19:0] mix_l  = (psg_on ? {{4{psg_l[15]}}, psg_l} : 20'sd0) + fm_s + {{4{pcm_l[15]}}, pcm_l};
+    wire signed [19:0] mix_r  = (psg_on ? {{4{psg_r[15]}}, psg_r} : 20'sd0) + fm_s + {{4{pcm_r[15]}}, pcm_r};
     function [15:0] sat16(input signed [19:0] v);
         sat16 = (v > 20'sd32767) ? 16'h7FFF : (v < -20'sd32768) ? 16'h8000 : v[15:0];
     endfunction

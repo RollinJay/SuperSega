@@ -6,7 +6,8 @@ usage: mk_testrom.py outdir
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
 tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, romwait.sms, tms_g2_224.sms, tms_g2_240.sms,
 tms_txt_240.sms (the TMS9918 modes at 224 and 240 lines, build_tms_tall), mdrgfx.sms and mdrtext.sms (the MasterDrive
-picture extensions, build_mdrgfx), gfxfuzz*.sms (random pictures, build_gfxfuzz), and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+picture extensions, build_mdrgfx), gfxfuzz*.sms (random pictures, build_gfxfuzz), dma.sms (the DMA engine,
+build_dma), pcm.sms (PCM and wavetable sound, build_pcm), and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -16,6 +17,7 @@ mode) and one at Y=$F8 (wraps to the top), and scrolls both axes once per frame
 from the frame interrupt. The pictures from the emulator, the RTL machine and
 Gearsystem (192/224) are compared frame by frame.
 """
+import math
 import os
 import sys
 
@@ -1119,6 +1121,172 @@ def build_gfxfuzz(seed):
     rom[0x7FFF] = 0x8C
     return bytes(rom)
 
+def build_dma():
+    """The DMA engine (Technical Reference section 9), drawn so the core and the
+    emulator can be compared. In MasterDrive mode, with the display off, the
+    ROM fills the name table (mode 2), copies 64 tiles from ROM (mode 0, source
+    0) and three palettes into CRAM (mode 0 to CRAM, extended CRAM), copies 256
+    bytes from work RAM bank 3 (source 2), copies 16 tiles VRAM to VRAM (mode
+    1), copies from the card slot with no card in it ($FF, source 1), and fills
+    $3FE0-$401F, which runs on into the upper 16 KB, where unique-cell tile 512
+    shows it. Then it writes rows of names that show each result and turns the
+    display on: rows 0-7 the ROM tiles, row 9 the work RAM tiles, row 11 the
+    copied tiles, row 13 the card's, row 15 tile 512, the rest the filled name
+    (tile 2, flipped)."""
+    a = Asm()
+    a.org(0x0000)
+    a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0); a.db(0xC3); a.ref16('main')
+    a.org(0x0038); a.db(0xF5, 0xDB, 0xBF, 0xF1, 0xFB, 0xED, 0x4D)
+    a.org(0x0066); a.db(0xED, 0x45)
+    a.org(0x0100); a.label('main')
+    regs = [(0xA1, 0x8F)]                                       # I/O gate, XRB, native CRAM
+    regs += [(v, 0x80 | i) for i, v in enumerate([0x06, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF])]
+    regs += [(0x12, 0x92), (0x00, 0x93), (0x08, 0x97)]          # extended CRAM, VRAM expansion; unique-cell
+    a.db(0x21); a.ref16('regs'); a.db(0x06, 2 * len(regs), 0x0E, 0xBF, 0xED, 0xB3)
+    # work RAM bank 3: 256 bytes, then back to bank 0
+    a.db(0x3E, 0x03, 0xD3, 0x0A)
+    a.db(0x21); a.dw(0xC000); a.db(0x06, 0x00)
+    a.label('wr'); a.db(0x78, 0x2F, 0xE6, 0x7F, 0x77, 0x23, 0x10); a.rel('wr')   # (HL) = ~B & $7F
+    jobs = []
+
+    def dma(src, ctl, dst, length):
+        lab = f'job{len(jobs)}'
+        jobs.append((lab, [src & 0xFF, src >> 8, ctl, dst & 0xFF, dst >> 8, length & 0xFF, 0x80 | (length >> 8)]))
+        a.db(0x21); a.ref16(lab); a.db(0xCD); a.ref16('dmago')
+
+    dma(0x0202, 0x08, 0x3800, 32 * 28 * 2)        # fill the name table with name $0202
+    dma(0, 0x00, 0x0000, 64 * 32); a.label('rom_src_fix')
+    dma(0, 0x00, 0x4000 | 0x0000, 96)             # palettes 0-2 to CRAM (bit 6 of the high byte)
+    dma(0, 0x00, 0x4000 | 0x00A0, 32)             # palette 5
+    dma(0x0000, 0x02, 0x0800, 256)                # work RAM bank 3 -> tiles 64-71
+    dma(0x0000, 0x04, 0x1000, 512)                # VRAM $0000 -> $1000: tiles 128-143
+    dma(0x2000, 0x01, 0x0C00, 256)                # the card (none: $FF) -> tiles 96-103
+    dma(0x005A, 0x08, 0x3FE0, 0x40)               # fill $3FE0-$401F with $5A: into the upper 16 KB
+    a.db(0x3E, 0x00, 0xD3, 0x0A)
+    # sprites off; names for the result rows
+    a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0x7F, 0xD3, 0xBF, 0x3E, 0xD0, 0xD3, 0xBE)
+    rows = {}
+    for r in range(8):
+        rows[r] = [(r * 8 + c % 8, 0x08 * (c // 16) | (0x20 if c % 16 >= 8 else 0)) for c in range(32)]
+    rows[9] = [(64 + c % 8, 0x48) for c in range(32)]          # palette 5
+    rows[11] = [(128 + c % 16, 0x20) for c in range(32)]       # palette 2
+    rows[13] = [(96 + c % 8, 0x08) for c in range(32)]
+    rows[15] = [(0, 0x80) for c in range(32)]                  # tile 512
+    for r, ents in rows.items():
+        addr = 0x3800 + r * 64
+        a.db(0x3E, addr & 0xFF, 0xD3, 0xBF, 0x3E, 0x40 | (addr >> 8), 0xD3, 0xBF)
+        a.db(0x21); a.ref16(f'row{r}'); a.db(0x06, 64, 0x0E, 0xBE, 0xED, 0xB3)
+    a.db(0x3E, 0x40, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)        # display on
+    a.label('loop'); a.db(0x18); a.rel('loop')
+    a.label('dmago')                                           # HL -> $F4-$FA
+    a.db(0x0E, 0xF4, 0x06, 0x07)
+    a.label('dl'); a.db(0xED, 0xA3, 0x0C, 0x78, 0xB7, 0x20); a.rel('dl'); a.db(0xC9)   # OUTI ; INC C ; LD A,B ; OR A ; JR NZ
+    a.label('regs')
+    for v, r in regs:
+        a.db(v, r)
+    for r, ents in rows.items():
+        a.label(f'row{r}'); a.db(*[v for e in ents for v in e])
+    a.label('tiles')
+    a.db(*[v for t in range(64) for r in range(8) for v in _bg_tile(t + 8, r)])
+    a.label('pals')
+    for p in range(3):
+        for c in range(16):
+            r_, g, b = (c + p * 5) & 15, (c * 3 + p * 7) & 15, (15 - c + p * 3) & 15
+            a.db((g << 4) | r_, b)
+    a.label('pal5')
+    for c in range(16):
+        a.db(((c * 2) & 15) << 4 | 15, c)
+    for lab, data in jobs:
+        a.label(lab); a.db(*data)
+    a.resolve()
+    rom = a.b
+    # the ROM-source jobs point at the tile and palette data
+    for i, lab in ((1, 'tiles'), (2, 'pals'), (3, 'pal5')):
+        at = a.labels[f'job{i}']
+        rom[at] = a.labels[lab] & 0xFF; rom[at + 1] = a.labels[lab] >> 8
+    # the CRAM jobs: $F8 bit 6 (the destination high byte above carried $40)
+    for i in (2, 3):
+        at = a.labels[f'job{i}']
+        rom[at + 4] = 0x40
+    assert a.pc <= 0x7FF0, hex(a.pc)
+    rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
+    cs = sum(rom[0:0x7FF0]) & 0xFFFF
+    rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
+    rom[0x7FFF] = 0x8C
+    return bytes(rom)
+
+
+PCM_PHASES = 30          # frames per phase: PCM alone, wavetable alone, both, silence
+
+
+def _wave_sine():
+    return [round(8 + 7 * math.sin(2 * math.pi * k / 32)) for k in range(32)]
+
+
+def build_pcm():
+    """PCM and wavetable sound (Technical Reference section 7), for
+    tools/check_pcm_wav.py. MasterDrive mode, the I/O gate open. Frames 0-29:
+    the PCM plays a square wave at 8,000 samples a second, 16 samples of 192
+    and 16 of 64 (250 Hz), the ROM keeping its FIFO above 32 bytes by reading
+    $08. Frames 30-59: the PCM stops (its output holds the last sample) and
+    the wavetable plays: voice 0 a sine of 32 samples, frequency 125 (400 Hz),
+    volume 15, both sides; voice 1 a square (15, then 0), frequency 250 (800
+    Hz), volume 8, the left side only. Frames 60-89: both. Frames 90-119:
+    silence. Then the cycle repeats."""
+    a = Asm()
+    a.org(0x0000)
+    a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0); a.db(0xC3); a.ref16('main')
+    a.org(0x0038)                                          # frame IRQ: count frames at $C000
+    a.db(0xF5, 0xDB, 0xBF, 0x3A); a.dw(0xC000); a.db(0x3C, 0x32); a.dw(0xC000)
+    a.db(0xF1, 0xFB, 0xED, 0x4D)
+    a.org(0x0066); a.db(0xED, 0x45)
+    a.org(0x0100); a.label('main')
+    a.db(0xAF, 0x32); a.dw(0xC000)
+    a.db(0x3E, 0x80, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)    # R15 = $80: the I/O gate
+    a.db(0x3E, 0x00, 0xD3, 0x08)                           # PCM at 8,000 a second
+    # wavetable voices: waveforms, then frequency, volume and sides (not yet keyed on)
+    for v, wave, f, vol, sides in ((0, _wave_sine(), 125, 15, 3), (1, [15] * 16 + [0] * 16, 250, 8, 2)):
+        for k, smp in enumerate(wave):
+            a.db(0x3E, (v << 5) | k, 0xD3, 0x11, 0x3E, smp, 0xD3, 0x12)
+        a.db(0x3E, v << 5, 0xD3, 0x11)
+        a.db(0x3E, f & 0xFF, 0xD3, 0x13, 0x3E, f >> 8, 0xD3, 0x14)
+        a.db(0x3E, (sides << 4) | vol, 0xD3, 0x15)
+    a.db(0x3E, 0x20, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)    # frame IRQ on, display off
+    a.db(0xFB)
+    a.db(0x21); a.ref16('square')                          # HL: the next PCM sample
+    a.label('loop')
+    a.db(0x3A); a.dw(0xC000)                               # A = frame
+    a.db(0xFE, PCM_PHASES); a.db(0x38); a.rel('feed')      # < 30: PCM
+    a.db(0xFE, 2 * PCM_PHASES); a.db(0x30); a.rel('p3')
+    a.db(0xCD); a.ref16('keyon'); a.db(0x18); a.rel('loop')   # 30-59: wavetable only
+    a.label('p3')
+    a.db(0xFE, 3 * PCM_PHASES); a.db(0x30); a.rel('quiet')
+    a.label('feed')
+    a.db(0xDB, 0x08, 0xE6, 0x70, 0xFE, 0x40); a.db(0x30); a.rel('loop')   # FIFO at 32 bytes or more
+    a.db(0x06, 0x08)
+    a.label('put'); a.db(0x7E, 0xD3, 0x07, 0x23, 0x7D, 0xE6, 0x1F, 0x20); a.rel('next')
+    a.db(0x21); a.ref16('square')                          # wrap at 32 samples (the table is aligned)
+    a.label('next'); a.db(0x10); a.rel('put')
+    a.db(0x3A); a.dw(0xC000); a.db(0xFE, 2 * PCM_PHASES); a.db(0x38); a.rel('loop')
+    a.db(0xCD); a.ref16('keyon'); a.db(0x18); a.rel('loop')
+    a.label('quiet')                                       # 90-119: keys off, the PCM stops
+    a.db(0x3E, 0x00, 0xD3, 0x11, 0x3E, 0x00, 0xD3, 0x14, 0x3E, 0x20, 0xD3, 0x11, 0x3E, 0x00, 0xD3, 0x14)
+    a.label('hush'); a.db(0x3A); a.dw(0xC000); a.db(0xFE, 4 * PCM_PHASES); a.db(0x38); a.rel('hush')
+    a.db(0xAF, 0x32); a.dw(0xC000); a.db(0x18); a.rel('loop')   # then the cycle again from frame 0
+    a.label('keyon')                                       # key on both voices (frequency high bits 0)
+    a.db(0x3E, 0x00, 0xD3, 0x11, 0x3E, 0x80, 0xD3, 0x14, 0x3E, 0x20, 0xD3, 0x11, 0x3E, 0x80, 0xD3, 0x14, 0xC9)
+    while a.pc & 0x1F:
+        a.db(0x00)
+    a.label('square'); a.db(*([192] * 16 + [64] * 16))
+    a.resolve()
+    rom = a.b
+    rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
+    cs = sum(rom[0:0x7FF0]) & 0xFFFF
+    rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
+    rom[0x7FFF] = 0x8C
+    return bytes(rom)
+
+
 if __name__ == '__main__':
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
@@ -1149,6 +1317,10 @@ if __name__ == '__main__':
     for m in ('g1', 'g2', 'mc', 'txt'):
         open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
         print(f'wrote tms_{m}.sg')
+    open(os.path.join(out, 'dma.sms'), 'wb').write(build_dma())
+    print('wrote dma.sms')
+    open(os.path.join(out, 'pcm.sms'), 'wb').write(build_pcm())
+    print('wrote pcm.sms')
     for sd in GFXFUZZ_SEEDS:
         open(os.path.join(out, f'gfxfuzz{sd}.sms'), 'wb').write(build_gfxfuzz(sd))
         print(f'wrote gfxfuzz{sd}.sms')
