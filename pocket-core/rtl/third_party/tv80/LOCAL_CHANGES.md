@@ -2,8 +2,8 @@
 
 tv80 (MIT, Guy Hutchison; a Verilog translation of Daniel Wallner's T80),
 from https://github.com/hutch31/tv80 at commit 66a131c38d05ef58b3d8c4f1507a72e6e4aa5d65,
-is vendored here unchanged except for two lines in `tv80_core.v`, each marked
-"MasterDrive local change":
+is vendored here unchanged except for two lines in `tv80_core.v` and two in
+`tv80_mcode.v` (one added, one removed), each marked "MasterDrive local change":
 
 - `Auto_Wait_t1 <= Auto_Wait || iorq_i;` (T80's original form) instead of
   `Auto_Wait || (iorq_i & ~Auto_Wait_t2)`. With an external WAIT holding an
@@ -17,6 +17,15 @@ is vendored here unchanged except for two lines in `tv80_core.v`, each marked
   it (machine profile `cpu.reset_state`); the emulator and Gearsystem start
   there too, so the three can be compared by instruction trace from the first
   instruction (pocket-core/tools/cmp_trace.py).
+- `tv80_mcode.v`, INI, IND, INIR and INDR: `TStates = 3'b101` added to the
+  opcode fetch (MCycle 0) and `TStates = 3'b100` removed from the memory write
+  (MCycle 2). The instructions now take the Z80's cycles: 4 for the `$ED`
+  fetch, 5 for the opcode fetch, 4 for the port read (with the automatic I/O
+  wait) and 3 for the memory write, and 5 more when they repeat. tv80 took 4,
+  4, 4 and 4: the same total, but the port read ended at T12 instead of T13,
+  where the Z80, MAME's Z80 and the emulator (probe M51) put it. Checked by
+  pocket-core/sim/z80, which compares every port access as well as every
+  instruction start with the emulator.
 
 One file is added, not changed: `LICENSE-T80`, the licence notice of T80, which tv80 translates.
 T80's licence asks for its notice to go with synthesized forms, so `pocket/build_core.sh` puts it

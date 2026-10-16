@@ -1,7 +1,8 @@
 #!/bin/sh
 # Z80 wrapper timing test (iverilog): the start cycle of every instruction of a
 # short program covering the timing classes (IX/IY, DDCB, block I/O, IN/OUT,
-# CALL/RET) on the RTL CPU wrapper, against the emulator's Z80.
+# CALL/RET) on the RTL CPU wrapper, and the T-state, port and value of every
+# port access, against the emulator's Z80.
 # usage: ./run.sh [emulator page]   (default: ../../../emulator/masterdrive-emulator.html)
 set -e
 R=../../rtl

@@ -4,7 +4,7 @@
 #   0. the Pocket definition files (input.json, interact.json) are within the
 #      platform's limits and match what pocket/mdr_pocket.v reads and decodes
 #   1. tools/mk_testrom.py reproduces roms/ byte for byte
-#   2. sim/z80: the Z80 wrapper's instruction timing matches the emulator's Z80
+#   2. sim/z80: the Z80 wrapper's instruction and port-access timing matches the emulator's Z80
 #   3. sim/io: the SC-3000 keyboard's ghosting and the math unit's divide, which
 #      take several clocks in the core, match reference models
 #   4. sim/sys: the machine draws the same frames as the emulator's machine model

@@ -2479,6 +2479,11 @@ module tv80_mcode
                   case (1'b1) // MCycle
                     MCycle[0] :
                       begin
+                        // MasterDrive local change: 5 T-states for the opcode fetch, and the
+                        // default 3 for the memory write in MCycle[2], as on the Z80 (4, 5, 4, 3,
+                        // +5 when repeating). tv80 took 4 and 4, so the port read ended at T12
+                        // instead of T13.
+                        TStates = 3'b101;
                         Set_Addr_To = aBC;
                         Set_BusB_To = 4'b1010;
                         Set_BusA_To = 4'b0000;
@@ -2504,7 +2509,8 @@ module tv80_mcode
                           begin
 			    IncDec_16 = 4'b1110;
                           end
-                        TStates = 3'b100;
+                        // MasterDrive local change: no TStates here; the memory write takes the
+                        // default 3 T-states (see MCycle[0]).
                         Write = 1'b1;
                         I_BTR = 1'b1;
                       end // case: 3

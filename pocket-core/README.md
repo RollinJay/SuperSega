@@ -11,7 +11,7 @@ rtl/                  the machine (platform-independent)
   mdr_vdp.v            VDP: Mode 4 and the TMS9918 modes, with the MasterDrive register file
   mdr_psg.v            SN76489 (Sega) with stereo panning
   mdr_dpram.v          inferred dual-port block RAM
-  third_party/tv80/   Z80 core (MIT); two local changes, see LOCAL_CHANGES.md
+  third_party/tv80/   Z80 core (MIT); three local changes, see LOCAL_CHANGES.md
   third_party/ikaopll/ YM2413 FM core (BSD 2-Clause), unchanged; upstream commit in VERSION
 pocket/               Analogue Pocket platform layer
   core_top.v          APF top level (port list from the APF template)
@@ -45,7 +45,7 @@ Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check
 ```sh
 python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, fm, fm_tight, mdrfeat, ports, tms_* test ROMs
 python3 tools/check_core_json.py             # input.json/interact.json against platform limits and the RTL
-(cd sim/z80 && ./run.sh)                     # Z80 wrapper timing against the emulator's Z80
+(cd sim/z80 && ./run.sh)                     # Z80 wrapper timing and port accesses against the emulator's Z80
 (cd sim/io && ./run.sh)                      # keyboard ghosting and math unit against reference models
 (cd syn && yosys -q -l synth.log synth.ys)   # resource estimate; rewrites syn/synth.log
 cd sim/sys && ./build.sh && mkdir -p out
@@ -81,7 +81,7 @@ pocket/build_core.sh                 # about 15 minutes; needs network access an
 
 ## Licences
 
-- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80, whose BSD-style notice is in `rtl/third_party/tv80/LICENSE-T80`). Two lines changed, documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`.
+- tv80: MIT (Guy Hutchison; derived from Daniel Wallner's T80, whose BSD-style notice is in `rtl/third_party/tv80/LICENSE-T80`). Three small changes, documented in `rtl/third_party/tv80/LOCAL_CHANGES.md`.
 - IKAOPLL: BSD 2-Clause (Sehyeon Kim, who signs its LICENSE as Raki). Unchanged; `rtl/third_party/ikaopll/VERSION` gives the upstream commit. Its README says its 9-bit output design and VRC7 instrument set were copied from Nuked-SMS-FPGA, which is GPL-2.0-or-later; design doc §16 says why the core keeps IKAOPLL under BSD.
 - agg23 analogue-pocket-utils: MIT (Adam Gastineau).
 - APF framework files: Analogue's licence; fetched by `setup.sh`, not included.

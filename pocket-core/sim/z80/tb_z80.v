@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 // Z80 wrapper timing test: runs prog.hex, logs each instruction start (M1) with
-// the T-state count, and every I/O access with the T-state at which io_sample fired.
+// the T-state count, and every I/O access (full 16-bit address, direction,
+// value) with the T-state at which io_sample fired.
 module tb;
     reg clk = 0; always #5 clk = ~clk;
     reg reset_n = 0;
@@ -29,7 +30,7 @@ module tb;
     always @(posedge clk) begin
         m1_prev <= m1_n;
         if (m1_prev && !m1_n) $fdisplay(f, "M1 %0d %04x", tcount, a);
-        if (io_sample) $fdisplay(f, "IO %0d %02x %0d %02x", tcount, a[7:0], io_write, io_write ? dout : (a[7:0] ^ 8'h5A));
+        if (io_sample) $fdisplay(f, "IO %0d %04x %0d %02x", tcount, a, io_write, io_write ? dout : (a[7:0] ^ 8'h5A));
         if (mem_rd_start && !m1_n && 0) ;
     end
     initial begin
