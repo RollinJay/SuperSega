@@ -28,8 +28,10 @@
 #      text window, 16x16 and four-times magnified sprites, the renderer's
 #      busiest line; gfxfuzz*.sms: random registers, VRAM and CRAM), and for
 #      the DMA engine (dma.sms: fills and copies from each source into VRAM and
-#      CRAM); the PCM and wavetable ROM's sound has each tone at the emulator's
-#      pitch and level on the sides it selects (pcm.sms); and the
+#      CRAM, and short transfers at each turbo step; the CPU's time for each
+#      transfer against the emulator's, instruction by instruction); the PCM
+#      and wavetable ROM's sound has each tone at the emulator's pitch and level
+#      on the sides it selects, the PCM at all four rates (pcm.sms); and the
 #      FM test ROM's sound
 #      follows the $F2 mute states with the right FM pitch and level (Master
 #      System and MasterDrive modes) and has no FM in Game Gear mode, and a
@@ -140,14 +142,14 @@ export -f run_sys_case
 # (tools/check_fm_wav.py) in the two modes with the FM unit and in one without
 # it, the tightly timed driver at 200 % turbo (the bus synchroniser must hold its
 # writes), and both ROMs again on the PAL machine (pitches at 3.546893 MHz); the
-# PCM and wavetable ROM (tools/check_pcm_wav.py, four phases of 30 frames). Run
+# PCM and wavetable ROM (tools/check_pcm_wav.py, seven phases of 20 frames). Run
 # alongside the frame cases.
 # name | ROM | mode | frames | tb_mdr options | check tool | its options
 SOUND_CASES=("fmsms|fm.sms|sms|50||check_fm_wav.py|" "fmss|fm.sms|ss|50||check_fm_wav.py|"
              "fmgg|fm.sms|gg|50||check_fm_wav.py|--no-fm" "fmturbo|fm_tight.sms|sms|50|-turbo 4|check_fm_wav.py|"
              "fmpal|fm.sms|sms|50|-pal|check_fm_wav.py|--pal"
              "fmturbopal|fm_tight.sms|sms|50|-pal -turbo 4|check_fm_wav.py|--pal"
-             "pcm|pcm.sms|ss|122||check_pcm_wav.py|")
+             "pcm|pcm.sms|ss|142||check_pcm_wav.py|")
 run_sound_case() {
     local name rom mode n topt tool opt
     IFS='|' read -r name rom mode n topt tool opt <<< "$1"
@@ -217,6 +219,15 @@ printf '%-9s cartridge wait state at 200 %%: ' romwait
 python3 tools/read_ports_ppm.py "$W/sys/romwait_13.ppm" | sed -n 1,4p | tr '\n' ' ' > "$W/sys/romwait.txt"
 want='$04: $37 $14: $32 $03: $35 $13: $35 '
 if [ "$(cat "$W/sys/romwait.txt")" = "$want" ]; then echo 'ROM line $37, RAM $32 at 200 %; both $35 at 175 %'; else echo "WRONG:"; cat "$W/sys/romwait.txt"; echo; fail=1; fi
+# the DMA charge (Q26: the emulator's): dma.sms traced instruction by instruction
+# on the core, with the Pocket's PSRAM latency (9 clocks), and on the emulator,
+# up to its first turbo step; each transfer must cost the CPU the same time
+printf '%-9s DMA charge, 100 %%, PSRAM latency: ' dmatime
+if (cd "$PC/sim/sys" && ./obj/tb_mdr ../../roms/dma.sms ss 2 "$W/sys/dmatime" -lat 9 -trace 4000 "$W/sys/dmatime_rt.bin") \
+       > "$W/sys/dmatime.log" 2>&1 &&
+   node "$PC/../emulator/tools/jstrace.js" "$PAGE" "$PC/roms/dma.sms" ss 4000 "$W/js/dmatime_js.bin" >> "$W/sys/dmatime.log" 2>&1; then
+    python3 tools/cmp_cycles.py "$W/sys/dmatime_rt.bin" "$W/js/dmatime_js.bin" roms/dma.sms || fail=1
+else echo "FAILED:"; cat "$W/sys/dmatime.log"; fail=1; fi
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"

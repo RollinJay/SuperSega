@@ -259,9 +259,12 @@ module mdr_top #(
     // and that logic is too deep to reach the controller's registers within the
     // same clock; this register stage delays each access by one clock (19 ns),
     // well inside a T-state.
-    // While a DMA transfer owns the bus (the CPU is held) its reads take the
-    // CPU's place; when it ends, a read the CPU was in the middle of is made
-    // again (dma_redo), since the transfer's reads replaced its data.
+    // While a DMA transfer owns the bus its reads take the CPU's place. The
+    // CPU's next opcode fetch starts during the transfer (its T1 comes before
+    // the CPU is held, in T2), so that read is remembered (cpu_rd_pend) and made
+    // when the bus is handed back, whether the fetch is still in T1 or waits in
+    // T2. Neither the transfer's reads nor that fetch start the cartridge wait
+    // state (m_nows): the DMA engine charges them itself.
     reg  [15:0] m_a = 16'd0;
     reg  [7:0]  m_dout = 8'd0;
     reg         m_mreq_n = 1'b1, m_rd_n = 1'b1, m_wr_n = 1'b1, m_rd_start = 1'b0;
@@ -269,13 +272,15 @@ module mdr_top #(
     wire [15:0] dma_m_a;
     wire        dma_m_rd;
     wire [1:0]  dma_m_src;
-    reg         dma_bus_d = 1'b0;
-    wire        dma_redo = dma_bus_d && !dma_bus && !mreq_n && !rd_n;
+    reg         cpu_rd_pend = 1'b0;
+    reg         m_nows = 1'b0;
     always @(posedge clk_sys) begin
-        dma_bus_d <= dma_bus;
+        if (reset || !dma_bus) cpu_rd_pend <= 1'b0;
+        else if (mem_rd_start) cpu_rd_pend <= 1'b1;
         m_a <= dma_bus ? dma_m_a : a; m_dout <= cpu_dout;
         m_mreq_n <= dma_bus ? 1'b0 : mreq_n; m_rd_n <= dma_bus ? 1'b0 : rd_n; m_wr_n <= dma_bus ? 1'b1 : wr_n;
-        m_rd_start <= dma_bus ? dma_m_rd : (mem_rd_start || dma_redo);
+        m_rd_start <= dma_bus ? dma_m_rd : (mem_rd_start || cpu_rd_pend);
+        m_nows <= dma_busy;
         m_dsrc <= dma_bus ? dma_m_src : 2'd0;
     end
     wire [7:0]  mem_rdata;
@@ -356,7 +361,8 @@ module mdr_top #(
     wire [7:0]  dma_vdin, dma_vdout, dma_cdin;
     wire [8:0]  dma_caddr;
     mdr_dma u_dma (
-        .clk(clk_sys), .rst(reset), .ce_cpu(ce_cpu), .start(dma_start),
+        .clk(clk_sys), .rst(reset), .ce_held(ce_cpu && (!mreq_n || !iorq_n)),
+        .fetch_ws(dma_busy && mem_rd_start && a < 16'hC000 && mode != 3'd4 && step_eff == 3'd4), .start(dma_start),
         .r_f4(dma_regs[7:0]), .r_f5(dma_regs[15:8]), .r_f6(dma_regs[23:16]), .r_f7(dma_regs[31:24]),
         .r_f8(dma_regs[39:32]), .r_f9(dma_regs[47:40]), .r_fa(cpu_dout),
         .ws200(step_eff == 3'd4 && mode != 3'd4),
@@ -409,7 +415,7 @@ module mdr_top #(
     reg  [1:0] cart_ws = 2'd0;
     always @(posedge clk_sys) begin
         if (reset) cart_ws <= 2'd0;
-        else if (m_rd_start && m_a < 16'hC000 && mode != 3'd4 && step_eff == 3'd4) cart_ws <= 2'd2;
+        else if (m_rd_start && !m_nows && m_a < 16'hC000 && mode != 3'd4 && step_eff == 3'd4) cart_ws <= 2'd2;
         else if (ce_cpu && cart_ws != 2'd0) cart_ws <= cart_ws - 2'd1;
     end
     assign cart_wait_n = (cart_ws != 2'd1);

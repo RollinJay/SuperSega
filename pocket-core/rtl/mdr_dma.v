@@ -12,9 +12,13 @@
 // The CPU is held from the start until the transfer is done and it has been
 // charged what the emulator charges (open question Q26): one T-state per
 // byte, and for a transfer from the CPU address space the cartridge wait
-// state on each byte read from $0000-$BFFF at 200 %. The charge is counted in
-// CPU enables while the CPU waits, so it is a T-state at any turbo step; when
-// the memory is slower than the charge, the CPU waits for the transfer.
+// state on each byte read from $0000-$BFFF at 200 %. The CPU goes on to the
+// T1 of its next opcode fetch and is held from that fetch's T2: the charge is
+// counted in the CPU enables at which it waits (ce_held), one wait state
+// each, so it is a T-state at any turbo step. The fetch's own cartridge wait
+// state at 200 % (fetch_ws, from mdr_top) is added to the charge, since it
+// would otherwise fall inside the hold. When the memory is slower than the
+// charge, the CPU waits for the transfer.
 //
 // Memory reads go through mdr_mem while the CPU is held: the engine drives
 // its address and read strobe (mdr_top multiplexes them), card reads force
@@ -25,7 +29,8 @@
 module mdr_dma (
     input  wire        clk,
     input  wire        rst,
-    input  wire        ce_cpu,
+    input  wire        ce_held,         // a CPU enable at which the CPU waits (T2 or a wait state)
+    input  wire        fetch_ws,        // the held fetch takes the cartridge wait state: charge it
     input  wire        start,           // $FA written with bit 7 set (MasterDrive mode)
     input  wire [7:0]  r_f4, r_f5, r_f6, r_f7, r_f8, r_f9,
     input  wire [7:0]  r_fa,            // the value being written to $FA
@@ -61,21 +66,29 @@ module mdr_dma (
     reg [1:0]  vw;
     reg [2:0]  md;                       // clocks before mdr_mem's wait line is meaningful
     reg [2:0]  tail;                     // clocks the CPU stays held after the bus is handed back
-    // the hold outlasts the bus by a few clocks, so that a read the CPU was in
-    // the middle of, made again by mdr_top, holds it through mdr_mem by then
+    // the hold outlasts the bus by a few clocks, so that the CPU's fetch, which
+    // mdr_top makes when the bus is handed back, holds it through mdr_mem by then
     assign busy = (st != S_IDLE) || (owe != 17'd0) || (tail != 3'd0);
     assign bus  = (st != S_IDLE);
 
     wire [15:0] rd_a = (sel == 2'd1) ? {2'b01, src[13:0]} : (sel == 2'd2) ? {3'b110, src[12:0]} : src;
     // the cartridge wait state of a byte read from the CPU address space at 200 %
     wire        extra = ws200 && (mode == 2'd0 || mode == 2'd3) && (sel == 2'd0 || sel == 2'd3) && (src < 16'hC000);
+    // the charge: a byte's T-state (and wait state) as it is written, less one
+    // for each enable at which the CPU waits
+    // a byte is written when the VDP can take it: a CRAM byte waits for the
+    // VDP to finish the one before (it reads the entry and writes it back),
+    // while the engine has already read the next one
+    wire        wr_go   = (st == S_WRITE) && (!to_c || c_ready);
+    wire [1:0]  owe_add = (wr_go ? 2'd1 + {1'b0, extra} : 2'd0) + {1'b0, fetch_ws};
+    wire        owe_dec = ce_held && (owe != 17'd0);
 
     always @(posedge clk) begin
         m_rd <= 1'b0; v_we <= 1'b0; v_re <= 1'b0; c_we <= 1'b0;
         if (rst) begin
             st <= S_IDLE; owe <= 17'd0; m_src <= 2'd0; tail <= 3'd0;
         end else begin
-            if (ce_cpu && owe != 17'd0 && !(st == S_WRITE)) owe <= owe - 17'd1;
+            owe <= owe + {15'd0, owe_add} - {16'd0, owe_dec};
             if (tail != 3'd0) tail <= tail - 3'd1;
             case (st)
             S_IDLE: if (start) begin
@@ -101,24 +114,17 @@ module mdr_dma (
                 vw <= vw - 2'd1;
                 if (vw == 2'd0) begin data <= v_dout; st <= S_WRITE; end
             end
-            S_WRITE: begin
-                // charge this byte: one T-state, and the wait state of a cartridge read
-                owe <= owe + 17'd1 + {16'd0, extra} - {16'd0, ce_cpu && owe != 17'd0};
-                if (to_c) begin
-                    c_we <= 1'b1; c_addr <= dst[8:0]; c_din <= data; st <= S_CWAIT;
-                end else begin
-                    v_we <= 1'b1; v_addr <= dst; v_din <= data;
-                    if (left == 15'd1) begin st <= S_IDLE; tail <= 3'd5; end
-                    else st <= S_READ;
-                end
+            S_WRITE: if (wr_go) begin
+                if (to_c) begin c_we <= 1'b1; c_addr <= dst[8:0]; c_din <= data; end
+                else begin v_we <= 1'b1; v_addr <= dst; v_din <= data; end
+                if (left != 15'd1) st <= S_READ;
+                else if (to_c) st <= S_CWAIT;            // the last CRAM byte: let the VDP finish it
+                else begin st <= S_IDLE; tail <= 3'd5; end
                 src <= src + 16'd1;
                 dst <= dst + 15'd1;
                 left <= left - 15'd1;
             end
-            S_CWAIT: if (!c_we && c_ready) begin
-                if (left == 15'd0) begin st <= S_IDLE; tail <= 3'd5; end
-                else st <= S_READ;
-            end
+            S_CWAIT: if (!c_we && c_ready) begin st <= S_IDLE; tail <= 3'd5; end
             default: st <= S_IDLE;
             endcase
         end

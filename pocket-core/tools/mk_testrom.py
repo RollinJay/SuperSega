@@ -1125,14 +1125,20 @@ def build_dma():
     """The DMA engine (Technical Reference section 9), drawn so the core and the
     emulator can be compared. In MasterDrive mode, with the display off, the
     ROM fills the name table (mode 2), copies 64 tiles from ROM (mode 0, source
-    0) and three palettes into CRAM (mode 0 to CRAM, extended CRAM), copies 256
-    bytes from work RAM bank 3 (source 2), copies 16 tiles VRAM to VRAM (mode
-    1), copies from the card slot with no card in it ($FF, source 1), and fills
-    $3FE0-$401F, which runs on into the upper 16 KB, where unique-cell tile 512
-    shows it. Then it writes rows of names that show each result and turns the
-    display on: rows 0-7 the ROM tiles, row 9 the work RAM tiles, row 11 the
-    copied tiles, row 13 the card's, row 15 tile 512, the rest the filled name
-    (tile 2, flipped)."""
+    0), three palettes and then a fourth into CRAM (mode 0 to CRAM, extended
+    CRAM), copies 256 bytes from work RAM bank 3 (source 2), copies 16 tiles
+    VRAM to VRAM (mode 1), copies from the card slot with no card in it ($FF,
+    source 1), and fills $3FE0-$401F, which runs on into the upper 16 KB, where
+    unique-cell tile 512 shows it. sim/check.sh compares the CPU's time for
+    these transfers, instruction by instruction, with the emulator's. Then, at
+    each turbo step, it runs transfers of 1 to 16 bytes of six kinds into VRAM
+    and CRAM that nothing shows (fills, HALTs ($76) from ROM, work RAM, a VRAM
+    copy): some end while the CPU's next opcode fetch is in its first T-state,
+    and a fetch lost to the transfer would run a stale byte, so the display
+    would never come on. Then it writes rows of names that show
+    each result and turns the display on: rows 0-7 the ROM tiles, row 9 the
+    work RAM tiles, row 11 the copied tiles, row 13 the card's, row 15 tile 512,
+    the rest the filled name (tile 2, flipped)."""
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0); a.db(0xC3); a.ref16('main')
@@ -1163,6 +1169,23 @@ def build_dma():
     dma(0x2000, 0x01, 0x0C00, 256)                # the card (none: $FF) -> tiles 96-103
     dma(0x005A, 0x08, 0x3FE0, 0x40)               # fill $3FE0-$401F with $5A: into the upper 16 KB
     a.db(0x3E, 0x00, 0xD3, 0x0A)
+
+    # short transfers, 1-16 bytes of each kind at each turbo step, so that some
+    # end while the CPU's next opcode fetch is in its first T-state: a fetch
+    # lost to a transfer would run a stale byte (a HALT from the ROM source)
+    a.db(0x3E, 0xE1, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)   # Feature Enable A bit 6 too: turbo
+    a.db(0x21); a.ref16('steps')
+    a.label('st'); a.db(0x7E, 0xFE, 0xFF, 0x28); a.rel('stx')          # LD A,(HL) ; CP $FF ; JR Z,stx
+    a.db(0xD3, 0xF3, 0xE5, 0x21); a.ref16('kinds')                     # OUT ($F3),A ; PUSH HL ; LD HL,kinds
+    a.label('kd'); a.db(0x7E, 0xFE, 0xFF, 0x28); a.rel('kdx')          # LD A,(HL) ; CP $FF ; JR Z,kdx
+    for port in (0xF6, 0xF4, 0xF5, 0xF7, 0xF8):
+        a.db(0x7E, 0xD3, port, 0x23)                                   # LD A,(HL) ; OUT (port),A ; INC HL
+    a.db(0x06, 0x01)                                                   # LD B,1
+    a.label('ln'); a.db(0x78, 0xD3, 0xF9, 0x3E, 0x80, 0xD3, 0xFA)      # LD A,B ; OUT ($F9),A ; LD A,$80 ; OUT ($FA),A
+    a.db(0x04, 0x78, 0xFE, 17, 0x38); a.rel('ln')                      # INC B ; LD A,B ; CP 17 ; JR C,ln
+    a.db(0x18); a.rel('kd')
+    a.label('kdx'); a.db(0xE1, 0x23, 0x18); a.rel('st')                # POP HL ; INC HL ; JR st
+    a.label('stx'); a.db(0xAF, 0xD3, 0xF3)                             # back to 100 %
     # sprites off; names for the result rows
     a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0x7F, 0xD3, 0xBF, 0x3E, 0xD0, 0xD3, 0xBE)
     rows = {}
@@ -1196,6 +1219,21 @@ def build_dma():
     a.label('pal5')
     for c in range(16):
         a.db(((c * 2) & 15) << 4 | 15, c)
+    a.label('halts'); a.db(*([0x76] * 16))
+    a.label('steps'); a.db(0, 1, 2, 3, 4, 0xFF)
+    # $F6, $F4, $F5, $F7, $F8: into VRAM a fill, the ROM's HALTs, work RAM, a VRAM
+    # copy (tiles 256 on, which no name uses); into CRAM palette 15 a fill and
+    # the HALTs (no name uses it)
+    a.label('kinds')
+    for ctl, src, dst in ((0x08, 0x0000, 0x2000), (0x00, None, 0x2000), (0x02, 0x0000, 0x2000),
+                          (0x04, 0x2000, 0x2100), (0x08, 0x0000, 0x41E0), (0x00, None, 0x41E0)):
+        a.db(ctl)
+        if src is None:
+            a.ref16('halts')
+        else:
+            a.dw(src)
+        a.db(dst & 0xFF, dst >> 8)
+    a.db(0xFF)
     for lab, data in jobs:
         a.label(lab); a.db(*data)
     a.resolve()
@@ -1216,7 +1254,9 @@ def build_dma():
     return bytes(rom)
 
 
-PCM_PHASES = 30          # frames per phase: PCM alone, wavetable alone, both, silence
+PCM_PHASE_FRAMES = 20   # frames per phase of pcm.sms
+# its phases: the PCM's rate select ($08 bits 1-0) or None for no PCM, and whether the wavetable plays
+PCM_PHASES = ((0, False), (1, False), (2, False), (3, False), (None, True), (0, True), (None, False))
 
 
 def _wave_sine():
@@ -1225,14 +1265,16 @@ def _wave_sine():
 
 def build_pcm():
     """PCM and wavetable sound (Technical Reference section 7), for
-    tools/check_pcm_wav.py. MasterDrive mode, the I/O gate open. Frames 0-29:
-    the PCM plays a square wave at 8,000 samples a second, 16 samples of 192
-    and 16 of 64 (250 Hz), the ROM keeping its FIFO above 32 bytes by reading
-    $08. Frames 30-59: the PCM stops (its output holds the last sample) and
-    the wavetable plays: voice 0 a sine of 32 samples, frequency 125 (400 Hz),
-    volume 15, both sides; voice 1 a square (15, then 0), frequency 250 (800
-    Hz), volume 8, the left side only. Frames 60-89: both. Frames 90-119:
-    silence. Then the cycle repeats."""
+    tools/check_pcm_wav.py. MasterDrive mode, the I/O gate open. Seven phases
+    of 20 frames (PCM_PHASES), then again from the first: the PCM alone at
+    each of its four rates (8,000, 11,025, 16,000 and 22,050 samples a
+    second), the wavetable alone, the PCM at 8,000 with the wavetable, and
+    silence. The PCM plays a square wave of 16 samples of 192 and 16 of 64
+    (the rate / 32: 250, 344.5, 500 and 689 Hz), the ROM keeping its FIFO above
+    32 bytes by reading $08; without it the PCM stops and its output holds the
+    last sample. The wavetable: voice 0 a sine of 32 samples, frequency 125
+    (400 Hz), volume 15, both sides; voice 1 a square (15, then 0), frequency
+    250 (800 Hz), volume 8, the left side only."""
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0); a.db(0xC3); a.ref16('main')
@@ -1241,9 +1283,7 @@ def build_pcm():
     a.db(0xF1, 0xFB, 0xED, 0x4D)
     a.org(0x0066); a.db(0xED, 0x45)
     a.org(0x0100); a.label('main')
-    a.db(0xAF, 0x32); a.dw(0xC000)
     a.db(0x3E, 0x80, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)    # R15 = $80: the I/O gate
-    a.db(0x3E, 0x00, 0xD3, 0x08)                           # PCM at 8,000 a second
     # wavetable voices: waveforms, then frequency, volume and sides (not yet keyed on)
     for v, wave, f, vol, sides in ((0, _wave_sine(), 125, 15, 3), (1, [15] * 16 + [0] * 16, 250, 8, 2)):
         for k, smp in enumerate(wave):
@@ -1251,30 +1291,35 @@ def build_pcm():
         a.db(0x3E, v << 5, 0xD3, 0x11)
         a.db(0x3E, f & 0xFF, 0xD3, 0x13, 0x3E, f >> 8, 0xD3, 0x14)
         a.db(0x3E, (sides << 4) | vol, 0xD3, 0x15)
+    a.db(0xAF, 0x32); a.dw(0xC001)                         # phase 0
     a.db(0x3E, 0x20, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)    # frame IRQ on, display off
     a.db(0xFB)
+    a.label('phase')                                       # start the phase in $C001
+    a.db(0xAF, 0x32); a.dw(0xC000)                         # its frame count
+    a.db(0x3A); a.dw(0xC001); a.db(0x87, 0x6F, 0x26, 0x00, 0x11); a.ref16('ptab'); a.db(0x19)   # HL = ptab + 2 x phase
+    a.db(0x7E, 0xD3, 0x08, 0x23, 0x7E, 0x32); a.dw(0xC002)   # $08 = the rate; $C002 = bit 0 PCM, bit 1 wavetable
+    a.db(0xE6, 0x02, 0xCC); a.ref16('keyoff')              # wavetable off: keys off
+    a.db(0x3A); a.dw(0xC002); a.db(0xE6, 0x02, 0xC4); a.ref16('keyon')
     a.db(0x21); a.ref16('square')                          # HL: the next PCM sample
     a.label('loop')
-    a.db(0x3A); a.dw(0xC000)                               # A = frame
-    a.db(0xFE, PCM_PHASES); a.db(0x38); a.rel('feed')      # < 30: PCM
-    a.db(0xFE, 2 * PCM_PHASES); a.db(0x30); a.rel('p3')
-    a.db(0xCD); a.ref16('keyon'); a.db(0x18); a.rel('loop')   # 30-59: wavetable only
-    a.label('p3')
-    a.db(0xFE, 3 * PCM_PHASES); a.db(0x30); a.rel('quiet')
-    a.label('feed')
+    a.db(0x3A); a.dw(0xC000); a.db(0xFE, PCM_PHASE_FRAMES); a.db(0x38); a.rel('run')
+    a.db(0x3A); a.dw(0xC001); a.db(0x3C, 0xFE, len(PCM_PHASES)); a.db(0x38); a.rel('nx'); a.db(0xAF)
+    a.label('nx'); a.db(0x32); a.dw(0xC001); a.db(0x18); a.rel('phase')
+    a.label('run')
+    a.db(0x3A); a.dw(0xC002); a.db(0x1F); a.db(0x30); a.rel('loop')   # no PCM in this phase
     a.db(0xDB, 0x08, 0xE6, 0x70, 0xFE, 0x40); a.db(0x30); a.rel('loop')   # FIFO at 32 bytes or more
     a.db(0x06, 0x08)
     a.label('put'); a.db(0x7E, 0xD3, 0x07, 0x23, 0x7D, 0xE6, 0x1F, 0x20); a.rel('next')
     a.db(0x21); a.ref16('square')                          # wrap at 32 samples (the table is aligned)
     a.label('next'); a.db(0x10); a.rel('put')
-    a.db(0x3A); a.dw(0xC000); a.db(0xFE, 2 * PCM_PHASES); a.db(0x38); a.rel('loop')
-    a.db(0xCD); a.ref16('keyon'); a.db(0x18); a.rel('loop')
-    a.label('quiet')                                       # 90-119: keys off, the PCM stops
-    a.db(0x3E, 0x00, 0xD3, 0x11, 0x3E, 0x00, 0xD3, 0x14, 0x3E, 0x20, 0xD3, 0x11, 0x3E, 0x00, 0xD3, 0x14)
-    a.label('hush'); a.db(0x3A); a.dw(0xC000); a.db(0xFE, 4 * PCM_PHASES); a.db(0x38); a.rel('hush')
-    a.db(0xAF, 0x32); a.dw(0xC000); a.db(0x18); a.rel('loop')   # then the cycle again from frame 0
+    a.db(0x18); a.rel('loop')
     a.label('keyon')                                       # key on both voices (frequency high bits 0)
     a.db(0x3E, 0x00, 0xD3, 0x11, 0x3E, 0x80, 0xD3, 0x14, 0x3E, 0x20, 0xD3, 0x11, 0x3E, 0x80, 0xD3, 0x14, 0xC9)
+    a.label('keyoff')
+    a.db(0x3E, 0x00, 0xD3, 0x11, 0x3E, 0x00, 0xD3, 0x14, 0x3E, 0x20, 0xD3, 0x11, 0x3E, 0x00, 0xD3, 0x14, 0xC9)
+    a.label('ptab')
+    for rate, wave in PCM_PHASES:
+        a.db(rate or 0, (1 if rate is not None else 0) | (2 if wave else 0))
     while a.pc & 0x1F:
         a.db(0x00)
     a.label('square'); a.db(*([192] * 16 + [64] * 16))

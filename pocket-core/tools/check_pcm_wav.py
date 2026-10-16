@@ -3,30 +3,39 @@
 
 usage: check_pcm_wav.py capture.wav
 
-The ROM plays four phases of 30 frames each, then repeats them: (1) the PCM
-alone, a square wave of 16 samples of 192 and 16 of 64 at 8,000 samples a
-second (250 Hz); (2) the wavetable alone, voice 0 a 32-sample sine at
-frequency 125 (400 Hz) on both sides at volume 15, voice 1 a square at
-frequency 250 (800 Hz) on the left at volume 8; (3) both; (4) silence. For
-each phase this measures the three tones over its frames 8-25, on both
-sides, and checks that each is there, at the expected level and pitch, or
-absent, as the phase and the voice's sides say. The levels are the
-emulator's (open question Q27): in the units of a PSG channel at full volume
-(8191), the PCM is (sample - 128) x 80 and a voice (sample - 8) x volume x 51,
-before the mixer's 41/64.
+The ROM plays seven phases of 20 frames each (mk_testrom.PCM_PHASES), then
+repeats them: the PCM alone at each of its four rates, a square wave of 16
+samples of 192 and 16 of 64, so a tone at the rate / 32 (250, 344.5, 500 and
+689 Hz); the wavetable alone, voice 0 a 32-sample sine at frequency 125
+(400 Hz) on both sides at volume 15, voice 1 a square at frequency 250
+(800 Hz) on the left at volume 8; the PCM at 8,000 samples a second with the
+wavetable; and silence. For each phase this measures every one of those tones
+over the phase's frames 5-17, on both sides, and checks that each is there,
+within 2 % of the expected level and 0.05 % of its pitch, or absent, as the
+phase and the voice's sides say. The levels are the emulator's (open question
+Q27): in the units of a PSG channel at full volume (8191), the PCM is
+(sample - 128) x 80 and a voice (sample - 8) x volume x 51, before the
+mixer's 41/64.
 """
 import math
+import os
 import sys
 import wave
 
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mk_testrom import PCM_PHASES, PCM_PHASE_FRAMES  # noqa: E402
+
 FRAME = 262 * 228 / 3579545          # NTSC frame, seconds
-PHASE = 30                           # frames per phase
 HEADROOM = 41 / 64
-PCM_HZ = 8000 / 32
+RATES = (8000, 11025, 16000, 22050)
+PCM_HZ = [r / 32 for r in RATES]
 SINE_HZ = 125 * 3.2
 SQ_HZ = 250 * 3.2
+LEVEL_TOL = 0.02
+PITCH_TOL = 0.0005
+ABSENT = 40
 
 
 def fundamental(samples, scale):
@@ -61,32 +70,36 @@ def main():
     w = wave.open(sys.argv[1])
     rate = w.getframerate()
     d = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').reshape(-1, 2).astype(float)
-    need = (4 * PHASE) * FRAME
+    need = len(PCM_PHASES) * PCM_PHASE_FRAMES * FRAME
     if len(d) < int(need * rate):
         sys.exit(f'capture too short: {len(d) / rate:.2f} s, need {need:.2f} s')
     bad = 0
-    # (phase name, PCM on, wavetable on)
-    for k, (name, pcm, wt) in enumerate((('PCM', True, False), ('wavetable', False, True), ('both', True, True),
-                                         ('silence', False, False))):
-        a = int((PHASE * k + 8) * FRAME * rate)
-        b = int((PHASE * k + 25) * FRAME * rate)
+    for k, (pcm, wt) in enumerate(PCM_PHASES):
+        name = (f'PCM {RATES[pcm]}' if pcm is not None else '') + (' + ' if pcm is not None and wt else '') + \
+            ('wavetable' if wt else '') or 'silence'
+        a = int((PCM_PHASE_FRAMES * k + 5) * FRAME * rate)
+        b = int((PCM_PHASE_FRAMES * k + 17) * FRAME * rate)
         for ch, side in ((0, 'L'), (1, 'R')):
             x = d[a:b, ch] - d[a:b, ch].mean()
-            p, s, q = tone(x, PCM_HZ, rate), tone(x, SINE_HZ, rate), tone(x, SQ_HZ, rate)
-            want_q = wt and ch == 0
-            ok = ((abs(p / PCM_FULL - 1) < 0.08) if pcm else (p < 40)) and \
-                 ((abs(s / SINE_FULL - 1) < 0.08) if wt else (s < 40)) and \
-                 ((abs(q / SQ_FULL - 1) < 0.10) if want_q else (q < 40))
-            print(f'{name:9} {side}: PCM 250 Hz {p:6.0f} (want {PCM_FULL:.0f} if on), sine 400 Hz {s:6.0f} '
-                  f'(want {SINE_FULL:.0f}), square 800 Hz {q:6.0f} (want {SQ_FULL:.0f} left) {"ok" if ok else "WRONG"}')
-            bad += not ok
-            if ch == 0:
-                for on, hz0, label in ((pcm, PCM_HZ, 'PCM'), (wt, SINE_HZ, 'sine'), (want_q, SQ_HZ, 'square')):
-                    if on:
-                        hz = peak(x, rate, hz0 * 0.95, hz0 * 1.05)
-                        good = abs(hz / hz0 - 1) < 0.003
-                        print(f'          {label} pitch {hz:.2f} Hz, expected {hz0:.2f} {"ok" if good else "WRONG"}')
-                        bad += not good
+            # (label, frequency, expected level or None for absent)
+            tones = [(f'PCM {hz:.1f} Hz', hz, PCM_FULL if pcm == i else None) for i, hz in enumerate(PCM_HZ)]
+            tones += [('sine 400 Hz', SINE_HZ, SINE_FULL if wt else None),
+                      ('square 800 Hz', SQ_HZ, SQ_FULL if wt and ch == 0 else None)]
+            words = []
+            for label, hz, want in tones:
+                got = tone(x, hz, rate)
+                ok = abs(got / want - 1) < LEVEL_TOL if want else got < ABSENT
+                if want or not ok:
+                    words.append(f'{label} {got:.0f} (want {want:.0f})' if want else f'{label} {got:.0f} (want none)')
+                if want and ch == 0:
+                    f = peak(x, rate, hz * 0.95, hz * 1.05)
+                    good = abs(f / hz - 1) < PITCH_TOL
+                    words.append(f'at {f:.2f} Hz' + ('' if good else ' WRONG PITCH'))
+                    bad += not good
+                bad += not ok
+                if not ok:
+                    words.append('WRONG')
+            print(f'{name:21} {side}: ' + ('; '.join(words) if words else 'nothing heard, as wanted'))
     if bad:
         sys.exit(f'{bad} check(s) failed')
     print('PASS')
