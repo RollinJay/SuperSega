@@ -6,10 +6,13 @@
 #   1. tools/mk_testrom.py reproduces roms/ byte for byte
 #   2. sim/z80: the Z80 wrapper's instruction and port-access timing matches the emulator's Z80
 #   3. sim/io: the SC-3000 keyboard's ghosting and the math unit's divide, which
-#      take several clocks in the core, match reference models
+#      take several clocks in the core, match reference models, and the
+#      MasterDrive I/O gate and machine ID answer as Q1 and Q8 decide
 #   4. sim/sys: the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and MasterDrive feature test
 #      ROMs, for the I/O test ROM in Master System and Game Gear modes, for the
+#      I/O gate ROM (mdports.sms) in MasterDrive, Master System and Game Gear
+#      modes (in MasterDrive mode also against the expected values), for the
 #      VDP-height ROM in Game Gear mode, and for the four TMS9918-mode ROMs on the
 #      SG-1000 (Master System colours exactly, true TMS colours within the core's
 #      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
@@ -22,7 +25,9 @@
 #      simulation, NTSC and PAL (a headerless TMS ROM is detected as SG-1000 and
 #      drawn in true TMS colours, the default); the video timing the scaler sees
 #      is regular (PAL lines 345 or 346 pixel clocks), also across a switch from
-#      PAL to NTSC; Pocket A and B read as buttons 1 and 2 in Master System mode
+#      PAL to NTSC; an export cartridge runs in MasterDrive mode with System =
+#      MasterDrive and in Master System mode with Auto (mdports.sms); Pocket A
+#      and B read as buttons 1 and 2 in Master System mode
 #      and B as button 1 in MasterDrive mode; and the save slot reads back the
 #      loaded file with only the bytes the ROM writes changed
 #
@@ -77,6 +82,9 @@ SYS_CASES=(
     "gg192|vdp192.sms|gg|11|10||"
     "smsports|ports.sms|sms|11|10||"
     "ggports|ports.sms|gg|11|10||"
+    "mdports|mdports.sms|ss|11|10||"
+    "smsmdports|mdports.sms|sms|11|10||"
+    "ggmdports|mdports.sms|gg|11|10||"
     "tmsg1|tms_g1.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsg2|tms_g2.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsmc|tms_mc.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
@@ -147,6 +155,13 @@ for c in "v224|clk_sys 896040-896040|59.92 Hz" "v224pal|clk_sys 1080310-1080320|
     printf '%-9s frame timing %s: ' "$name" "$hz"
     if grep -qF "$want" "$W/sys/$name.log"; then echo "$want"; else echo "WRONG:"; grep 'frame timing' "$W/sys/$name.log"; fail=1; fi
 done
+# the MasterDrive I/O gate and machine ID (Q1, Q8): mdports.sms reads six ports
+# before Feature Enable A bit 7 is set ($FF), then, with it set, the registers,
+# 200 x 100 from the math unit and $A7 at $17
+printf '%-9s I/O gate and machine ID (MasterDrive mode): ' mdports
+python3 tools/read_ports_ppm.py "$W/sys/mdports_10.ppm" | head -17 | tr '\n' ' ' > "$W/sys/mdports.txt"
+want='$01: $FF $06: $FF $09: $FF $0F: $FF $16: $FF $17: $FF $00: $C0 $01: $7F $06: $FF $09: $00 $0E: $00 $0F: $20 $10: $4E $16: $81 $17: $A7 $18: $FF $DC: $FF '
+if [ "$(cat "$W/sys/mdports.txt")" = "$want" ]; then echo 'closed $FF, open $17 = $A7'; else echo "WRONG:"; cat "$W/sys/mdports.txt"; echo; fail=1; fi
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"
@@ -160,6 +175,8 @@ POCKET_CASES=(
     "p224|vdp224.sms|40|37|ntsc"
     "pss|mdrfeat.sms|12|10 11|ntsc"
     "pggports|ports.sms|11|-system 2 10|ntsc"
+    "pmdports|mdports.sms|11|-system 3 10|ntsc"
+    "pmdauto|mdports.sms|11|10|ntsc"
     "pbutton|ports.sms|11|-system 3 -hold 5 10|ntsc"
     "pbtn1|ports.sms|11|-system 1 -hold 4 10|ntsc"
     "pbtn2|ports.sms|11|-system 1 -hold 5 10|ntsc"
@@ -194,7 +211,7 @@ export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
 fail=0
 for pair in "p224_37 v224_37" "pss_10 mdrfeat_10" "pss_11 mdrfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
-            "p224pal_37 v224pal_37"; do
+            "p224pal_37 v224pal_37" "pmdports_10 mdports_10" "pmdauto_10 smsmdports_10"; do
     set -- $pair
     printf '%-12s Pocket vs machine simulation: ' "$1"
     python3 tools/ppmdiff.py "$W/pocket/$1.ppm" "$W/sys/$2.ppm" || fail=1

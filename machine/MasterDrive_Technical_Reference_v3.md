@@ -9,7 +9,7 @@ MasterDrive is an 8-bit console in the Sega SG-1000 / Master System / Game Gear 
 Two ideas run through everything below:
 
 - **Stock behaviour.** At power-on every extension is off. The machine then behaves exactly like the original hardware — a Master System with the FM sound unit fitted, or a Game Gear, SG-1000 or SC-3000, depending on the mode it boots in.
-- **Opt-in extensions.** New software turns extensions on through three *Feature Enable* registers (A, B and C, described in §10). Old software never touches them, so it can never see them.
+- **Opt-in extensions.** New software turns extensions on through three *Feature Enable* registers (A, B and C, described in §10). Old software never touches them, so it can never see them. MasterDrive's own I/O registers are opened the same way, by Feature Enable A bit 7 (§11).
 
 A third, separate idea is the **enhancement layer** (AEL, §15): optional boosts for *old* software, such as removing sprite flicker. They are user settings, all off by default except True TMS colours and Start = Pause (§15).
 
@@ -59,7 +59,7 @@ The FM chip also needs time between register writes (§7): 12 base cycles after 
 
 | Resource | Size | Control |
 |---|---|---|
-| Work RAM | 128 KB, 16 banks of 8 KB | port `$0A` |
+| Work RAM | 128 KB, 16 banks of 8 KB | port `$0A` (once Feature Enable A bit 7 is set, §11) |
 | Work RAM window | `$C000`–`$DFFF`, mirrored at `$E000`–`$FFFF` | |
 | Video RAM (VRAM) | 16 KB, expandable to 32 KB | Feature Enable B bit 4 enables; bank1 R3 bit 0 selects the bank the CPU reaches |
 | Colour RAM (CRAM) | 32 entries, expandable to 256 | bank1 R2 bit 1 |
@@ -248,7 +248,7 @@ A multitap on the pad port (Sega Team Player MK-1654 or EA 4 Way Play protocol),
 
 | Source | Ports | Notes |
 |---|---|---|
-| SN76489 PSG (3 tones + noise) | `$7E`/`$7F` write | stereo panning on `$06` (Game Gear and MasterDrive modes) |
+| SN76489 PSG (3 tones + noise) | `$7E`/`$7F` write | stereo panning on `$06` (Game Gear mode, and MasterDrive mode once Feature Enable A bit 7 is set, §11) |
 | YM2413 FM | `$F0` register, `$F1` data, `$F2` control | the FM unit is always fitted |
 | PCM FIFO (64 bytes) | `$07` data, `$08` control | MasterDrive |
 | Two wavetable voices | `$11`–`$15` | MasterDrive |
@@ -276,7 +276,7 @@ The register layouts of PCM control (`$08` write) and the wavetable are not writ
 | Master System | Sega mapper, standard map |
 | Game Gear | as Master System, with Game Gear port decoding |
 | SF-7000 | see below |
-| MasterDrive | Master System map plus the extensions |
+| MasterDrive | Master System map plus the extensions. The boot menu can also start an export cartridge in this mode (§14) |
 
 ### Cartridge mappers
 
@@ -346,7 +346,7 @@ The VDP register-write command byte is `10bbnnnn`. On stock hardware bits 5–4 
 | 14 | window Y split; bit 7 selects side |
 | 15 | **Feature Enable A** |
 
-**Feature Enable A** — bit 0 native 12-bit CRAM · bit 1 line-scroll horizontal · bit 2 window layer · bit 3 ESAT · bit 4 16 sprites per line · bit 5 XRB · bit 6 turbo
+**Feature Enable A** — bit 0 native 12-bit CRAM · bit 1 line-scroll horizontal · bit 2 window layer · bit 3 ESAT · bit 4 16 sprites per line · bit 5 XRB · bit 6 turbo · bit 7 MasterDrive I/O registers `$01`–`$17` (§11)
 
 Registers 11–15 take effect only in MasterDrive mode; in the other modes they are ignored, as on the stock VDP.
 
@@ -378,8 +378,8 @@ Bank 2 unallocated; bank 3 reserved.
 | Range | Function |
 |---|---|
 | `$00` | Game Gear Start / region (Game Gear and MasterDrive modes) |
-| `$01`–`$05` | Game Gear serial (EXT link) registers (Game Gear and MasterDrive modes) |
-| `$06` | PSG stereo panning (write-only) |
+| `$01`–`$05` | Game Gear serial (EXT link) registers (Game Gear mode; MasterDrive mode once Feature Enable A bit 7 is set) |
+| `$06` | PSG stereo panning (write-only; Game Gear mode, and MasterDrive mode once Feature Enable A bit 7 is set) |
 | `$07`–`$08` | PCM FIFO data / control |
 | `$09` | slot source select |
 | `$0A` | work RAM bank |
@@ -387,6 +387,7 @@ Bank 2 unallocated; bank 3 reserved.
 | `$0C`–`$10` | math unit |
 | `$11`–`$15` | wavetable audio |
 | `$16` | multitap detection (reads `$81`: pad found, detection complete) |
+| `$17` | machine ID, read-only: `$A7` (§14) |
 | `$3E` | memory enables (write) |
 | `$3F` | I/O control (write) |
 | `$7E`–`$7F` | V / H counters (read); PSG (write) |
@@ -400,13 +401,13 @@ Bank 2 unallocated; bank 3 reserved.
 | `$FC`–`$FD` | SDSC debug console |
 | `$FE`–`$FF` | watchpoint register select / data |
 
-On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V counter reads at every even port and the H counter at every odd port in `$40`–`$7F`. The SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers: in those modes writes to `$00`–`$3F` do nothing. The Game Gear decodes `$00`–`$06` separately, and MasterDrive extends that to `$16`. Writes to `$07`–`$16`, like writes to VDP registers 11–15 (§10), take effect only in MasterDrive mode; in every other mode they do what they do on the stock machine.
+On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V counter reads at every even port and the H counter at every odd port in `$40`–`$7F`. The SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers: in those modes writes to `$00`–`$3F` do nothing. The Game Gear decodes `$00`–`$06` separately, and MasterDrive extends that to `$17`, but only once software has set Feature Enable A bit 7: this *I/O gate* (Q1) keeps old code run in MasterDrive mode from reaching the new registers. Until the bit is set, in MasterDrive mode `$01`–`$17` act as the `$3E`/`$3F` mirrors and read `$FF`, as on a Master System, and only `$00` (Start and region) answers. The gate is live: clearing the bit closes the ports again, and what the registers were set to (work RAM bank, slot select, card bank, stereo, the math operands, PCM and wavetable) stays in force. In every other mode these ports do what they do on the stock machine; writes to VDP registers 11–15 (§10) likewise take effect only in MasterDrive mode.
 
-**Reads.** `$00`–`$3F` are write-only on the Master System and read `$FF`; on the Game Gear and MasterDrive every port there that is not a register listed above also reads `$FF`. In MasterDrive mode, `$07`–`$16` and `$F0`–`$FF` are fully decoded: unreadable ports return `$FF`, never the controller mirror. In the other modes `$FB`–`$FF` read as on the stock machine — the controller mirror, or `$FF` on the Game Gear — because stock software may read its pads there (§13).
+**Reads.** `$00`–`$3F` are write-only on the Master System and read `$FF`; on the Game Gear and MasterDrive every port there that is not a register listed above also reads `$FF`. In MasterDrive mode, `$01`–`$17` (while the I/O gate is open) and `$F0`–`$FF` are fully decoded: unreadable ports return `$FF`, never the controller mirror. In the other modes `$FB`–`$FF` read as on the stock machine — the controller mirror, or `$FF` on the Game Gear — because stock software may read its pads there (§13).
 
 **`$3E` bit 2** (I/O chip disable) turns off only the controller decode across `$C0`–`$FF`, and only on the Master System and MasterDrive. It has no effect on the Game Gear, and does not affect `$F2` or MasterDrive's `$F0`–`$FF`.
 
-The turbo and debug ports sit above `$F0`, outside the `$3E`/`$3F` mirror range, so no old title writing a memory- or I/O-control mirror can reach them; writes to `$F0`–`$FF` do nothing on the stock machines. Whether `$06`–`$16` should move above `$F0` too is open question Q1.
+The turbo and debug ports sit above `$F0`, outside the `$3E`/`$3F` mirror range, so no old title writing a memory- or I/O-control mirror can reach them; writes to `$F0`–`$FF` do nothing on the stock machines. `$01`–`$17` stay inside that range; the I/O gate is what keeps old code from reaching them (Q1, decided).
 
 ---
 
@@ -472,7 +473,14 @@ The `TMR SEGA` header is checked at `$7FF0`, `$3FF0` and `$1FF0`, in that order 
 | 5 / 6 / 7 | Game Gear Japan / Export / International |
 | **8** | **MasterDrive** |
 
-An export Master System BIOS rejects any cartridge whose region is not 4, so region-8 software will not boot on a stock export console. How one ROM could detect a MasterDrive at run time and work on both is open (Q8).
+An export Master System BIOS rejects any cartridge whose region is not 4, so region-8 software will not boot on a stock export console. One ROM can still work on both (Q8, decided October 2026):
+
+- **Native mode.** The boot menu can start an export (region 4) cartridge in MasterDrive mode instead of Master System mode. It then starts as MasterDrive software does, every extension off. On the Analogue Pocket core this is the System setting MasterDrive; in the emulator, its machine-mode selector.
+- **Machine ID.** Port `$17` reads `$A7` in MasterDrive mode once Feature Enable A bit 7 is set (§11): the high nibble `$A` means MasterDrive, the low nibble is the machine version (7). It is read-only; a write is ignored. Before the bit is set, and on stock consoles, `$17` reads `$FF` (the controller mirror in the SG-1000, SC-3000 and SF-7000 modes).
+
+To detect the machine, software writes VDP register 15 with bit 7 set (a stock VDP ignores register 15), then reads `$17` and tests the high nibble for `$A`, rather than only for a value other than `$FF`, since some sources describe open bus at the low ports of stock consoles.
+
+Old code started in native mode meets MasterDrive behaviour: the pad reads as a Mega Drive pad (B and C as buttons 1 and 2 with TH high), the enhancement layer (§15) does not act, `$F0`–`$FF` are fully decoded, VDP registers 11–15 take effect, and the TMS modes raise line interrupts when R0 bit 4 is set. The option is for software that detects the machine; ordinary games run in Master System mode.
 
 ---
 
@@ -543,14 +551,14 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range. They act as registers only in MasterDrive mode (`$06` also in Game Gear mode, §11), so stock software in its own mode is unaffected. The risk is old code run in MasterDrive mode that writes a mirror address in `$06`–`$16`: a title retagged to region 8 (§14), a converted title, or a stock cartridge started in MasterDrive mode (one proposed answer to Q8 is a boot-menu option that does this). Move them above `$F0`? | open |
+| Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range. They act as registers only in MasterDrive mode (`$06` also in Game Gear mode, §11), so stock software in its own mode is unaffected. The risk is old code run in MasterDrive mode that writes a mirror address in `$06`–`$16`: a title retagged to region 8 (§14), a converted title, or a stock cartridge started in MasterDrive mode (one proposed answer to Q8 is a boot-menu option that does this). Move them above `$F0`? | resolved (owner, October 2026): they stay; in MasterDrive mode `$01`–`$17` answer only while Feature Enable A bit 7 is set (the I/O gate, §11), and `$00` always answers. Both implementations do this |
 | Q2 | Maximum ROM size and the mapper register layout above 4 MB | open |
 | Q3 | Cartridge save-RAM size the machine guarantees (the 315-5235 maps 2 × 16 KB; the emulator models 2 × 8 KB) | open |
 | Q4 | ESAT format | resolved in v6: 2 bytes per sprite |
 | Q5 | Unique-cell mode and 32 KB VRAM | resolved in v6: coupled |
 | Q6 | Turbo default | resolved: off at reset; a title turns it on itself (Feature Enable A bit 6, then `$F3`). The enhancement layer's turbo is for unmodified software only |
 | Q7 | Math unit divide | open (§9) |
-| Q8 | Run-time detection of a MasterDrive by a single ROM | open (§14) |
+| Q8 | Run-time detection of a MasterDrive by a single ROM | resolved (owner, October 2026): a boot-menu option runs an export cartridge in MasterDrive mode, and a read-only machine ID at `$17` reads `$A7` behind the I/O gate (§14). Both implementations do this |
 | Q9 | Work RAM bank readback at `$0A` | open |
 | Q10 | Reverting third-party GG-to-SMS patches | an emulator workflow, not a machine question |
 | Q11 | Should the true-TMS-colours boost default off like every other boost, and act only in the stock modes? | resolved (owner, October 2026): on at power-on, one of the two boosts that start on (Start = Pause is the other), and it also acts on MasterDrive software's TMS modes (§15). Both implementations do this |
@@ -566,7 +574,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q21 | FM register writes at turbo (§1). The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo steps above 100 % they can come too close: on the Pocket core a test driver that leaves the chip little more than the minimum at 100 % played no FM at 200 %. Should the bus synchroniser hold the CPU on `$F0`/`$F1` until the FM chip is ready, as it does for the VDP? | resolved (owner, October 2026): yes (§1). Both implementations do this, and the test driver now plays at 200 % |
 | Q22 | PAL turbo clocks (§1). The turbo steps are defined at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. In PAL both implementations run the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz, because their turbo is a multiple of the base clock. Should PAL turbo be those, or the NTSC frequencies? | resolved (owner, October 2026): the same percentages of the PAL clock (§1). Both implementations do this |
 
-Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in MasterDrive mode, the only mode in which those registers act (§10); and the keyboard's active-low polarity rests on a single source that contradicts itself.
+Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in MasterDrive mode, the only mode in which those registers act (§10): an old title that set R15 bit 7 there would also open the I/O registers (§11); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
 ---
 
@@ -590,6 +598,8 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Mappers | Sega, Codemasters, Korean, Korean MSX (MSX variant) | the same |
 | Controllers, SK-1100 keyboard | yes | yes (keyboard not yet tested on the core) |
 | Mega Drive mouse, Sports Pad trackball | yes | not yet |
+| I/O gate (Feature Enable A bit 7, `$01`–`$17`) and machine ID (`$17`) | yes | yes |
+| Native mode for an export cartridge (Q8) | the machine-mode selector | the System setting |
 | Multitap detection (`$16`) | yes | yes |
 | Multitap protocols (Sega Team Player, EA 4 Way Play) | not yet | not yet |
 | Game Gear serial registers (`$01`–`$05`) | yes (they hold what is written) | yes (the same) |
@@ -607,4 +617,4 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | PAL CPU clock (3.546893 MHz, §1) | yes: PAL frames come at 49.70 a second, and the PSG and FM chip run on the PAL clock | yes, the same (the Pocket's video clock stays fixed, so a PAL line reaches its scaler as 345 or 346 pixel clocks; not yet seen on a Pocket) |
 | Enhancement layer | all | all |
 
-**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a MasterDrive feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and MasterDrive modes and gets the same values on both, apart from the one difference the implementations are meant to have: no debug host is attached to the core (`$FC`/`$FD` bit 7, MasterDrive mode). An FM test ROM plays a PSG tone and an FM sine and steps `$F2` through its four states: on the core each chip is heard exactly in the states that select it, at the expected pitch and at the balance above (Q20). The emulator's `$F2` states are checked by a probe; its FM sound is approximate, so the two sound different. Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Nothing has run on a Pocket yet.
+**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a MasterDrive feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and MasterDrive modes and gets the same values on both, apart from the one difference the implementations are meant to have: no debug host is attached to the core (`$FC`/`$FD` bit 7, MasterDrive mode). An I/O gate test ROM reads MasterDrive's low ports before and after setting Feature Enable A bit 7: in MasterDrive mode they read `$FF` while the gate is closed, then the registers answer and `$17` reads `$A7`; in Master System and Game Gear modes the gate never opens. The emulator and the core agree in all three modes. An FM test ROM plays a PSG tone and an FM sine and steps `$F2` through its four states: on the core each chip is heard exactly in the states that select it, at the expected pitch and at the balance above (Q20). The emulator's `$F2` states are checked by a probe; its FM sound is approximate, so the two sound different. Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Nothing has run on a Pocket yet.

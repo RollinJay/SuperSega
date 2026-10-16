@@ -1579,6 +1579,9 @@ class FM{
   }
 }
 
+/* The machine ID at $17 (Q8): high nibble $A = MasterDrive, low nibble = the
+   machine version (7). Software tests the high nibble. */
+const MACHINE_ID=0xA7;
 /* ---------------- Machine ---------------- */
 class Machine{
   constructor(){
@@ -1769,15 +1772,17 @@ class Machine{
     const p=port&0xFF;
     /* Game Gear low ports. MasterDrive adopts the GG scheme, so a GG title retagged
        to MasterDrive still reads Start at $00. Port $00: bit 7 Start (0 = pressed),
-       bit 6 region (1 = export), bits 5-0 read 0 (bit 5 = NTSC). */
-    if((this.mode==='gg'||this.mode==='ss')&&p<=0x06){
+       bit 6 region (1 = export), bits 5-0 read 0 (bit 5 = NTSC). In MasterDrive
+       mode $01-$06 answer only once the I/O gate is open (mdIO). */
+    if((this.mode==='gg'&&p<=0x06)||(this.mode==='ss'&&(p===0x00||(p<=0x06&&this.mdIO())))){
       if(p===0x00) return (this.jpRegion?0x00:0x40)|(this.btn.start?0x00:0x80);
       return this.ggReg[p];
     }
     /* MasterDrive registers inside the $00-$3F mirror range are decoded by the
-       FPGA, so they must answer before the controller-port mirror does. Ports in
-       $07-$16 with nothing readable return $FF. */
-    if(this.mode==='ss'&&p>=0x07&&p<=0x16){
+       FPGA once the I/O gate is open, so they must answer before the controller-
+       port mirror does. Ports in $07-$17 with nothing readable return $FF. */
+    if(this.mode==='ss'&&p>=0x07&&p<=0x17&&this.mdIO()){
+      if(p===0x17) return MACHINE_ID;
       if(p===0x08) return (this.pcm.fifo.length<<4)&0x70;
       if(p===0x09) return this.slotSel;
       if(p===0x0B) return this.cardBank;
@@ -1845,6 +1850,12 @@ class Machine{
   /* CPU clock multiplier. MasterDrive software sets its own step through $F3; the
      enhancement layer's turbo step is for stock software (machine profile v7). */
   cpuMult(){ return this.mode==='ss' ? (this.turbo||1) : ((this.ael&&this.ael.turbo)||1); }
+  /* The MasterDrive I/O registers at $01-$17 answer only while Feature Enable A
+     (VDP R15) bit 7 is set (Q1, Q8). Until then MasterDrive mode decodes those
+     ports as a Master System does: writes reach the $3E/$3F mirrors, reads give
+     $FF. $00 (Start / region) always answers. The gate is live, and what the
+     registers were set to stays in force while it is closed. */
+  mdIO(){ return this.mode==='ss' && !!(this.vdp.reg[15]&0x80); }
   /* The base clock: 3.579545 MHz, or 3.546893 MHz in PAL as on a PAL Master System
      (Technical Reference section 1). The VDP, PSG and FM chip run on it, so a PAL
      frame (313 lines of 228 cycles) comes at 49.70 Hz and an NTSC one at 59.92 Hz. */
@@ -1959,7 +1970,7 @@ class Machine{
         K.row=(K.ctrl&1)?7:(K.portC&7);             // port C lower as input floats high: row 7
         return; }      // $DF : control register
     }
-    if((this.mode==='gg'||this.mode==='ss')&&p<=0x06){
+    if((this.mode==='gg'&&p<=0x06)||(this.mode==='ss'&&(p===0x00||(p<=0x06&&this.mdIO())))){
       if(p===0x06){ const P=(this.psgTarget||this.psg); P.stereo=v; P.stereoSet=1; return; }   /* write-only */
       if(p!==0x00) this.ggReg[p]=v;   /* $00 is read-only */
       return;
@@ -1967,7 +1978,10 @@ class Machine{
     /* The SG-1000, SC-3000 and SF-7000 have no $3E/$3F registers: nothing below $40 answers. */
     if((this.mode==='sg'||this.mode==='sc'||this.mode==='sf')&&p<0x40) return;
     if(this.mode==='ss'){
-      switch(p){
+      /* $07-$17 are MasterDrive registers only while the I/O gate is open; while
+         it is closed a write there falls through to the $3E/$3F mirror below. */
+      const reg=p>=0x07&&p<=0x17, open=this.mdIO();
+      if(!reg||open) switch(p){
         case 0x07: if(this.pcm.fifo.length<64) this.pcm.fifo.push(v); return;
         case 0x08: this.pcm.ctl=v; return;
         case 0x09: this.slotSel=v; return;
@@ -1995,10 +2009,10 @@ class Machine{
         case 0x15: { const w=this.wave[this.waveSel]; w.vol=v&15; w.pan=(v>>4)&3; return; }
       }
       if(p>=0xF4&&p<=0xFA){ this.dma[p-0xF4]=v; if(p===0xFA&&(v&0x80)) this.runDMA(); return; }
-      /* MasterDrive decodes $07-$16 itself. The ports not written above ($0F/$10
-         math result, $16 multitap) are read-only: a write must not fall through
-         to the $3E/$3F mirror below. */
-      if(p>=0x07&&p<=0x16) return;
+      /* With the gate open MasterDrive decodes $07-$17 itself. The ports not
+         written above ($0F/$10 math result, $16 multitap, $17 machine ID) are
+         read-only: a write must not fall through to the $3E/$3F mirror below. */
+      if(reg&&open) return;
     }
     if(p<0x40){
       if(p&1){ this.ioCtl=v;
@@ -3608,7 +3622,7 @@ function feasibility(m){
 
   if(panned) rows.push(panNonBinary
     ? ['PSG panning (continuous)','emu','The SN76489 in the Game Gear ASIC gates each channel to each side. It has one output per side, not a per-channel level, so only hard left / right / both exist in silicon.']
-    : ['PSG panning (hard L/R)','gg','Port $06 does exactly this on Game Gear and MasterDrive. A plain Master System is mono and cannot.']);
+    : ['PSG panning (hard L/R)','gg','Port $06 does exactly this on Game Gear, and on MasterDrive once Feature Enable A bit 7 is set. A plain Master System is mono and cannot.']);
   if(gained) rows.push(['PSG channel levels','sms','Achievable on any target as a ROM data change: the attenuation values the driver writes are edited. Live mixing needs MasterDrive.']);
   if(fmPanned) rows.push(fmPanPerChannel
     ? ['FM panning (per channel)','emu','The YM2413 has a single mono output pin. Panning individual FM channels needs nine separate DACs, which no member of this hardware family has.']
@@ -5000,7 +5014,7 @@ function refresh(){
   document.getElementById('maptab').innerHTML=mt;
   // features
   const A=V.fa(), B=V.fb2();
-  const fa=[['CRAM native 12-bit',1],['Line-scroll H',2],['Window layer',4],['ESAT sprites',8],['16 sprites/line',16],['Extended reg banks',32]];
+  const fa=[['CRAM native 12-bit',1],['Line-scroll H',2],['Window layer',4],['ESAT sprites',8],['16 sprites/line',16],['Extended reg banks',32],['Turbo enable ($F3)',64],['I/O registers $01-$17',128]];
   const fbb=[['Line V-offset',1],['Extended CRAM',2],['16x16 sprites',4],['Per-sprite collision',8],['VRAM banking',16]];
   const fcc=[['Legacy modes use CRAM',1],['Legacy sprite limit raised',2],['Text window (40 col)',4],['1024-tile unique cells',8],['ESAT 2-byte (mag/early clock)',16],['SC-3000 keyboard',32]];
   let ft='<tr><th>Feature Enable A (R15)</th><th>State</th></tr>';
@@ -5233,7 +5247,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
       const set=(V.status&0x20)!==0; m.inp(0xBF);
       return {ok:set&&((V.status&0x20)===0),note:set?'set then cleared on read':'never set'}; });
     chk('Memory','128 KB work RAM, 16 banks',()=>{
-      const m=M('ss'); let bad=0;
+      const m=M('ss'); m.vdp.reg[15]=0x80; let bad=0;   /* Feature Enable A bit 7: the I/O registers answer */
       for(let b=0;b<16;b++){ m.out(0x0A,b); m.wr(0xC000,0xA0|b); }
       for(let b=0;b<16;b++){ m.out(0x0A,b); if(m.rd(0xC000)!==(0xA0|b)) bad++; }
       return {ok:bad===0&&m.wram.length===0x20000,note:(m.wram.length>>10)+' KB, '+bad+' bad banks'}; });

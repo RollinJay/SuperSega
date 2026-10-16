@@ -480,11 +480,11 @@ change(LATER + 'The enhancement-layer design document the profile cites (SuperSe
 
 # ------------------------------------------------------------------ open questions
 p['open_questions'] = [
-    {'id': 'Q1', 'topic': 'Port mirror range', 'status': 'open',
-     'detail': ('Registers $06-$16 sit in the $3E/$3F mirror range. Stock software in its own mode is unaffected '
-                '(port_map.mode_scope); the risk is old code running in MasterDrive mode - a retagged or converted '
-                'title, or a stock cartridge started in MasterDrive mode (software_detection option 2) - that '
-                'writes a $3E/$3F mirror address in $06-$16. Relocation above $F0 is the candidate fix.')},
+    {'id': 'Q1', 'topic': 'Port mirror range', 'status': 'resolved',
+     'detail': ('Registers $06-$16 sit in the $3E/$3F mirror range, a risk for old code running in MasterDrive mode '
+                'that writes a mirror address there. Decided by the owner in October 2026: the registers stay, and '
+                'in MasterDrive mode $01-$17 answer only while Feature Enable A bit 7 is set; until then those ports '
+                'are the $3E/$3F mirrors and read $FF, and $00 still answers (port_map.native_gate).')},
     {'id': 'Q2', 'topic': 'Maximum ROM size and mapper layout above 4 MB', 'status': 'open',
      'detail': 'See media.cartridge_slot.sega_mapper_reach.'},
     {'id': 'Q3', 'topic': 'Cartridge save-RAM size', 'status': 'open',
@@ -497,7 +497,10 @@ p['open_questions'] = [
      'detail': ('Off at reset. A title enables it itself (Feature Enable A bit 6, then $F3). The enhancement '
                 'layer\'s turbo boost is for unmodified software in the stock modes and does not apply to MasterDrive titles.')},
     {'id': 'Q7', 'topic': 'Math unit divide', 'status': 'open', 'detail': 'See math_unit.divide_open.'},
-    {'id': 'Q8', 'topic': 'Run-time machine detection', 'status': 'open', 'detail': 'See software_detection.'},
+    {'id': 'Q8', 'topic': 'Run-time machine detection', 'status': 'resolved',
+     'detail': ('Decided by the owner in October 2026: a boot-menu option runs an export cartridge in MasterDrive '
+                'mode, and a read-only machine ID register at $17 reads $A7, behind the I/O gate of Q1 '
+                '(software_detection).')},
     {'id': 'Q9', 'topic': 'Work RAM bank readback at $0A', 'status': 'open',
      'detail': 'Not readable today. Interrupt handlers that switch banks need to restore the previous one; readback or a documented RAM shadow is needed.'},
     {'id': 'Q10', 'topic': 'Reverting third-party GG2SMS layers', 'status': 'emulator workflow',
@@ -687,6 +690,96 @@ change(LATER + 'The machine is renamed MasterDrive (formerly Super Sega), the ow
 
 change(LATER + 'Q22 resolved by the owner: in PAL the turbo steps are the same percentages of the PAL clock, '
        '4.434, 5.320, 6.207 and 7.094 MHz (cpu.turbo.clock_generation), as both implementations already ran them.')
+
+# ------------------------------------------------------------------ Q1 and Q8 (decided by the owner, October 2026)
+GATE = 'while Feature Enable A bit 7 is set (port_map.native_gate)'
+pm['0x00'] = ('Game Gear port 0: bit 7 Start (0 = pressed), bit 6 region (1 = export), bits 5-0 read 0. Decoded in '
+              'Game Gear AND MasterDrive modes; in MasterDrive mode it answers whether or not the I/O gate is open.')
+pm['0x01-0x05'] = 'Game Gear serial / EXT link registers: Game Gear mode, and MasterDrive mode ' + GATE
+pm['0x06'] = 'PSG stereo panning (write-only): Game Gear mode, and MasterDrive mode ' + GATE
+put_after(pm, '0x16', '0x17', 'machine ID, read-only, $A7 (software_detection.machine_id): MasterDrive mode ' + GATE)
+rv = {}
+for k, v in p['port_map']['masterdrive_read_values'].items():
+    if k == '0x07-0x16':
+        rv['0x01-0x17'] = ('decoded by the FPGA in MasterDrive mode ' + GATE + ': $01-$05 the Game Gear serial '
+                           'registers, $06 $FF (write-only), $07-$17 as below; ports with no readable register return '
+                           '$FF, never the controller mirror. While the gate is closed they read $FF, as on a Master '
+                           'System.')
+    else:
+        rv[k] = v
+    if k == '0x16':
+        rv['0x17'] = '$A7: the machine ID (software_detection.machine_id)'
+p['port_map']['masterdrive_read_values'] = rv
+p['port_map']['mode_scope'] = (
+    'In MasterDrive mode the registers at 0x01-0x17 answer only ' + GATE + '; 0x00 always answers. In Game Gear mode '
+    '0x00-0x06 are always its registers. Writes to VDP bank 0 R11-R15 take effect only in MasterDrive mode '
+    '(vdp_registers.bank_0_scope). In every other case these ports and registers do what they do on the stock machine.')
+put_after(p['port_map'], 'mode_scope', 'native_gate', (
+    'Decided by the owner, October 2026 (Q1, with Q8): in MasterDrive mode the I/O registers at 0x01-0x17 answer only '
+    'while software has Feature Enable A (VDP bank 0 R15) bit 7 set. Until then MasterDrive mode decodes 0x01-0x17 as '
+    'the Master System does: an even port writes 0x3E, an odd port writes 0x3F, and a read returns $FF. 0x00 (Start '
+    'and region) always answers. Bit 7 is clear at reset. The gate is live: clearing the bit closes the ports again, '
+    'and what the registers were set to (work RAM bank, slot select, card bank, stereo, the math operands, PCM and '
+    'wavetable) stays in force.'))
+p['port_map']['open_risk'] = (
+    'RESOLVED by the I/O gate (Q1, native_gate). The MasterDrive registers stay at 0x01-0x17 inside the 0x3E/0x3F '
+    'mirror range, and answer only once native software sets Feature Enable A bit 7, so old code running in MasterDrive '
+    'mode (a retagged or converted title, or an export cartridge started in MasterDrive mode, software_detection) that '
+    'writes a mirror address there reaches memory or I/O control, as on a Master System. What remains: old code that '
+    'writes VDP R15 with bit 7 set opens the registers (vdp_registers.bank_0_evidence), and old code in MasterDrive '
+    'mode meets the rest of MasterDrive behaviour (software_detection.native_mode).')
+p['vdp_registers']['bank_0']['15'] = ('Feature Enable A - bit0 CRAM native, bit1 line-scroll H, bit2 window, bit3 ESAT, '
+                                      'bit4 16 sprites/line, bit5 XRB, bit6 turbo (enables writes to $F3), bit7 the '
+                                      'MasterDrive I/O registers at $01-$17 (port_map.native_gate)')
+p['vdp_registers']['bank_0_evidence'] = (
+    'Evidence, not proof (a risk from Technical Reference v2 that v3 keeps): six commercial titles were checked '
+    'and none write VDP registers 11-15, where Feature Enable A lives. It matters for old code running in MasterDrive '
+    'mode, the only mode in which those registers take effect (bank_0_scope): an old title that set R15 bit 7 there '
+    'would also open the I/O registers at $01-$17 (port_map.native_gate).')
+p['software_detection'] = {
+    'status': 'RESOLVED (Q8, decided by the owner, October 2026)',
+    'question': ('How does one ROM tell, at run time, that it is on a MasterDrive? Extended '
+                 'features are reachable only in MasterDrive mode, which the header region '
+                 '(8) selects, and an export SMS BIOS refuses region 8. A single ROM for both '
+                 'machines therefore cannot use region 8.'),
+    'options': [
+        'Two ROMs from one source (what the Super Mario Land DX port does now).',
+        'A boot-menu option to run a region-4 cartridge in MasterDrive mode, plus a read-only '
+        'machine ID register the ROM can test.',
+        'An unlock sequence that switches a running region-4 title into MasterDrive mode.',
+    ],
+    'chosen': 'option 2: a boot-menu option and a read-only machine ID register',
+    'boot_menu': ('The boot menu can start an export (region 4) cartridge in MasterDrive mode instead of Master System '
+                  'mode. It then starts as MasterDrive software does: every extension off, and the I/O registers waiting '
+                  'for Feature Enable A bit 7 (port_map.native_gate). On the Analogue Pocket core this is System = '
+                  'MasterDrive; in the emulator, the machine-mode selector.'),
+    'native_mode': ('Old code started this way meets MasterDrive behaviour: the pad reads as a Mega Drive pad (B and C '
+                    'as buttons 1 and 2 with TH high), the enhancement layer does not act, 0xF0-0xFF are fully decoded, '
+                    'VDP registers 11-15 take effect, and the TMS modes raise line interrupts when R0 bit 4 is set. '
+                    '0x00 reads Start and region. The option is for software that detects the machine; ordinary games '
+                    'run in Master System mode.'),
+    'machine_id': {
+        'port': '0x17',
+        'value': '0xA7',
+        'encoding': 'high nibble $A = MasterDrive; low nibble = the machine version (7)',
+        'access': 'read-only, MasterDrive mode, ' + GATE + '; a write is absorbed',
+        'otherwise': ('while the gate is closed a read gives $FF and a write is a 0x3F mirror write; in the other modes '
+                      'the port does what it does on the stock machine ($FF on the Master System and Game Gear, the '
+                      'controller mirror in the SG-1000, SC-3000 and SF-7000 modes)'),
+    },
+    'procedure': ('Write VDP R15 with bit 7 set (on a stock VDP register 15 does nothing), then IN A,($17): a '
+                  'MasterDrive in MasterDrive mode answers with $A in the high nibble. Test the high nibble rather than '
+                  'only for a value other than $FF, since some sources describe open bus at the low ports of stock '
+                  'consoles.'),
+    'source': 'Super Mario Land DX port design, distribution question',
+}
+change(LATER + 'Q1 resolved by the owner: in MasterDrive mode the I/O registers at $01-$17 answer only while Feature '
+       'Enable A bit 7 is set (port_map.native_gate); until then those ports are the $3E/$3F mirrors and read $FF, as on '
+       'a Master System, and $00 still answers. The gate is live and the registers keep their settings while it is '
+       'closed. port_map.mode_scope and open_risk and Feature Enable A (bank 0 R15) follow.')
+change(LATER + 'Q8 resolved by the owner: a boot-menu option runs an export cartridge in MasterDrive mode, and a read-only '
+       'machine ID register at $17 reads $A7 (high nibble $A = MasterDrive, low nibble the machine version), behind '
+       'the I/O gate of Q1 (software_detection).')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

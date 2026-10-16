@@ -43,10 +43,10 @@ Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check
 `sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, MasterDrive mode, Game Gear, the four TMS9918 modes), the FM test ROM must sound as its `$F2` settings say (`tools/check_fm_wav.py`), the PAL frame rate and pitch must follow the PAL clock, and the Pocket platform simulation must draw the same frames as the machine simulation (NTSC and PAL) with regular video timing, read the Pocket's A and B as buttons 1 and 2 in Master System mode and B as button 1 in MasterDrive mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
 
 ```sh
-python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, fm, fm_tight, mdrfeat, ports, tms_* test ROMs
+python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, fm, fm_tight, mdrfeat, ports, mdports, tms_* test ROMs
 python3 tools/check_core_json.py             # input.json/interact.json against platform limits and the RTL
 (cd sim/z80 && ./run.sh)                     # Z80 wrapper timing and port accesses against the emulator's Z80
-(cd sim/io && ./run.sh)                      # keyboard ghosting and math unit against reference models
+(cd sim/io && ./run.sh)                      # keyboard ghosting, math unit, I/O gate against reference models
 (cd syn && yosys -q -l synth.log synth.ys)   # resource estimate; rewrites syn/synth.log
 cd sim/sys && ./build.sh && mkdir -p out
 ./obj/tb_mdr ../../roms/vdp224.sms sms 40 out/v224 10 37        # frames 10 and 37 as PPM
@@ -58,7 +58,7 @@ cd sim/sys && ./build.sh && mkdir -p out
 #   hold C: -holdc ; audio: -wav file.wav
 ./obj/tb_mdr ../../roms/fm.sms sms 50 out/fm -wav out/fm.wav          # FM; check with:
 python3 ../../tools/check_fm_wav.py out/fm.wav                  # (--no-fm for gg, sg, sc; --pal with -pal)
-./obj/tb_mdr ../../roms/ports.sms ss 11 out/io 10                # I/O decode test; decode with:
+./obj/tb_mdr ../../roms/ports.sms ss 11 out/io 10                # I/O decode test (mdports.sms: the I/O gate); decode with:
 python3 ../../tools/read_ports_ppm.py out/io_10.ppm [other.ppm]
 cd ../pocket && ./build.sh && mkdir -p out
 ./obj/tb_pocket ../../roms/vdp224.sms 40 out/p 37               # through the Pocket layer

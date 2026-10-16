@@ -4,7 +4,7 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -453,6 +453,29 @@ def build_ports():
     (columns 16-23), rows 3-20, so the Game Gear window shows them all. Run in
     each machine mode and compare the emulator with the RTL; no input is pressed
     when the frames are taken."""
+    return _ports_rom([], False, PORTS_READ)
+
+
+# mdports.sms: the MasterDrive I/O gate (Q1) and machine ID (Q8). The first rows
+# are read once, before Feature Enable A bit 7 is set; then the ROM sets it
+# (R15 = $80), and if $17 reads $Ax (a MasterDrive) multiplies 200 x 100 in the
+# math unit; then it reads the rest every frame. In MasterDrive mode the first rows read $FF and the $17 row after them
+# $A7; in the other modes the gate never opens.
+MDPORTS_FIRST = [0x01, 0x06, 0x09, 0x0F, 0x16, 0x17]
+MDPORTS_EVERY = [0x00, 0x01, 0x06, 0x09, 0x0E, 0x0F, 0x10, 0x16, 0x17, 0x18, 0xDC]
+
+
+def build_mdports():
+    """The MasterDrive I/O gate and machine ID check (MDPORTS_FIRST, MDPORTS_EVERY)."""
+    return _ports_rom(MDPORTS_FIRST, True, MDPORTS_EVERY)
+
+
+def _ports_rom(first, gate, every):
+    """The ports.sms layout: the ports in first read once at start, the gate
+    opened (R15 = $80, then 200 x 100 in the math unit on a MasterDrive) if
+    gate, then the ports in every read each frame; all drawn one row each from
+    row 3."""
+    allp = list(first) + list(every)
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0)             # DI ; IM 1 ; LD SP,$DFF0
@@ -473,15 +496,25 @@ def build_ports():
     a.label('clr'); a.db(0xAF, 0xD3, 0xBE, 0x1B, 0x7A, 0xB3, 0x20); a.rel('clr')       # clear
     a.db(0x3E, 0x00, 0xD3, 0xBF, 0x3E, 0x7F, 0xD3, 0xBF, 0x3E, 0xD0, 0xD3, 0xBE)   # SAT: no sprites ($3F00 = $D0)
     a.db(0x3E, 0xA5, 0xD3, 0xFB)                           # OUT ($FB),$A5
+    if first:                                              # read once, before the gate opens
+        a.db(0x21); a.ref16('ports'); a.db(0x11); a.dw(0xC100); a.db(0x06, len(first))
+        a.label('rd1'); a.db(0x4E, 0xED, 0x78, 0x12, 0x23, 0x13, 0x10); a.rel('rd1')
+    if gate:                                               # R15 = $80: Feature Enable A bit 7
+        a.db(0x3E, 0x80, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)
+        # detection (Technical Reference §14): only a MasterDrive answers $Ax at $17;
+        # on the other machines $0C-$0E are the $3E/$3F mirrors and must not be written
+        a.db(0xDB, 0x17, 0xE6, 0xF0, 0xFE, 0xA0, 0x20); a.rel('nomd')   # IN A,($17) ; AND $F0 ; CP $A0 ; JR NZ
+        a.db(0x3E, 200, 0xD3, 0x0C, 0x3E, 100, 0xD3, 0x0D, 0xAF, 0xD3, 0x0E)   # 200 x 100 = $4E20
+        a.label('nomd')
     a.label('loop')
     # read every port into $C100...
-    a.db(0x21); a.ref16('ports'); a.db(0x11); a.dw(0xC100); a.db(0x06, len(PORTS_READ))
+    a.db(0x21); a.ref16('ports' if not first else 'every'); a.db(0x11); a.dw(0xC100 + len(first)); a.db(0x06, len(every))
     a.label('rd'); a.db(0x4E, 0xED, 0x78, 0x12, 0x23, 0x13, 0x10); a.rel('rd')   # LD C,(HL) ; IN A,(C) ; LD (DE),A ; INC HL ; INC DE ; DJNZ
     # ...then draw them, one row each from row 3
     a.db(0x21); a.dw(0x3800 + 3 * 64 + 6 * 2); a.db(0x22); a.dw(0xC200)   # row address
     a.db(0x21); a.ref16('ports'); a.db(0x22); a.dw(0xC204)
     a.db(0x21); a.dw(0xC100); a.db(0x22); a.dw(0xC206)
-    a.db(0x3E, len(PORTS_READ), 0x32); a.dw(0xC202)
+    a.db(0x3E, len(allp), 0x32); a.dw(0xC202)
     a.label('row')
     a.db(0x2A); a.dw(0xC200); a.db(0x7D, 0xD3, 0xBF, 0x7C, 0xF6, 0x40, 0xD3, 0xBF)   # set VRAM address
     a.db(0x11); a.dw(64); a.db(0x19, 0x22); a.dw(0xC200)                              # next row
@@ -502,7 +535,10 @@ def build_ports():
     for r, v in enumerate([0x04, 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB, 0x00, 0x00, 0x00, 0xFF]):
         a.db(v, 0x80 | r)
     a.label('ports')
-    a.db(*PORTS_READ)
+    a.db(*first)
+    if first:
+        a.label('every')
+    a.db(*every)
     a.resolve()
     rom = a.b
     rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
@@ -686,6 +722,8 @@ if __name__ == '__main__':
     print('wrote mdrfeat.sms')
     open(os.path.join(out, 'ports.sms'), 'wb').write(build_ports())
     print('wrote ports.sms')
+    open(os.path.join(out, 'mdports.sms'), 'wb').write(build_mdports())
+    print('wrote mdports.sms')
     for m in ('g1', 'g2', 'mc', 'txt'):
         open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
         print(f'wrote tms_{m}.sg')

@@ -110,7 +110,12 @@ module mdr_pocket (
         if (bridge_wr && bridge_addr[31:12] == 20'h00000) begin
             case (bridge_addr[11:0])
                 12'h0F0: reset_req <= 8'hFF;
-                12'h100: set_system  <= bridge_wr_data[2:0];
+                12'h100: begin
+                    set_system <= bridge_wr_data[2:0];
+                    // a change restarts the machine in the new mode (the mode is
+                    // latched only in reset, below), as a change of Video does
+                    if (bridge_wr_data[2:0] != set_system) reset_req <= 8'hFF;
+                end
                 12'h104: set_region  <= bridge_wr_data[0];
                 12'h108: begin
                     set_pal <= bridge_wr_data[0];
@@ -282,22 +287,24 @@ module mdr_pocket (
     wire       has_hdr = (&hm7) || (&hm3) || (&hm1);
     wire [3:0] hdr_region = (&hm7) ? hr7[7:4] : (&hm3) ? hr3[7:4] : hr1[7:4];
 
-    // machine mode: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive
-    reg [2:0] mode;
+    // machine mode: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive.
+    // System = MasterDrive runs any cartridge in MasterDrive (native) mode: the
+    // boot menu's option for an export cartridge (Q8, Technical Reference §14).
+    reg [2:0] mode_sel;
     always @* begin
         case (s_system)
-            3'd1: mode = 3'd0;
-            3'd2: mode = 3'd1;
-            3'd3: mode = 3'd5;
-            3'd4: mode = 3'd2;
-            3'd5: mode = 3'd3;
+            3'd1: mode_sel = 3'd0;
+            3'd2: mode_sel = 3'd1;
+            3'd3: mode_sel = 3'd5;
+            3'd4: mode_sel = 3'd2;
+            3'd5: mode_sel = 3'd3;
             default: begin
                 if (has_hdr) begin
-                    if (hdr_region >= 4'd5 && hdr_region <= 4'd7) mode = 3'd1;
-                    else if (hdr_region == 4'd8) mode = 3'd5;
-                    else mode = 3'd0;
-                end else if (s_rommask <= 23'h00FFFF) mode = 3'd2;   // small and headerless: SG-1000
-                else mode = 3'd0;
+                    if (hdr_region >= 4'd5 && hdr_region <= 4'd7) mode_sel = 3'd1;
+                    else if (hdr_region == 4'd8) mode_sel = 3'd5;
+                    else mode_sel = 3'd0;
+                end else if (s_rommask <= 23'h00FFFF) mode_sel = 3'd2;   // small and headerless: SG-1000
+                else mode_sel = 3'd0;
             end
         endcase
     end
@@ -306,9 +313,11 @@ module mdr_pocket (
     // the machine
     // =====================================================================
     wire        m_reset = !sys_reset_n || s_dl || !s_loaded;
-    // the TV standard is part of the machine: it changes only in reset
+    // the TV standard and the machine mode are part of the machine: they change
+    // only in reset
     reg         m_pal = 1'b0;
-    always @(posedge clk_sys) if (m_reset) m_pal <= s_pal;
+    reg  [2:0]  mode = 3'd0;
+    always @(posedge clk_sys) if (m_reset) begin m_pal <= s_pal; mode <= mode_sel; end
     wire        rom_req;
     wire [23:0] rom_addr;
     reg         rom_ack;

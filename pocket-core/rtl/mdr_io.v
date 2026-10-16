@@ -5,9 +5,12 @@
 // valid at that edge.
 //
 // Port map (machine profile v7):
-//   $00-$06  Game Gear system ports (GG and MasterDrive modes)
-//   $07-$16  MasterDrive registers (MasterDrive mode): PCM, slot select, work RAM
-//            bank, card bank, math unit, wavetable, multitap detection
+//   $00      Game Gear Start / region (GG and MasterDrive modes)
+//   $01-$06  Game Gear system ports: GG mode; MasterDrive mode once Feature
+//            Enable A bit 7 is set (the I/O gate, Q1)
+//   $07-$17  MasterDrive registers, MasterDrive mode once the gate is open: PCM,
+//            slot select, work RAM bank, card bank, math unit, wavetable,
+//            multitap detection, $17 the machine ID ($A7, Q8)
 //   $00-$3F  otherwise: even = memory control ($3E), odd = I/O control ($3F)
 //   $40-$7F  write: PSG; read: V counter (even) / H counter (odd)
 //   $80-$BF  VDP data (even) / control (odd)
@@ -69,6 +72,14 @@ module mdr_io (
     wire ss = (mode == M_SS);
     wire legacy = (mode == M_SG) || (mode == M_SC) || (mode == M_SF);
     wire kb_live = legacy || (ss && vdp_fec[5]);
+    // The I/O gate (Q1): in MasterDrive mode $01-$17 are registers only while
+    // Feature Enable A bit 7 is set; until then they are the $3E/$3F mirrors and
+    // read $FF, as on a Master System. It is live, and what the registers hold
+    // stays in force while it is closed.
+    wire md_io = ss && vdp_fea[7];
+    wire gg_lo = (gg && port <= 8'h06) || (ss && port == 8'h00) || (md_io && port <= 8'h06);
+    wire md_lo = md_io && port >= 8'h07 && port <= 8'h17;
+    localparam [7:0] MACHINE_ID = 8'hA7;   // $A = MasterDrive, 7 = machine version (Q8)
 
     // ------------------------------------------------------------ registers
     reg [7:0] gg_sio [1:5];
@@ -179,11 +190,11 @@ module mdr_io (
     wire io_disabled = mem_ctl[2] && (mode == M_SMS || ss);
     always @* begin
         rdata = 8'hFF;
-        if ((gg || ss) && port <= 8'h06) begin
+        if (gg_lo) begin
             if (port == 8'h00)      rdata = {~pad1[7], ~jp_region, 6'b000000};
             else if (port == 8'h06) rdata = 8'hFF;
             else                    rdata = gg_sio[port[2:0]];
-        end else if (ss && port >= 8'h07 && port <= 8'h16) begin
+        end else if (md_lo) begin
             case (port)
                 8'h08: rdata = {1'b0, pcm_fill[2:0], 4'b0000};
                 8'h09: rdata = slot_sel;
@@ -192,6 +203,7 @@ module mdr_io (
                 8'h0F: rdata = math_div ? div_q[7:0] : math_res[7:0];
                 8'h10: rdata = math_div ? div_q[15:8] : math_res[15:8];
                 8'h16: rdata = 8'h81;
+                8'h17: rdata = MACHINE_ID;
                 default: rdata = 8'hFF;
             endcase
         end else if (port == 8'hF2 && fm_present && mode != M_SG) begin
@@ -232,14 +244,14 @@ module mdr_io (
     assign vdp_rd = rd && (port[7:6] != 2'b00) && (port < 8'hC0);   // counters and VDP ports
     assign vdp_wr = wr && (port[7:6] == 2'b10);
     assign psg_wr = wr && (port[7:6] == 2'b01);
-    assign stereo_wr = wr && (gg || ss) && port == 8'h06;
+    assign stereo_wr = wr && (gg || md_io) && port == 8'h06;
     assign fm_wr  = wr && fm_present && (port == 8'hF0 || port == 8'hF1);
     assign fm_addr = port[0];
-    assign pcm_wr = wr && ss && port == 8'h07;
+    assign pcm_wr = wr && md_io && port == 8'h07;
     always @(posedge clk) if (wr && port == 8'hFB) dbg_ctl <= wdata;
     // TH latch (Gearsystem rule): a $3F write that leaves a TH pin configured as
     // an input while raising its level bit
-    wire lowport = port < 8'h40 && !((gg || ss) && port <= 8'h06) && !(ss && port >= 8'h07 && port <= 8'h16);
+    wire lowport = port < 8'h40 && !gg_lo && !md_lo;
     assign th_latch = wr && lowport && port[0] && !legacy &&
                       ((wdata[1] && wdata[5] && !io_ctl[5]) || (wdata[3] && wdata[7] && !io_ctl[7]));
 
@@ -248,7 +260,7 @@ module mdr_io (
     // result is ready 16 clocks after the $0E write, long before the CPU's next
     // IN can read it (at least 82 clocks later), and the divider is not one long
     // chain of logic.
-    wire        div_start = wr && ss && port == 8'h0E && wdata[0] && math_b != 8'd0;
+    wire        div_start = wr && md_io && port == 8'h0E && wdata[0] && math_b != 8'd0;
     reg  [7:0]  div_r = 8'd0, div_d = 8'd0;
     reg  [4:0]  div_n = 5'd0;
     wire [8:0]  div_sh  = {div_r, div_q[15]};
@@ -275,9 +287,9 @@ module mdr_io (
             for (i = 0; i < 7; i = i + 1) dma[i] <= 8'd0;
             ppi_c <= 8'h00; ppi_ctl <= 8'h9B;      // 8255 reset: every port an input
         end else if (wr) begin
-            if ((gg || ss) && port <= 8'h06) begin
+            if (gg_lo) begin
                 if (port != 8'h00 && port != 8'h06) gg_sio[port[2:0]] <= wdata;
-            end else if (ss && port >= 8'h07 && port <= 8'h16) begin
+            end else if (md_lo) begin   // $0F, $10, $16, $17 are read-only: a write is absorbed
                 case (port)
                     8'h08: pcm_ctl <= wdata;
                     8'h09: slot_sel <= wdata;

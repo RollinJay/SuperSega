@@ -11,6 +11,10 @@
 //   math unit MasterDrive mode: OUT $0C (A), $0D (B), $0E (operation), then
 //             $0F/$10 read 16 clocks later. Divide: {A, B} / B, 0 when B = 0;
 //             multiply: A x B.
+//   I/O gate  MasterDrive mode: $01-$17 are the $3E/$3F mirrors and read $FF
+//             until Feature Enable A bit 7 is set (Q1), then the registers,
+//             $17 reading the machine ID $A7 (Q8); Game Gear and Master System
+//             modes are unaffected by the bit.
 //
 // The CPU cannot read sooner than 16 clocks after the OUT: its next IN comes at
 // least 11 T-states (82 system clocks at 200 % turbo) later.
@@ -28,12 +32,14 @@ module tb;
     reg  [83:0] keys = 84'd0;
     reg  [7:0] p1 = 8'h00, p2 = 8'h00;
     reg        ghost = 1'b0;
-    wire [7:0] rdata;
+    reg  [7:0] fea = 8'h00;
+    wire [7:0] rdata, mem_ctl, io_ctl;
+    wire       stereo_wr;
 
     mdr_io u_io (.clk(clk), .rst(rst), .mode(mode), .jp_region(1'b0), .fm_present(1'b0),
         .io_sample(io_sample), .io_write(io_write), .port(port), .wdata(wdata), .rdata(rdata),
-        .vdp_rdata(8'h00), .vdp_rd(), .vdp_wr(), .vdp_fea(8'h00), .vdp_fec(8'h00), .th_latch(),
-        .psg_wr(), .stereo_wr(), .fm_wr(), .fm_addr(), .fm_ctl(), .mem_ctl(), .io_ctl(),
+        .vdp_rdata(8'h00), .vdp_rd(), .vdp_wr(), .vdp_fea(fea), .vdp_fec(8'h00), .th_latch(),
+        .psg_wr(), .stereo_wr(stereo_wr), .fm_wr(), .fm_addr(), .fm_ctl(), .mem_ctl(mem_ctl), .io_ctl(io_ctl),
         .wram_bank(), .slot_sel(), .card_bank(), .turbo_step(), .pcm_ctl(), .pcm_wr(),
         .pcm_fill(7'd0), .pad1(p1), .pad2(p2), .reset_btn(1'b0), .kb_keys(keys),
         .kb_ghosting(ghost));
@@ -41,6 +47,16 @@ module tb;
     task out(input [7:0] p, input [7:0] d);
         begin
             @(negedge clk); port = p; wdata = d; io_write = 1'b1; io_sample = 1'b1;
+            @(negedge clk); io_sample = 1'b0; io_write = 1'b0;
+        end
+    endtask
+
+    // a write that must (st = 1) or must not (st = 0) raise the stereo strobe
+    reg saw_st;
+    task out_st(input [7:0] p, input [7:0] d);
+        begin
+            @(negedge clk); port = p; wdata = d; io_write = 1'b1; io_sample = 1'b1;
+            #1 saw_st = stereo_wr;
             @(negedge clk); io_sample = 1'b0; io_write = 1'b0;
         end
     endtask
@@ -75,13 +91,13 @@ module tb;
         end
     endfunction
 
-    integer n, k, bad_kb, bad_math, ghosted, a, b, op;
+    integer n, k, bad_kb, bad_math, bad_gate, ghosted, a, b, op;
     reg [2:0]  row;
     reg [7:0]  lo, hi;
     reg [11:0] want_kb;
     reg [15:0] got, want;
     initial begin
-        bad_kb = 0; bad_math = 0; ghosted = 0;
+        bad_kb = 0; bad_math = 0; bad_gate = 0; ghosted = 0;
         repeat (3) @(negedge clk);
         rst = 1'b0;
 
@@ -107,8 +123,8 @@ module tb;
         end
         $display("keyboard: %0d cases (%0d where ghosting adds keys), %0d wrong", n, ghosted, bad_kb);
 
-        // ---- math unit, MasterDrive mode
-        mode = 3'd5;
+        // ---- math unit, MasterDrive mode, with the I/O gate open
+        mode = 3'd5; fea = 8'h80;
         for (n = 0; n < 20000; n = n + 1) begin
             a = (n < 256) ? n : $urandom % 256;
             b = (n < 256) ? (n * 7) % 256 : $urandom % 256;
@@ -125,7 +141,32 @@ module tb;
         end
         $display("math unit: %0d cases, %0d wrong", n, bad_math);
 
-        if (bad_kb == 0 && bad_math == 0) $display("PASS");
+        // ---- the I/O gate (Q1) and the machine ID (Q8)
+        mode = 3'd5; fea = 8'h00;                               // MasterDrive, gate closed
+        out(8'h0C, 8'h55); if (mem_ctl !== 8'h55) bad_gate = bad_gate + 1;   // $3E mirror
+        out(8'h17, 8'hF5); if (io_ctl !== 8'hF5) bad_gate = bad_gate + 1;    // $3F mirror
+        out(8'h05, 8'h12); if (io_ctl !== 8'h12) bad_gate = bad_gate + 1;
+        out_st(8'h06, 8'hA9); if (saw_st || mem_ctl !== 8'hA9) bad_gate = bad_gate + 1;
+        in(8'h0F, lo); if (lo !== 8'hFF) bad_gate = bad_gate + 1;
+        in(8'h16, lo); if (lo !== 8'hFF) bad_gate = bad_gate + 1;
+        in(8'h17, lo); if (lo !== 8'hFF) bad_gate = bad_gate + 1;
+        in(8'h03, lo); if (lo !== 8'hFF) bad_gate = bad_gate + 1;
+        in(8'h00, lo); if (lo[5:0] !== 6'd0 || lo === 8'hFF) bad_gate = bad_gate + 1;   // Start / region: always
+        out(8'h3E, 8'hA8); out(8'h3F, 8'hFF);
+        fea = 8'h80;                                            // gate open
+        in(8'h17, lo); if (lo !== 8'hA7) bad_gate = bad_gate + 1;
+        in(8'h16, lo); if (lo !== 8'h81) bad_gate = bad_gate + 1;
+        out(8'h17, 8'h12); if (io_ctl !== 8'hFF) bad_gate = bad_gate + 1;    // read-only: absorbed
+        out(8'h0C, 8'h55); if (mem_ctl !== 8'hA8) bad_gate = bad_gate + 1;
+        out_st(8'h06, 8'h0F); if (!saw_st || mem_ctl !== 8'hA8) bad_gate = bad_gate + 1;
+        mode = 3'd1; fea = 8'h00;                               // Game Gear: $06 needs no gate
+        out_st(8'h06, 8'h0F); if (!saw_st) bad_gate = bad_gate + 1;
+        mode = 3'd0; fea = 8'h80;                               // Master System: the mirrors, bit or no bit
+        in(8'h17, lo); if (lo !== 8'hFF) bad_gate = bad_gate + 1;
+        out(8'h0C, 8'h55); if (mem_ctl !== 8'h55) bad_gate = bad_gate + 1;
+        $display("I/O gate and machine ID: %0d wrong", bad_gate);
+
+        if (bad_kb == 0 && bad_math == 0 && bad_gate == 0) $display("PASS");
         else $display("FAIL");
         $finish;
     end

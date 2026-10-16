@@ -155,18 +155,18 @@ probe('M9c', 'A pending line IRQ is taken right after EI+1 instruction, not at t
 });
 
 // ---------------------------------------------------------------- I/O
-probe('M10a', 'MasterDrive math result readable at $0F/$10 (was answered by the pad mirror)', () => {
-  const m = sms('ss');
+probe('M10a', 'MasterDrive math result readable at $0F/$10 (was answered by the pad mirror); Feature Enable A bit 7 set, as the I/O registers need (M54)', () => {
+  const m = sms('ss'); m.vdp.reg[15] = 0x80;
   m.out(0x0C, 200); m.out(0x0D, 100); m.out(0x0E, 0);
   const lo = m.inp(0x0F), hi = m.inp(0x10);
   return { ok: ((hi << 8) | lo) === 20000, note: `read ${(hi << 8) | lo}, want 20000` };
 });
-probe('M10b', 'MasterDrive multitap detection $16 and slot select $09 readback', () => {
-  const m = sms('ss'); m.out(0x09, 0x02);
+probe('M10b', 'MasterDrive multitap detection $16 and slot select $09 readback; Feature Enable A bit 7 set (M54)', () => {
+  const m = sms('ss'); m.vdp.reg[15] = 0x80; m.out(0x09, 0x02);
   return { ok: m.inp(0x16) === 0x81 && m.inp(0x09) === 0x02, note: `$16=${m.inp(0x16).toString(16)} $09=${m.inp(0x09).toString(16)}` };
 });
-probe('M38', 'MasterDrive: writes to the read-only ports $0F, $10 and $16 are absorbed, not taken as $3E/$3F mirrors; on the Master System they still are (Technical Reference \u00a711)', () => {
-  const s = sms('ss'); const mc = s.memCtl, ic = s.ioCtl;
+probe('M38', 'MasterDrive: with the I/O registers open (Feature Enable A bit 7, M54), writes to the read-only ports $0F, $10 and $16 are absorbed, not taken as $3E/$3F mirrors; on the Master System they still are (Technical Reference \u00a711)', () => {
+  const s = sms('ss'); s.vdp.reg[15] = 0x80; const mc = s.memCtl, ic = s.ioCtl;
   s.out(0x0F, 0x00); s.out(0x10, 0x00); s.out(0x16, 0x00);
   const m = sms('sms'); m.out(0x0F, 0x55); m.out(0x10, 0xAA);
   return { ok: s.memCtl === mc && s.ioCtl === ic && m.ioCtl === 0x55 && m.memCtl === 0xAA,
@@ -589,6 +589,48 @@ probe('M53', 'IN F,(C) ($ED $70) reads port (C), sets S, Z and P/V from the valu
   const ef = run(0xEF), zero = run(0x00);                          // $EF: S, odd parity; $00: Z, even parity
   return { ok: ef.t === 12 && ef.f === 0x80 && zero.f === 0x44 && ef.reads === '220' && ef.keep,
            note: `${ef.t} T, port ${ef.reads || 'not read'}, F&$C4 $${ef.f.toString(16)} / $${zero.f.toString(16)}` };
+});
+
+probe('M54', 'MasterDrive I/O gate (Q1): until software sets Feature Enable A bit 7, ports $01-$17 act as the $3E/$3F mirrors and read $FF, and $00 still reads Start and region; with the bit set they are the MasterDrive and Game Gear registers; clearing it closes them again but what they were set to stays in force; the gate is MasterDrive mode only (Technical Reference \u00a711)', () => {
+  const hex = v => '$' + v.toString(16).toUpperCase().padStart(2, '0');
+  const r15 = (m, v) => { m.out(0xBF, v); m.out(0xBF, 0x8F); };       // VDP register 15 through the control port
+  const m = sms('ss');
+  const closed = [0x01, 0x05, 0x06, 0x09, 0x0E, 0x0F, 0x16, 0x17].map(q => m.inp(q));
+  const start = m.inp(0x00);
+  m.out(0x0C, 0xAB); const mc1 = m.memCtl; m.out(0x0D, 0xF5); const ic1 = m.ioCtl;
+  m.out(0x06, 0xA9); const mc2 = m.memCtl, st0 = m.psg.stereoSet;
+  m.out(0x05, 0x12); const ic2 = m.ioCtl, gg5 = m.ggReg[5];
+  m.out(0x3E, 0xA8); m.out(0x3F, 0xFF);                                  // back to the reset values
+  r15(m, 0x80);
+  m.out(0x0C, 200); m.out(0x0D, 100); m.out(0x0E, 0);
+  const prod = m.inp(0x0F) | (m.inp(0x10) << 8), tap = m.inp(0x16);
+  m.out(0x06, 0x0F); m.out(0x05, 0x12); m.out(0x0A, 5);
+  const openOk = prod === 20000 && tap === 0x81 && m.psg.stereo === 0x0F && m.ggReg[5] === 0x12 &&
+                 m.memCtl === 0xA8 && m.ioCtl === 0xFF && m.wramBank === 5;
+  r15(m, 0x00);
+  const shut = m.inp(0x16), kept = m.wramBank;
+  const g = sms('gg'); g.out(0x06, 0x0F);                                 // Game Gear: $06 needs no gate
+  const s = sms('sms'); s.vdp.reg[15] = 0x80; s.out(0x0C, 0xAB);         // Master System: the mirrors, bit or no bit
+  const ok = closed.every(v => v === 0xFF) && (start & 0x3F) === 0 && start !== 0xFF &&
+             mc1 === 0xAB && ic1 === 0xF5 && mc2 === 0xA9 && !st0 && ic2 === 0x12 && gg5 === 0x00 &&
+             openOk && shut === 0xFF && kept === 5 && g.psg.stereo === 0x0F && s.memCtl === 0xAB;
+  return { ok, note: `closed: ${closed.map(hex).join(' ')}, $00 ${hex(start)}, mirrors ${hex(mc1)}/${hex(ic1)}/${hex(mc2)}/${hex(ic2)}; ` +
+                     `open: ${prod}, $16 ${hex(tap)}; closed again: $16 ${hex(shut)}, bank ${kept}` };
+});
+
+probe('M55', 'Machine ID (Q8): with Feature Enable A bit 7 set, port $17 reads $A7 in MasterDrive mode (high nibble $A = MasterDrive, low nibble the machine version 7); stock modes read $FF; a write to $17 is absorbed with the gate open and is a $3F mirror write before (Technical Reference \u00a714)', () => {
+  const detect = mode => {                                         // LD A,$80 ; OUT ($BF),A ; LD A,$8F ; OUT ($BF),A ; IN A,($17)
+    const m = sms(mode); const code = [0x3E, 0x80, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF, 0xDB, 0x17];
+    code.forEach((v, i) => m.wr(0xC000 + i, v)); m.cpu.PC = 0xC000;
+    for (let i = 0; i < 5; i++) m.cpu.step();
+    return m.cpu.R[7];
+  };
+  const ids = ['ss', 'sms', 'gg'].map(detect);
+  const a = sms('ss'); const before = a.inp(0x17); a.out(0x17, 0xF5); const mirror = a.ioCtl;
+  a.vdp.reg[15] = 0x80; a.out(0x3F, 0xFF); a.out(0x17, 0x00); const absorbed = a.ioCtl;
+  const hex = v => '$' + v.toString(16).toUpperCase().padStart(2, '0');
+  return { ok: ids[0] === 0xA7 && ids[1] === 0xFF && ids[2] === 0xFF && before === 0xFF && mirror === 0xF5 && absorbed === 0xFF,
+           note: `MasterDrive ${hex(ids[0])}, SMS ${hex(ids[1])}, GG ${hex(ids[2])}; before the gate ${hex(before)}, write -> $3F ${hex(mirror)}; after ${hex(absorbed)}` };
 });
 
 let pass = 0;

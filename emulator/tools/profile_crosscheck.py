@@ -34,6 +34,13 @@ chk('work RAM %d bytes'%wram['size_bytes'],
 chk('work RAM %d banks'%wram['banks'], 'this.wramBank=v&%d;'%(wram['banks']-1) in js, 'bank register masked to the bank count')
 chk('work RAM bank port %s'%wram['bank_register_port'], 'case %s: this.wramBank='%hexlit(wram['bank_register_port']) in js)
 
+mid=prof['software_detection']['machine_id']
+chk('machine ID %s at port %s'%(mid['value'], mid['port']),
+    'const MACHINE_ID=%s;'%hexlit(mid['value']) in js and 'if(p===%s) return MACHINE_ID;'%hexlit(mid['port']) in js)
+gate=re.search(r'Feature Enable A \(VDP bank 0 R15\) bit (\d)', prof['port_map']['native_gate'])
+chk('I/O registers gated by Feature Enable A bit %s'%(gate and gate.group(1)),
+    gate and 'mdIO(){ return this.mode===\'ss\' && !!(this.vdp.reg[15]&%s); }'%hexlit(1<<int(gate.group(1))) in js)
+
 turbo=prof['cpu']['turbo']
 chk('turbo on port %s'%turbo['control_port'], 'case %s:'%hexlit(turbo['control_port']) in js)
 chk('turbo NOT on 0x3F', 'turbo=[1,1.25,1.5,1.75,2][((v>>4)&7)' not in js,
