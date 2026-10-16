@@ -410,8 +410,10 @@ change('Review fixes: Feature Enable A bit 6 (turbo) added to the register table
 
 cpu = p['cpu']
 put_after(cpu, 'base_clock_hz', 'pal_clock_hz', 3546893)
-cpu['turbo']['clock_generation'] = ('FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock (PAL '
-                                    'turbo frequencies: open question Q22); VDP, PSG and FM stay at 1x')
+cpu['turbo']['clock_generation'] = ('FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock and '
+                                    '4.434/5.320/6.207/7.094 MHz at the PAL clock: each step is the same '
+                                    'percentage of the base clock in both standards (open question Q22, decided '
+                                    'by the owner); VDP, PSG and FM stay at 1x')
 put_after(cpu, 'pal_clock_hz', 'clock_standards', (
     'base_clock_hz is the NTSC clock. In PAL the CPU runs at pal_clock_hz, as on a PAL Master System, so a '
     '313-line frame of 228 cycles per line is 49.70 Hz (at the NTSC clock it would be 50.16 Hz).'))
@@ -555,11 +557,11 @@ p['open_questions'] = [
                 'little more than the minimum at 100 % played no FM at 200 %. Decided by the owner in October '
                 '2026: at turbo the bus synchroniser holds the CPU on a write to $F0/$F1 until the chip can take '
                 'it, as it does for the VDP (cpu.turbo.fm_writes). Both implementations do this.')},
-    {'id': 'Q22', 'topic': 'PAL turbo clocks', 'status': 'open',
-     'detail': ('The turbo steps are defined at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. In PAL both '
-                'implementations run the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz, '
-                'because their turbo is a multiple of the base clock. Should PAL turbo be those, or the NTSC '
-                'frequencies?')},
+    {'id': 'Q22', 'topic': 'PAL turbo clocks', 'status': 'resolved',
+     'detail': ('The turbo steps were defined only at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. Decided by '
+                'the owner in October 2026: in PAL they are the same percentages of the PAL clock, 4.434, 5.320, '
+                '6.207 and 7.094 MHz (cpu.turbo.clock_generation). Both implementations already did this, because '
+                'their turbo is a multiple of the base clock.')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for MasterDrive software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
@@ -682,6 +684,9 @@ change(LATER + 'Open question Q22 added: the turbo frequencies in PAL. Both impl
 change(LATER + 'The machine is renamed MasterDrive (formerly Super Sega), the owner\'s choice: an all-in-one Sega 8-bit '
        'computer and console concept, with updates. Every name in the profile follows, the machine id and two keys '
        'included (video.mode4.height_selection.masterdrive, port_map.masterdrive_read_values).')
+
+change(LATER + 'Q22 resolved by the owner: in PAL the turbo steps are the same percentages of the PAL clock, '
+       '4.434, 5.320, 6.207 and 7.094 MHz (cpu.turbo.clock_generation), as both implementations already ran them.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

@@ -57,7 +57,8 @@
   "(after the October 2026 package) Open question Q21 added and decided by the owner: FM register writes at turbo could come faster than the YM2413 accepts them, so the bus synchroniser holds the CPU on $F0/$F1 until the chip is ready (cpu.turbo.fm_writes). audio.fm.write_timing gives the chip's write timing.",
   "(after the October 2026 package) Stock-mode controller mapping decided by the owner (input.stock_mapping): the Mega Drive pad's A is button 1 and B is button 2, and Start is the Game Gear's Start or, through Start = Pause, the Pause button; Start = Pause is now on at power-on, the second boost that starts on. The documents said only that the pad gives B and C with TH high, as a Mega Drive pad does; the emulator already used A and B.",
   "(after the October 2026 package) Open question Q22 added: the turbo frequencies in PAL. Both implementations run the turbo steps as percentages of the PAL clock (cpu.turbo.clock_generation).",
-  "(after the October 2026 package) The machine is renamed MasterDrive (formerly Super Sega), the owner's choice: an all-in-one Sega 8-bit computer and console concept, with updates. Every name in the profile follows, the machine id and two keys included (video.mode4.height_selection.masterdrive, port_map.masterdrive_read_values)."
+  "(after the October 2026 package) The machine is renamed MasterDrive (formerly Super Sega), the owner's choice: an all-in-one Sega 8-bit computer and console concept, with updates. Every name in the profile follows, the machine id and two keys included (video.mode4.height_selection.masterdrive, port_map.masterdrive_read_values).",
+  "(after the October 2026 package) Q22 resolved by the owner: in PAL the turbo steps are the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz (cpu.turbo.clock_generation), as both implementations already ran them."
  ],
  "v5_changes": [
   "SG-series capability recovery: features the TMS9918 had and the SMS/GG Mode 4 VDP dropped are restored.",
@@ -194,7 +195,7 @@
    "control_port": "0xF3",
    "control_field": "bits 2-0, step 0-4",
    "principle": "extra CPU cycles per frame; VDP/PSG/FM stay at 1x",
-   "clock_generation": "FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock (PAL turbo frequencies: open question Q22); VDP, PSG and FM stay at 1x",
+   "clock_generation": "FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock and 4.434/5.320/6.207/7.094 MHz at the PAL clock: each step is the same percentage of the base clock in both standards (open question Q22, decided by the owner); VDP, PSG and FM stay at 1x",
    "frame_rate_governance": "the game's existing VBlank wait",
    "enable": "Feature Enable A bit 6 - off at reset. A write to $F3 takes effect only while it is set, so unmodified SMS/GG software can never change the clock; the step stays in force until $F3 is written again.",
    "cartridge_wait": "A 250 ns cartridge ROM is fast enough up to 175 %; at 200 % each cartridge access takes one wait state (open question Q12 covers the Pocket core).",
@@ -1056,8 +1057,8 @@
   {
    "id": "Q22",
    "topic": "PAL turbo clocks",
-   "status": "open",
-   "detail": "The turbo steps are defined at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. In PAL both implementations run the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz, because their turbo is a multiple of the base clock. Should PAL turbo be those, or the NTSC frequencies?"
+   "status": "resolved",
+   "detail": "The turbo steps were defined only at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. Decided by the owner in October 2026: in PAL they are the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz (cpu.turbo.clock_generation). Both implementations already did this, because their turbo is a multiple of the base clock."
   }
  ]
 }
