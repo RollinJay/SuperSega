@@ -1,6 +1,6 @@
-// Super Sega - Video Display Processor
+// MasterDrive - Video Display Processor
 //
-// Mode 4 VDP (Master System / Game Gear) with the Super Sega register file.
+// Mode 4 VDP (Master System / Game Gear) with the MasterDrive register file.
 //
 // Timing model. The VDP counts base CPU cycles (228 per line) whatever the turbo
 // step. Per-line events happen at fixed cycle offsets, following Gearsystem's
@@ -23,11 +23,11 @@
 // following line, so video leaves the VDP one line late. Which VRAM, CRAM and
 // register values a line uses therefore matches Gearsystem's atomic render.
 //
-// Implemented: Mode 4 at 192/224/240 lines, Game Gear CRAM, Super Sega register
+// Implemented: Mode 4 at 192/224/240 lines, Game Gear CRAM, MasterDrive register
 // banks and gating, native and extended CRAM, VRAM banking, 16 sprites per line,
 // and the TMS9918 modes (Graphics I and II, Text, Multicolor) with their sprites,
 // the TMS palette or CRAM colours (Feature Enable C bit 0) and the raised sprite
-// limit (bit 1). The other Super Sega render features (ESAT, 16x16 and magnified
+// limit (bit 1). The other MasterDrive render features (ESAT, 16x16 and magnified
 // Mode 4 sprites, window, line scroll tables, unique-cell, text window) read and
 // write their registers but do not render yet.
 //
@@ -37,12 +37,12 @@
 // Mode 4 event times.
 `default_nettype none
 
-module ss_vdp (
+module mdr_vdp (
     input  wire        clk,
     input  wire        rst,
     input  wire        ce_cyc,        // one pulse per base CPU cycle
     input  wire        gg_mode,       // Game Gear native mode
-    input  wire        ss_mode,       // Super Sega mode: extensions reachable
+    input  wire        ss_mode,       // MasterDrive mode: extensions reachable
     input  wire        pal,
     input  wire        timing_gg,     // 1 = 315-5535 event table
     input  wire        no_spr_limit,  // enhancement layer: 16 per line for stock software
@@ -124,7 +124,7 @@ module ss_vdp (
     wire [7:0]  va_dout;
     reg  [14:0] vb_addr;
     wire [7:0]  vb_dout;
-    ss_dpram #(.AW(15), .DW(8)) u_vram (
+    mdr_dpram #(.AW(15), .DW(8)) u_vram (
         .clk_a(clk), .we_a(va_we), .addr_a(va_addr), .din_a(va_din), .dout_a(va_dout),
         .clk_b(clk), .we_b(1'b0), .addr_b(vb_addr), .din_b(8'h00), .dout_b(vb_dout));
 
@@ -135,7 +135,7 @@ module ss_vdp (
     wire [11:0] ca_dout_unused;
     reg  [7:0]  cb_addr;
     wire [11:0] cb_dout;
-    ss_dpram #(.AW(8), .DW(12)) u_cram (
+    mdr_dpram #(.AW(8), .DW(12)) u_cram (
         .clk_a(clk), .we_a(ca_we), .addr_a(ca_addr), .din_a(ca_din), .dout_a(ca_dout_unused),
         .clk_b(clk), .we_b(1'b0), .addr_b(cb_addr), .din_b(12'h000), .dout_b(cb_dout));
     reg [15:0] pal_written;          // per 16-entry palette, for extended-CRAM aliasing
@@ -371,7 +371,7 @@ module ss_vdp (
                         if (line_ctr == 8'd0) begin
                             line_ctr <= r10;
                             // As stock only Mode 4 (R0 bit 2) raises it: the TMS9918
-                            // has none. Super Sega mode in the TMS modes: open, Q15.
+                            // has none. MasterDrive mode in the TMS modes: open, Q15.
                             if (r0[2] || ss_mode) line_irq <= 1'b1;
                         end else line_ctr <= line_ctr - 8'd1;
                     end else line_ctr <= r10;
@@ -875,7 +875,7 @@ module ss_vdp (
     // =====================================================================
     // Raster: 342 pixels per line (228 base cycles x 1.5); active 256 pixels from
     // pixel PX_ACTIVE. Pixels leave on ce_pix, which is never held; in PAL, where
-    // machine time is held one clock in 109.63 (ss_top), a line lasts 345 or 346
+    // machine time is held one clock in 109.63 (mdr_top), a line lasts 345 or 346
     // pixel enables, and the output waits at pixel 341 for the next line start. The composite of line N starts at line N's render event and
     // can run into line N+1 (up to ~80 pixels with 16 magnified sprites), so the
     // output ring holds four lines and line N is read a whole line later, during
@@ -933,7 +933,7 @@ module ss_vdp (
     always @(posedge clk) begin
         if (!rst && ce_pix && px == PX_ACTIVE && out_ln < height) begin
             if (!(comp_line == out_ln || comp_line == ((out_ln + 9'd1 == lines) ? 9'd0 : out_ln + 9'd1))) begin
-                if (late_count < 5) $display("ss_vdp: output line %0d read with composite at line %0d", out_ln, comp_line);
+                if (late_count < 5) $display("mdr_vdp: output line %0d read with composite at line %0d", out_ln, comp_line);
                 late_count = late_count + 1;
             end
         end

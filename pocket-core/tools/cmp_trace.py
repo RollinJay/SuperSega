@@ -3,7 +3,7 @@
 
 usage: cmp_trace.py trace.bin gs_trace.bin
 The first trace comes from the emulator (emulator/tools/jstrace.js) or the RTL
-(sim/sys/tb_ss -trace); the second from sim/ref/gstrace. In the text below,
+(sim/sys/tb_mdr -trace); the second from sim/ref/gstrace. In the text below,
 "JS" means the first trace.
 Gearsystem splits I/O instructions so it can sync the VDP mid-instruction, which
 adds records at cycle counts that are not instruction boundaries; so every JS

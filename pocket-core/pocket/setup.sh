@@ -1,5 +1,5 @@
 #!/bin/sh
-# Super Sega - assemble a Quartus project for the Analogue Pocket core.
+# MasterDrive - assemble a Quartus project for the Analogue Pocket core.
 #
 # The Analogue Pocket framework files (apf/, core_bridge_cmd.v, the project
 # settings with the Pocket's pin assignments) are under Analogue's licence and
@@ -38,8 +38,8 @@ cp "$T/ap_core.qpf" "$OUT/src/fpga/"
 cp "$T/core/core_bridge_cmd.v" "$OUT/src/fpga/core/"
 
 # our sources
-cp "$HERE/core_top.v" "$HERE/ss_pocket.v" "$HERE/ss_pll.v" "$HERE/ss_save_unload.v" \
-   "$HERE/core_constraints.sdc" "$HERE/ss_core.qip" "$OUT/src/fpga/core/"
+cp "$HERE/core_top.v" "$HERE/mdr_pocket.v" "$HERE/mdr_pll.v" "$HERE/mdr_save_unload.v" \
+   "$HERE/core_constraints.sdc" "$HERE/mdr_core.qip" "$OUT/src/fpga/core/"
 cp -r "$HERE/third_party" "$OUT/src/fpga/core/"
 mkdir -p "$OUT/src/fpga/core/rtl"
 cp -r "$HERE/../rtl/." "$OUT/src/fpga/core/rtl/"
@@ -51,7 +51,7 @@ sed -e '/core\/core_top.v/d' -e '/core\/core_bridge_cmd.v/d' -e '/core\/core_con
     "$T/ap_core.qsf" > "$OUT/src/fpga/ap_core.qsf"
 # start a new line if the template's last kept line has no line end
 if [ -n "$(tail -c 1 "$OUT/src/fpga/ap_core.qsf")" ]; then echo >> "$OUT/src/fpga/ap_core.qsf"; fi
-echo 'set_global_assignment -name QIP_FILE core/ss_core.qip' >> "$OUT/src/fpga/ap_core.qsf"
+echo 'set_global_assignment -name QIP_FILE core/mdr_core.qip' >> "$OUT/src/fpga/ap_core.qsf"
 # leave out the simulation-only blocks (`ifndef SYNTHESIS), as the Yosys estimate does
 echo 'set_global_assignment -name VERILOG_MACRO "SYNTHESIS=1"' >> "$OUT/src/fpga/ap_core.qsf"
 

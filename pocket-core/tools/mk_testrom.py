@@ -4,7 +4,7 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, fm.sms, fm_tight.sms, ssfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -346,7 +346,7 @@ def build_fm(tight=False):
 
 
 def build_ss():
-    """Super Sega features: extended register banks (XRB), native 12-bit CRAM,
+    """MasterDrive features: extended register banks (XRB), native 12-bit CRAM,
     extended CRAM (16 palettes, unwritten ones alias to palette AND 1), the
     224-line height through Feature Enable B, 16 sprites per line, and 200 %
     turbo with the bus synchroniser holding VRAM writes made during active
@@ -437,7 +437,7 @@ def build_ss():
     rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
     cs = sum(rom[0:0x7FF0]) & 0xFFFF
     rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
-    rom[0x7FFF] = 0x8C                                       # region 8: Super Sega
+    rom[0x7FFF] = 0x8C                                       # region 8: MasterDrive
     return bytes(rom)
 
 
@@ -682,8 +682,8 @@ if __name__ == '__main__':
     open(os.path.join(out, 'fm.sms'), 'wb').write(build_fm())
     open(os.path.join(out, 'fm_tight.sms'), 'wb').write(build_fm(tight=True))
     print('wrote fm.sms, fm_tight.sms')
-    open(os.path.join(out, 'ssfeat.sms'), 'wb').write(build_ss())
-    print('wrote ssfeat.sms')
+    open(os.path.join(out, 'mdrfeat.sms'), 'wb').write(build_ss())
+    print('wrote mdrfeat.sms')
     open(os.path.join(out, 'ports.sms'), 'wb').write(build_ports())
     print('wrote ports.sms')
     for m in ('g1', 'g2', 'mc', 'txt'):

@@ -1,11 +1,11 @@
 # Gearsystem runners (test oracle only)
 
-Two small programs that run a ROM on Gearsystem, Ignacio Sanchez's Master System / Game Gear emulator, as an independent reference for the RTL and the Super Sega emulator:
+Two small programs that run a ROM on Gearsystem, Ignacio Sanchez's Master System / Game Gear emulator, as an independent reference for the RTL and the MasterDrive emulator:
 
 | Program | Writes |
 |---|---|
 | `gsrun.cpp` | frames as PPM and the 8 KB work RAM at chosen frames, with the same scripted input as the RTL and emulator harnesses (button 1 at frames 90–95 of every 120; Start at 60–65 on the Game Gear) |
-| `gstrace.cpp` | an instruction trace (PC, SP, A, F, cycle count, line) in the record format `pocket-core/sim/sys/tb_ss` writes with `-trace`, for cycle-level comparison with `pocket-core/tools/cmp_trace.py` |
+| `gstrace.cpp` | an instruction trace (PC, SP, A, F, cycle count, line) in the record format `pocket-core/sim/sys/tb_mdr` writes with `-trace`, for cycle-level comparison with `pocket-core/tools/cmp_trace.py` |
 
 Gearsystem is GPL-3. Nothing from it is in this repository or in the core; these runners are built against a local checkout and the binaries are not distributed. The comparisons in this milestone used Gearsystem commit `125c8d2dec5daa73046397764ea7bb9ad28706df` (12 October 2026).
 

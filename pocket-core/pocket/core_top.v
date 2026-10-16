@@ -1,9 +1,9 @@
 //
-// Super Sega - Analogue Pocket core top level
+// MasterDrive - Analogue Pocket core top level
 //
 // Instantiated by the APF's apf_top (fetched by setup.sh, not part of this
-// repository). The port list is the APF core_top interface. All Super Sega
-// logic sits in ss_pocket (platform layer) and ss_top (the machine).
+// repository). The port list is the APF core_top interface. All MasterDrive
+// logic sits in mdr_pocket (platform layer) and mdr_top (the machine).
 //
 `default_nettype none
 
@@ -471,7 +471,7 @@ wire clk_sys, clk_vid, clk_vid_90;
 wire pll_core_locked;
 wire signed [15:0] audio_l, audio_r;
 
-ss_pocket u_pocket (
+mdr_pocket u_pocket (
     .clk_74a        ( clk_74a ),
     .clk_sys        ( clk_sys ),
     .clk_vid        ( clk_vid ),
@@ -535,7 +535,7 @@ sound_i2s #(
     wire    pll_core_locked_s;
 synch_3 s01(pll_core_locked, pll_core_locked_s, clk_74a);
 
-ss_pll mp1 (
+mdr_pll mp1 (
     .refclk   ( clk_74a ),
     .rst      ( 0 ),
     .outclk_0 ( clk_sys ),

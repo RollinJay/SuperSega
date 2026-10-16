@@ -1,4 +1,4 @@
-// Super Sega - Analogue Pocket platform layer
+// MasterDrive - Analogue Pocket platform layer
 //
 // Everything between the Analogue Pocket framework (APF) and the machine:
 //   - interact menu settings (bridge writes at $0000_01xx, clk_74a domain)
@@ -15,7 +15,7 @@
 // model (sim/pocket). core_top.v wires it to the framework.
 `default_nettype none
 
-module ss_pocket (
+module mdr_pocket (
     input  wire        clk_74a,
     input  wire        clk_sys,          // 53.693175 MHz
     input  wire        clk_vid,          // 5.369318 MHz, same PLL as clk_sys
@@ -72,7 +72,7 @@ module ss_pocket (
     // interact settings (clk_74a), written by the APF before reset exit
     // =====================================================================
     // $0000_00F0 action: reset the machine
-    // $0000_0100 system      0 auto 1 SMS 2 Game Gear 3 Super Sega 4 SG-1000 5 SC-3000
+    // $0000_0100 system      0 auto 1 SMS 2 Game Gear 3 MasterDrive 4 SG-1000 5 SC-3000
     // $0000_0104 region      0 export 1 Japan
     // $0000_0108 video       0 NTSC 60 Hz 1 PAL 50 Hz
     // $0000_010C mapper      0 Sega 1 Codemasters 2 Korean 3 Korean MSX 8 KB
@@ -282,7 +282,7 @@ module ss_pocket (
     wire       has_hdr = (&hm7) || (&hm3) || (&hm1);
     wire [3:0] hdr_region = (&hm7) ? hr7[7:4] : (&hm3) ? hr3[7:4] : hr1[7:4];
 
-    // machine mode: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 Super Sega
+    // machine mode: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive
     reg [2:0] mode;
     always @* begin
         case (s_system)
@@ -327,7 +327,7 @@ module ss_pocket (
     wire [11:0] vid_bgr;
     wire signed [15:0] m_audio_l, m_audio_r;
 
-    ss_top u_machine (
+    mdr_top u_machine (
         .clk_sys(clk_sys), .reset(m_reset),
         .mode(mode), .mapper(s_mapper), .pal(m_pal), .jp_region(s_region),
         .timing_gg(1'b1), .sc_ram32(s_scram32),
@@ -407,7 +407,7 @@ module ss_pocket (
 
     wire        svu_active;
     wire [14:0] svu_addr;
-    ss_save_unload u_saveunload (
+    mdr_save_unload u_saveunload (
         .clk_74a(clk_74a), .bridge_rd(bridge_rd), .bridge_endian_little(bridge_endian_little),
         .bridge_addr(bridge_addr), .bridge_rd_data(save_rd_data),
         .clk_sys(clk_sys), .rd_active(svu_active), .rd_addr(svu_addr), .rd_data(sv_dout));
@@ -437,7 +437,7 @@ module ss_pocket (
     // {start, C, B, A, R, L, D, U}. In the stock modes the console reads A as
     // button 1 and B as button 2 (Technical Reference §6), so the same bits are
     // {start, C, button 2, button 1, ...} there; C only drives the auto-fire
-    // boost. In Super Sega mode software reads the pad as a Mega Drive pad (with
+    // boost. In MasterDrive mode software reads the pad as a Mega Drive pad (with
     // TH high, B and C are TL and TR). Start is the Game Gear's Start, and Pause
     // on SMS/SG/SC with the Start = Pause setting (on by default); Select = Pause.
     reg [31:0] k1_s1, k1, k2_s1, k2, k3_s1, k3, j3_s1, j3;
@@ -573,7 +573,7 @@ module ss_pocket (
     // change once per 10 clk_sys cycles (on vid_ce, which PAL never holds), so
     // every clk_sys -> clk_vid path has at least one clk_sys period; the two
     // clocks are constrained as related, not asynchronous (core_constraints.sdc).
-    // A PAL line is 345 or 346 pixel clocks (ss_top: machine time is held one
+    // A PAL line is 345 or 346 pixel clocks (mdr_top: machine time is held one
     // clock in 109.63); the scaler sees regular DE, HS and VS otherwise.
     reg [11:0] v_bgr;
     reg        v_de, v_hs, v_vs;

@@ -3,7 +3,7 @@
 tv80 (MIT, Guy Hutchison; a Verilog translation of Daniel Wallner's T80),
 from https://github.com/hutch31/tv80 at commit 66a131c38d05ef58b3d8c4f1507a72e6e4aa5d65,
 is vendored here unchanged except for two lines in `tv80_core.v`, each marked
-"Super Sega local change":
+"MasterDrive local change":
 
 - `Auto_Wait_t1 <= Auto_Wait || iorq_i;` (T80's original form) instead of
   `Auto_Wait || (iorq_i & ~Auto_Wait_t2)`. With an external WAIT holding an

@@ -1,4 +1,4 @@
-// Super Sega machine - Verilator system harness.
+// MasterDrive machine - Verilator system harness.
 //
 // Runs a ROM on the RTL machine with the same scripted input as the reference
 // tools (button 1 at frames 90-95 of every 120; Start at 60-65 in GG mode),
@@ -6,7 +6,7 @@
 // format of ../ref/gstrace.cpp so the CPU/VDP timing can be compared with
 // Gearsystem cycle for cycle.
 //
-// usage: tb_ss rom mode(sms|gg|ss) frames outprefix [options] [dumpframes...]
+// usage: tb_mdr rom mode(sms|gg|ss) frames outprefix [options] [dumpframes...]
 //   options: -pal  -gg1 (315-5535 timing; default for all modes)  -sms2 (SMS2 timing)
 //            enhancement layer: -spr16 -ovf -turbo N -vboost -afire -pstereo
 //                            -tmsapprox (TMS modes in the SMS approximation; true TMS colours by default)
@@ -15,7 +15,7 @@
 //            -wav FILE       48 kHz stereo capture of the audio output
 //            -trace N file   write the first N instruction starts
 //            -lat N          ROM bus latency in system cycles (default 4)
-#include "Vss_top.h"
+#include "Vmdr_top.h"
 #include "verilated.h"
 #include <cstdio>
 #include <cstdlib>
@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     }
     uint32_t pow2 = 1; while (pow2 < rom.size()) pow2 <<= 1;
 
-    Vss_top* t = new Vss_top;
+    Vmdr_top* t = new Vmdr_top;
     t->mode = (mode == "gg") ? 1 : (mode == "ss") ? 5 : (mode == "sg") ? 2 : (mode == "sc") ? 3 : 0;
     t->mapper = 0; t->pal = pal; t->jp_region = 0; t->timing_gg = !sms2; t->sc_ram32 = 0;
     t->rom_mask = pow2 - 1; t->card_present = 0; t->card_mask = 0; t->gg_crop = (mode == "gg");

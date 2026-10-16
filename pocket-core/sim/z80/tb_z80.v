@@ -13,7 +13,7 @@ module tb;
     reg [7:0] mem [0:65535];
     integer tcount = 0, i, f;
     reg int_n = 1;
-    ss_z80 dut(.clk(clk), .reset_n(reset_n), .cen(cen), .wait_n(1'b1), .int_n(int_n), .nmi_n(1'b1),
+    mdr_z80 dut(.clk(clk), .reset_n(reset_n), .cen(cen), .wait_n(1'b1), .int_n(int_n), .nmi_n(1'b1),
         .a(a), .dout(dout), .din(din), .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
         .m1_n(m1_n), .rfsh_n(rfsh_n), .halt_n(halt_n), .mem_rd_start(mem_rd_start),
         .mem_wr_start(mem_wr_start), .io_sample(io_sample), .io_cycle(io_cycle), .io_write(io_write),

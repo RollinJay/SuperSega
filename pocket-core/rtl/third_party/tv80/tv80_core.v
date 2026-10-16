@@ -397,7 +397,7 @@ module tv80_core (/*AUTOARG*/
           `ifdef TV80_REFRESH
           R <= `TV80DELAY 0;
           `endif
-          // Super Sega local change: the machine hands software the CPU with
+          // MasterDrive local change: the machine hands software the CPU with
           // SP = $DFF0, where the Master System BIOS leaves it (machine profile
           // cpu.reset_state). tv80 resets SP to $FFFF.
           SP <= `TV80DELAY 16'hDFF0;
@@ -1230,7 +1230,7 @@ module tv80_core (/*AUTOARG*/
                 end 
               else 
                 begin
-		  // Super Sega local change: T80's original form. tv80's
+		  // MasterDrive local change: T80's original form. tv80's
 		  // "iorq_i & ~Auto_Wait_t2" makes Auto_Wait_t1 toggle while WAIT
 		  // holds an I/O cycle in T2, so after WAIT is released the cycle
 		  // only continues on every other enable or so; with an external

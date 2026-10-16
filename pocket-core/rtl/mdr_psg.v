@@ -1,4 +1,4 @@
-// Super Sega - SN76489 PSG (Sega variant) with Game Gear stereo panning.
+// MasterDrive - SN76489 PSG (Sega variant) with Game Gear stereo panning.
 //
 // Three square-wave tone channels and one noise channel, clocked at the base
 // CPU clock / 16. Behaviour follows the Sega part as BlastEm and SMS Power
@@ -10,11 +10,11 @@
 //   - white noise taps bits 0 and 3; any write to the noise register resets the
 //     LFSR to $8000
 //   - 2 dB attenuation steps; 15 = off
-// Port $06 (Game Gear, Super Sega) gates each channel to left and right:
+// Port $06 (Game Gear, MasterDrive) gates each channel to left and right:
 // bits 7-4 left (noise, 2, 1, 0), bits 3-0 right.
 `default_nettype none
 
-module ss_psg (
+module mdr_psg (
     input  wire        clk,
     input  wire        rst,
     input  wire        ce_psg,        // base CPU clock / 16

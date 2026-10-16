@@ -4,4 +4,4 @@ Files used unchanged: src/IKAOPLL.v and src/IKAOPLL_modules/*.v (flattened into 
 Author: Sehyeon Kim, who signs the LICENSE as Raki (the upstream README: "(c) 2024 Sehyeon Kim(Raki)").
 Provenance: the upstream README says "The 9-bit digital output design and the VRC7 patch was copied from
 nukeykt's source" (github.com/nukeykt/Nuked-SMS-FPGA, ym2413.v, GPL-2.0-or-later). See
-pocket-core/docs/SuperSega_Pocket_Core_Design.md section 16.
+pocket-core/docs/MasterDrive_Pocket_Core_Design.md section 16.

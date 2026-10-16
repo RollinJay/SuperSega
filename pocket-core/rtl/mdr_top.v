@@ -1,4 +1,4 @@
-// Super Sega - machine top level (platform independent)
+// MasterDrive - machine top level (platform independent)
 //
 // Everything here is the machine; the platform (Analogue Pocket, simulation)
 // supplies the 53.693175 MHz system clock, ROM storage on a request/acknowledge
@@ -8,7 +8,7 @@
 //            base cycle 3.579545 MHz = sys/15 (VDP timing, PSG = base/16,
 //            YM2413 master clock); in PAL 3.546893 MHz, machine time being
 //            held for one clk_sys in every 109.63
-//            CPU 100/125/150/175/200 % of base (turbo: Super Sega software's
+//            CPU 100/125/150/175/200 % of base (turbo: MasterDrive software's
 //            $F3, or the enhancement layer's step for stock software)
 //            pixel 5.369318 MHz = sys/10, never held
 //   bus sync at turbo steps above 100 % the CPU is held on VDP port accesses
@@ -17,7 +17,7 @@
 //            and on FM writes until the YM2413 can take them
 `default_nettype none
 
-module ss_top #(
+module mdr_top #(
     // The FM unit is part of the machine (a YM2413, IKAOPLL here). FM_FITTED = 0
     // leaves it out: the $F2 detection latch then does not answer, so software
     // that probes for FM falls back to its PSG music instead of playing silence.
@@ -26,7 +26,7 @@ module ss_top #(
 ) (
     input  wire        clk_sys,
     input  wire        reset,
-    input  wire [2:0]  mode,           // 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 Super Sega
+    input  wire [2:0]  mode,           // 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive
     input  wire [1:0]  mapper,
     input  wire        pal,
     input  wire        jp_region,
@@ -38,18 +38,18 @@ module ss_top #(
     input  wire        gg_crop,
     // Enhancement layer (machine profile, AEL). All off = stock behaviour. Each
     // boost acts only on software in the stock modes (SG-1000, SC-3000, Master
-    // System, Game Gear); Super Sega software sets these features itself. The
-    // exception is ael_tmscol, on by default, which also acts on Super Sega
+    // System, Game Gear); MasterDrive software sets these features itself. The
+    // exception is ael_tmscol, on by default, which also acts on MasterDrive
     // software's TMS modes (open question Q11, decided).
     input  wire        ael_sprlimit,   // 16 sprites per line in Mode 4
     input  wire        ael_ovf_stock,  // ... but the overflow flag still reports the 9th sprite
     input  wire        ael_startpause, // Start raises Pause (SMS, SG-1000, SC-3000)
-    input  wire [2:0]  ael_turbo,      // turbo step for stock software (not Super Sega mode)
+    input  wire [2:0]  ael_turbo,      // turbo step for stock software (not MasterDrive mode)
     input  wire        ael_vramboost,  // no VDP access wait at turbo
     input  wire        ael_autofire,   // C held repeats button 2 (stock modes)
     input  wire        ael_pstereo,    // pseudo-stereo PSG until software writes $06 (stock modes)
     input  wire        ael_tmscol,     // true TMS9918 colours in the TMS modes, not the SMS approximation
-                                       // (on by default; it also acts on Super Sega software's TMS modes)
+                                       // (on by default; it also acts on MasterDrive software's TMS modes)
 
     // ROM bus
     output wire        rom_req,
@@ -102,7 +102,7 @@ module ss_top #(
 );
     localparam M_SS = 3'd5;
     wire ss = (mode == M_SS);
-    wire fm_here = FM_FITTED != 0 && (mode == 3'd0 || ss);   // the FM unit: SMS and Super Sega modes
+    wire fm_here = FM_FITTED != 0 && (mode == 3'd0 || ss);   // the FM unit: SMS and MasterDrive modes
 
     // ------------------------------------------------------------ clock enables
     // Machine time. NTSC: every clk_sys is a machine clock and the base cycle is
@@ -141,7 +141,7 @@ module ss_top #(
     wire        ce_pix  = (div10 == 4'd0);
     wire        ce_psg  = ce_base && (div16 == 4'd0);
     wire [2:0]  turbo_step;
-    // Super Sega software sets its own step ($F3); the enhancement layer's step
+    // MasterDrive software sets its own step ($F3); the enhancement layer's step
     // applies to stock software only, since explicit software intent wins.
     wire [2:0]  step_eff = ss ? turbo_step : ael_turbo;
     wire [7:0]  turbo_rate = (step_eff == 3'd1) ? 8'd125 : (step_eff == 3'd2) ? 8'd150 :
@@ -226,7 +226,7 @@ module ss_top #(
     wire        int_n;
     reg         nmi_n;
 
-    ss_z80 u_cpu (
+    mdr_z80 u_cpu (
         .clk(clk_sys), .reset_n(~reset), .cen(ce_cpu),
         .wait_n(mem_wait_n && sync_wait_n), .int_n(int_n), .nmi_n(nmi_n),
         .a(a), .dout(cpu_dout), .din(cpu_din),
@@ -269,7 +269,7 @@ module ss_top #(
     wire [7:0]  mem_ctl, io_ctl, slot_sel;
     wire [3:0]  wram_bank;
     wire [4:0]  card_bank;
-    ss_mem u_mem (
+    mdr_mem u_mem (
         .clk(clk_sys), .rst(reset), .mode(mode), .mapper(mapper), .sc_ram32(sc_ram32),
         .rom_mask(rom_mask), .card_present(card_present), .card_mask(card_mask),
         .a(m_a), .dout(m_dout), .mreq_n(m_mreq_n), .rd_n(m_rd_n), .wr_n(m_wr_n),
@@ -287,7 +287,7 @@ module ss_top #(
     wire [7:0]  vdp_fea, vdp_fec;
     wire        vdp_active;
     // Auto-fire (enhancement layer): while C is held, button 2 toggles every two
-    // frames (15 Hz at 60 Hz). Stock modes only: Super Sega software reads C as
+    // frames (15 Hz at 60 Hz). Stock modes only: MasterDrive software reads C as
     // a button of its own.
     reg [1:0] af_cnt;
     always @(posedge clk_sys) begin
@@ -298,7 +298,7 @@ module ss_top #(
     wire [7:0] pad1_eff = (af_on && pad1[6]) ? {pad1[7:6], af_cnt[1], pad1[4:0]} : pad1;
     wire [7:0] pad2_eff = (af_on && pad2[6]) ? {pad2[7:6], af_cnt[1], pad2[4:0]} : pad2;
 
-    ss_io u_io (
+    mdr_io u_io (
         .clk(clk_sys), .rst(reset), .mode(mode), .jp_region(jp_region),
         .fm_present(fm_here),
         .io_sample(io_sample), .io_write(io_write), .port(a[7:0]), .wdata(cpu_dout), .rdata(io_rdata),
@@ -318,10 +318,10 @@ module ss_top #(
     end
 
     // ------------------------------------------------------------ VDP
-    ss_vdp u_vdp (
+    mdr_vdp u_vdp (
         .clk(clk_sys), .rst(reset), .ce_cyc(ce_base),
         .gg_mode(mode == 3'd1), .ss_mode(ss), .pal(pal), .timing_gg(timing_gg),
-        // boosts are for stock software: Super Sega software sets these itself
+        // boosts are for stock software: MasterDrive software sets these itself
         .no_spr_limit(ael_sprlimit && !ss), .ovf_stock(ael_ovf_stock && !ss), .tms_true(ael_tmscol),
         .io_rd(vdp_rd), .io_wr(vdp_wr), .io_port(a[7:0]), .io_din(cpu_dout), .io_dout(vdp_rdata),
         .th_latch(th_latch), .int_n(int_n),
@@ -365,7 +365,7 @@ module ss_top #(
 
     // ------------------------------------------------------------ audio
     wire signed [15:0] psg_l, psg_r;
-    ss_psg u_psg (
+    mdr_psg u_psg (
         .clk(clk_sys), .rst(reset), .ce_psg(ce_psg), .wr(psg_wr), .din(cpu_dout),
         .stereo_wr(stereo_wr), .stereo_din(cpu_dout), .pstereo(ael_pstereo && !ss),
         .out_l(psg_l), .out_r(psg_r));
@@ -418,7 +418,7 @@ module ss_top #(
     end
 
     // Mix. $F2 bits 1-0 (Japanese Master System): 0 PSG only (power-on),
-    // 1 FM only, 2 both muted, 3 both. Outside the Master System and Super Sega
+    // 1 FM only, 2 both muted, 3 both. Outside the Master System and MasterDrive
     // modes $F2 is never written, so the PSG alone plays. Level: one FM channel
     // at full volume peaks at half a PSG channel at full volume (x8 on the
     // chip's output, about +-510 a channel), as in the emulator; the original's

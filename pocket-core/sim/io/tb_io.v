@@ -1,14 +1,14 @@
-// Super Sega - I/O unit test (iverilog).
+// MasterDrive - I/O unit test (iverilog).
 //
-// Two calculations in rtl/ss_io.v take several clocks so that the core meets
-// timing (docs/SuperSega_Pocket_Core_Design.md §11). This test checks each
+// Two calculations in rtl/mdr_io.v take several clocks so that the core meets
+// timing (docs/MasterDrive_Pocket_Core_Design.md §11). This test checks each
 // against a reference model through the real port writes and reads:
 //
 //   keyboard  SC-3000 mode: random keys and pads, a row selected through the
 //             8255 (OUT $DF mode word, OUT $DE row), ports $DC/$DD read 16
 //             clocks later, with and without ghosting. The reference is the
 //             closure as one combinational loop, the core's earlier form.
-//   math unit Super Sega mode: OUT $0C (A), $0D (B), $0E (operation), then
+//   math unit MasterDrive mode: OUT $0C (A), $0D (B), $0E (operation), then
 //             $0F/$10 read 16 clocks later. Divide: {A, B} / B, 0 when B = 0;
 //             multiply: A x B.
 //
@@ -30,7 +30,7 @@ module tb;
     reg        ghost = 1'b0;
     wire [7:0] rdata;
 
-    ss_io u_io (.clk(clk), .rst(rst), .mode(mode), .jp_region(1'b0), .fm_present(1'b0),
+    mdr_io u_io (.clk(clk), .rst(rst), .mode(mode), .jp_region(1'b0), .fm_present(1'b0),
         .io_sample(io_sample), .io_write(io_write), .port(port), .wdata(wdata), .rdata(rdata),
         .vdp_rdata(8'h00), .vdp_rd(), .vdp_wr(), .vdp_fea(8'h00), .vdp_fec(8'h00), .th_latch(),
         .psg_wr(), .stereo_wr(), .fm_wr(), .fm_addr(), .fm_ctl(), .mem_ctl(), .io_ctl(),
@@ -107,7 +107,7 @@ module tb;
         end
         $display("keyboard: %0d cases (%0d where ghosting adds keys), %0d wrong", n, ghosted, bad_kb);
 
-        // ---- math unit, Super Sega mode
+        // ---- math unit, MasterDrive mode
         mode = 3'd5;
         for (n = 0; n < 20000; n = n + 1) begin
             a = (n < 256) ? n : $urandom % 256;

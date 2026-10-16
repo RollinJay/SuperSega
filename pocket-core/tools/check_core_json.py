@@ -6,11 +6,11 @@ usage: check_core_json.py        (from anywhere; paths are relative to this file
 
 input.json drives the Pocket's own button remapper (Core Settings > Controls):
 at most 4 controller blocks of 8 mappings, names of 19 characters or fewer, and
-only the eight remappable keys. Each key must be a button pocket/ss_pocket.v
+only the eight remappable keys. Each key must be a button pocket/mdr_pocket.v
 reads, or remapping it would do nothing.
 interact.json is the core settings menu: at most 16 entries, names of 23
 characters or fewer, unique ids and addresses, lists of at most 16 options with
-a default inside the list, and every address one that ss_pocket.v decodes.
+a default inside the list, and every address one that mdr_pocket.v decodes.
 Limits are from Analogue's openFPGA documentation (input.json, interact.json).
 Exit status 0 when everything passes, 1 otherwise.
 """
@@ -21,7 +21,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORE = os.path.join(HERE, '..', 'pocket')
-DIST = os.path.join(CORE, 'dist', 'Cores', 'SuperSega.SuperSega')
+DIST = os.path.join(CORE, 'dist', 'Cores', 'MasterDrive.MasterDrive')
 
 # APF pad word bit for each remappable input.json key
 KEYBIT = {'pad_btn_a': 4, 'pad_btn_b': 5, 'pad_btn_x': 6, 'pad_btn_y': 7,
@@ -35,13 +35,13 @@ def bad(msg):
     problems.append(msg)
 
 
-rtl = open(os.path.join(CORE, 'ss_pocket.v'), encoding='utf-8').read()
+rtl = open(os.path.join(CORE, 'mdr_pocket.v'), encoding='utf-8').read()
 m = re.search(r'function \[7:0\] padmap;(.*?)endfunction', rtl, re.S)
 read_bits = {int(b) for b in re.findall(r'\bk\[(\d+)\]', m.group(1))} if m else set()
 read_bits |= {int(b) for b in re.findall(r'pause_btn\s*<=.*?\bk1\[(\d+)\]', rtl)}
 decoded = {int(a, 16) for a in re.findall(r"12'h([0-9A-Fa-f]{3}):", rtl)}
 if not read_bits:
-    bad('could not find padmap or pause_btn in ss_pocket.v')
+    bad('could not find padmap or pause_btn in mdr_pocket.v')
 
 inp = json.load(open(os.path.join(DIST, 'input.json')))['input']
 ctrls = inp.get('controllers', [])
@@ -64,7 +64,7 @@ for c in ctrls:
         if x['key'] not in KEYBIT:
             bad(f"input.json: key {x['key']!r} is not remappable")
         elif KEYBIT[x['key']] not in read_bits:
-            bad(f"input.json: {x['name']!r} uses {x['key']}, pad bit {KEYBIT[x['key']]}, which ss_pocket.v never reads")
+            bad(f"input.json: {x['name']!r} uses {x['key']}, pad bit {KEYBIT[x['key']]}, which mdr_pocket.v never reads")
 
 var = json.load(open(os.path.join(DIST, 'interact.json')))['interact']['variables']
 if len(var) > 16:
@@ -82,7 +82,7 @@ for v, a in zip(var, addrs):
     if v['type'] not in INTERACT_TYPES:
         bad(f"interact.json: {n!r} has unknown type {v['type']!r}")
     if a >> 12 or (a & 0xFFF) not in decoded:
-        bad(f'interact.json: {n!r} writes 0x{a:X}, which ss_pocket.v does not decode')
+        bad(f'interact.json: {n!r} writes 0x{a:X}, which mdr_pocket.v does not decode')
     if v['type'] == 'list':
         opts = v.get('options', [])
         if not 1 <= len(opts) <= 16:

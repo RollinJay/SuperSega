@@ -1,13 +1,13 @@
-// Super Sega - memory map
+// MasterDrive - memory map
 //
 // Decodes every CPU memory access by machine mode and cartridge mapper, and
 // owns the work RAM and cartridge RAM. ROM (cartridge, card) lives outside the
 // machine on a request/acknowledge bus, so the platform can keep it in PSRAM,
 // SDRAM or block RAM.
 //
-// Modes: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 Super Sega. (4 = SF-7000 is not in
+// Modes: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive. (4 = SF-7000 is not in
 // this milestone; it reads as open bus.)
-// Mappers (SMS/GG/Super Sega): 0 Sega, 1 Codemasters, 2 Korean, 3 Korean MSX 8 KB.
+// Mappers (SMS/GG/MasterDrive): 0 Sega, 1 Codemasters, 2 Korean, 3 Korean MSX 8 KB.
 //
 // Behaviour follows the machine profile and the reference emulator's model:
 //  - Sega mapper registers at $FFFC-$FFFF (Sega family only); the write also
@@ -18,14 +18,14 @@
 //  - $FFFC bit 3 maps cartridge RAM over $8000-$BFFF; bit 2 picks one of two
 //    8 KB banks, mirrored in the 16 KB window (profile open question Q3).
 //  - $3E bit 6 disables the cartridge, bit 4 work RAM: reads see $FF.
-//  - Super Sega: port $0A selects one of 16 work RAM banks of 8 KB; port $09
+//  - MasterDrive: port $0A selects one of 16 work RAM banks of 8 KB; port $09
 //    routes slot 1 / slot 2 to the card, bank from port $0B.
 //  - SG-1000: linear ROM, 1 KB RAM mirrored from $C000. SC-3000: ROM $0000-$7FFF
 //    (mirrored), cart RAM $8000-$BFFF (16 KB) or $8000-$FFFF (32 KB, no work
 //    RAM), 2 KB work RAM mirrored.
 `default_nettype none
 
-module ss_mem (
+module mdr_mem (
     input  wire        clk,
     input  wire        rst,
     input  wire [2:0]  mode,
@@ -160,7 +160,7 @@ module ss_mem (
     reg  [16:0] w_addr;
     reg  [7:0]  w_din;
     wire [7:0]  w_dout;
-    ss_dpram #(.AW(17), .DW(8)) u_wram (
+    mdr_dpram #(.AW(17), .DW(8)) u_wram (
         .clk_a(clk), .we_a(w_we), .addr_a(w_addr), .din_a(w_din), .dout_a(w_dout),
         .clk_b(clk), .we_b(1'b0), .addr_b(17'd0), .din_b(8'h00), .dout_b());
 
@@ -169,7 +169,7 @@ module ss_mem (
     reg  [14:0] c_addr;
     reg  [7:0]  c_din;
     wire [7:0]  c_dout;
-    ss_dpram #(.AW(15), .DW(8)) u_cartram (
+    mdr_dpram #(.AW(15), .DW(8)) u_cartram (
         .clk_a(clk), .we_a(c_we), .addr_a(c_addr), .din_a(c_din), .dout_a(c_dout),
         .clk_b(sv_clk), .we_b(sv_we), .addr_b(sv_addr), .din_b(sv_din), .dout_b(sv_dout));
 

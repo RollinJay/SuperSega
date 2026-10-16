@@ -34,7 +34,7 @@ module tb_pocket_top (
     wire [15:0]  dq;
     wire         wt, pclk, adv_n, cre, ce0_n, ce1_n, oe_n, we_n, ub_n, lb_n;
 
-    ss_pocket u_pocket (
+    mdr_pocket u_pocket (
         .clk_74a(clk_74a), .clk_sys(clk_sys), .clk_vid(clk_vid),
         .pll_locked(pll_locked), .apf_reset_n(apf_reset_n),
         .bridge_endian_little(1'b0), .bridge_addr(bridge_addr), .bridge_rd(bridge_rd),

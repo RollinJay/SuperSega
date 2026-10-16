@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Super Sega Emulator</title>
+<title>MasterDrive Emulator</title>
 <style>
 :root{
   --bg:#0d1220; --panel:#131a2b; --panel2:#0f1524; --line:#243049;
@@ -79,7 +79,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
 </head>
 <body>
 <header>
-  <h1>Super Sega</h1>
+  <h1>MasterDrive</h1>
   <span class="tag" id="modetag">no ROM</span>
   <div class="row" style="margin-left:auto">
     <select id="mode" title="Machine mode">
@@ -87,14 +87,14 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       <option value="sg">SG-1000</option>
       <option value="sc">SC-3000</option>
       <option value="gg">Game Gear</option>
-      <option value="ss" selected>Super Sega</option>
+      <option value="ss" selected>MasterDrive</option>
       <option value="msx">MSX2 (analysis)</option>
     </select>
     <select id="scram" title="SC-3000 cartridge RAM layout">
       <option value="16">cart RAM 16K</option>
       <option value="32">cart RAM 32K</option>
     </select>
-    <select id="turbo" title="Turbo boost for stock software (Super Sega titles set their own step through $F3)">
+    <select id="turbo" title="Turbo boost for stock software (MasterDrive titles set their own step through $F3)">
       <option value="1">100%</option><option value="1.25">125%</option>
       <option value="1.5">150%</option><option value="1.75">175%</option>
       <option value="2">200%</option>
@@ -151,7 +151,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
     <canvas id="screen" width="256" height="192"></canvas>
     <div class="row" style="margin-top:10px">
       <div><label>Cartridge (.sms .gg .bin)</label><input type="file" id="cart" accept=".sms,.gg,.sg,.sc,.bin,.rom"></div>
-      <div><label>Card (optional, Super Sega)</label><input type="file" id="card" accept=".sms,.gg,.bin,.rom,.card"></div>
+      <div><label>Card (optional, MasterDrive)</label><input type="file" id="card" accept=".sms,.gg,.bin,.rom,.card"></div>
       <div><label>Patch (.ips / .bps)</label><input type="file" id="patch" accept=".ips,.bps"></div>
     </div>
     <div class="row">
@@ -180,7 +180,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
         <button data-b="c">C</button><button data-b="start">ST</button>
       </div>
     </div>
-    <div class="note">Keys — arrows: d-pad · Z=A X=B C=C · Enter=Start · Tab=Pause/NMI (not in Game Gear mode). Super Sega mode exposes A/B/C/Start via the Genesis TH multiplex; SMS and GG modes present only two buttons, as the real machines do.</div>
+    <div class="note">Keys — arrows: d-pad · Z=A X=B C=C · Enter=Start · Tab=Pause/NMI (not in Game Gear mode). MasterDrive mode exposes A/B/C/Start via the Genesis TH multiplex; SMS and GG modes present only two buttons, as the real machines do.</div>
   </div>
 
   <div class="side">
@@ -192,7 +192,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       <button data-t="regs">Registers</button>
       <button data-t="map">Memory map</button>
       <button data-t="feat">Features</button>
-      <button data-t="lab">Super Sega Lab</button>
+      <button data-t="lab">MasterDrive Lab</button>
       <button data-t="msx">MSX Lab</button>
       <button data-t="hack">Hack Lab</button>
       <button data-t="snd">Sound Lab</button>
@@ -242,7 +242,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
     <div class="pane" id="p-map"><table id="maptab"></table></div>
 
     <div class="pane" id="p-feat">
-      <label>Super Sega feature enables</label>
+      <label>MasterDrive feature enables</label>
       <table id="feattab"></table>
       <div class="note">These mirror VDP register 15 (Feature Enable A) and bank&nbsp;1 register 2 (Feature Enable B). Everything is off at reset, so a stock ROM sees a plain Master System until it opts in.</div>
     </div>
@@ -284,7 +284,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
           <canvas id="labcvB" width="256" height="192" style="width:100%;image-rendering:pixelated;border:1px solid var(--line);border-radius:4px;background:#000"></canvas>
         </div>
         <div style="flex:1;min-width:104px">
-          <div class="note" style="margin:0 0 3px"><b>Super Sega</b></div>
+          <div class="note" style="margin:0 0 3px"><b>MasterDrive</b></div>
           <div class="note" style="margin:0 0 3px" id="labtC">composite</div>
           <canvas id="labcvC" width="256" height="192" style="width:100%;image-rendering:pixelated;border:2px solid var(--acc);border-radius:4px;background:#000"></canvas>
         </div>
@@ -395,7 +395,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
         <select id="mdumpfilter" style="min-width:120px"><option value="">all labels</option></select>
       </div>
       <div class="note" id="mdumpstat">Dumps every tracked graphic: a PNG sheet for editing,
-      Super Sega 4bpp planar tiles for the target, and a manifest tying sheet positions to labels,
+      MasterDrive 4bpp planar tiles for the target, and a manifest tying sheet positions to labels,
       palettes and motion data.</div>
       <table id="mclassout"></table>
       <table id="mroutines"></table>
@@ -404,7 +404,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       logic is moving, while one redrawn in place is background. This is the separation the converter
       needs to split the tile budget from the sprite budget.</div>
 
-      <label style="margin-top:12px">Convert current screen to Super Sega</label>
+      <label style="margin-top:12px">Convert current screen to MasterDrive</label>
       <div class="row"><button id="mconv">Analyse &amp; convert</button><button id="mexp">Export assets</button></div>
       <table id="mconvout"></table>
     </div>
@@ -515,7 +515,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
         <button id="sndspec">Export hardware spec</button>
         <button id="sndclr">Reset all</button>
       </div>
-      <div class="note">The sound patch is a settings file the enhancement layer applies at runtime &#8212; on Super Sega
+      <div class="note">The sound patch is a settings file the enhancement layer applies at runtime &#8212; on MasterDrive
       that <b>is</b> the patch, nothing in the ROM changes. The hardware spec is a written description of the same changes
       for building a real cartridge patch, which needs the game's sound driver reverse-engineered first.</div>
     </div>
@@ -531,7 +531,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       the left and top ones C, Start is Start, Select is Pause, and the d-pad and left stick give directions; the left
       stick always moves the d-pad. Bindings are kept in this browser. In the Master System, Game Gear, SG-1000,
       SC-3000 and SF-7000 modes A is button 1 and B is button 2 (C is auto-fire when that boost is on), and Start is the
-      Game Gear's Start or, with the Start = Pause boost (on by default), Pause; in Super Sega mode B is button 1,
+      Game Gear's Start or, with the Start = Pause boost (on by default), Pause; in MasterDrive mode B is button 1,
       C is button 2, and A and Start are read through the TH multiplex, as on a Mega Drive pad. Pause does nothing
       in Game Gear mode.</div>
     </div>
@@ -690,9 +690,9 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
 <script>
 "use strict";
 /* ============================================================
-   Super Sega emulator
+   MasterDrive emulator
    Z80 + Mode 4 VDP + SN76489 + approximate YM2413 + PCM/wave
-   Modes: Master System, Game Gear, Super Sega
+   Modes: Master System, Game Gear, MasterDrive
    ============================================================ */
 
 const LOGN=[]; function log(s){ LOGN.push(s); if(LOGN.length>300)LOGN.shift();
@@ -1107,7 +1107,7 @@ class VDP{
      M2 is the enable: with M2 clear, Mode 4 is 192 lines whatever M1 and M3
      say (MAME sega315_5246 select_extended_res_mode4, Gearsystem).
      where M1 = R1 bit 4, M2 = R0 bit 1, M3 = R1 bit 3, M4 = R0 bit 2.
-     Super Sega additionally exposes the selection through Feature Enable B
+     MasterDrive additionally exposes the selection through Feature Enable B
      bits 7-6, which is the path its own software uses. Previously only the
      latter existed, so no SMS title could get an extra-height mode at all. */
   height(){
@@ -1117,7 +1117,7 @@ class VDP{
     if(this.ss()){ const h=(this.fb2()>>6)&3; if(h===1) return 224; if(h===2) return 240; }
     return 192;
   }
-  /* Enhancement-layer boosts are for stock software: in Super Sega mode the
+  /* Enhancement-layer boosts are for stock software: in MasterDrive mode the
      software's own Feature Enable bits decide. */
   spriteLimit(){ if(this.m.ael&&this.m.ael.sprlimit&&!this.ss()) return 16; return this.on(0x10)?16:8; }
   legacySprLimit(){ if(this.m.ael&&this.m.ael.sprlimit&&!this.ss()) return this.spriteLimit(); return this.onC(0x02)?this.spriteLimit():4; }
@@ -1257,7 +1257,7 @@ class VDP{
       const ext=this.onB(0x02);
       /* Game Gear CRAM is 64 bytes, two per entry (GGGGRRRR, ----BBBB). A write
          to an even address is held in a latch; the write to the odd address
-         stores both bytes. Super Sega native mode is the same scheme over 512
+         stores both bytes. MasterDrive native mode is the same scheme over 512
          bytes when extended CRAM is on. (The native path used to index entries
          by byte address while the address advanced per byte, so sequential
          writes filled every other entry.) */
@@ -1445,7 +1445,7 @@ class VDP{
     if(this.line<h && !this.m.noRender) this.renderLine(this.line);
     if(this.line<=h){
       /* As stock, only Mode 4 raises the line interrupt: the TMS9918 has none.
-         Whether Super Sega software gets it in the TMS modes is open (Q15); the
+         Whether MasterDrive software gets it in the TMS modes is open (Q15); the
          emulator keeps raising it there. */
       if(this.lineCtr===0){ this.lineCtr=this.reg[10]; if(this.vmode()===4||this.ss()) this.irqLine=1; }
       else this.lineCtr--;
@@ -1649,7 +1649,7 @@ class Machine{
   romByte(rom,bank,off){ if(!rom||!rom.length) return 0xFF;
     const a=(bank*0x4000+off)%rom.length; return rom[a]; }
 
-  srcFor(frame){ // Super Sega dual-slot source select (port 0x09)
+  srcFor(frame){ // MasterDrive dual-slot source select (port 0x09)
     if(this.mode!=='ss'||!this.card) return 0;
     return (this.slotSel>>(frame-1))&1;              // frames 1,2
   }
@@ -1753,14 +1753,14 @@ class Machine{
   /* ---- I/O ---- */
   inp(port){
     const p=port&0xFF;
-    /* Game Gear low ports. Super Sega adopts the GG scheme, so a GG title retagged
-       to Super Sega still reads Start at $00. Port $00: bit 7 Start (0 = pressed),
+    /* Game Gear low ports. MasterDrive adopts the GG scheme, so a GG title retagged
+       to MasterDrive still reads Start at $00. Port $00: bit 7 Start (0 = pressed),
        bit 6 region (1 = export), bits 5-0 read 0 (bit 5 = NTSC). */
     if((this.mode==='gg'||this.mode==='ss')&&p<=0x06){
       if(p===0x00) return (this.jpRegion?0x00:0x40)|(this.btn.start?0x00:0x80);
       return this.ggReg[p];
     }
-    /* Super Sega registers inside the $00-$3F mirror range are decoded by the
+    /* MasterDrive registers inside the $00-$3F mirror range are decoded by the
        FPGA, so they must answer before the controller-port mirror does. Ports in
        $07-$16 with nothing readable return $FF. */
     if(this.mode==='ss'&&p>=0x07&&p<=0x16){
@@ -1805,7 +1805,7 @@ class Machine{
       return 0xFF; }
     if(p<0x80) return (p&1)? this.hCounter() : this.vCounter();
     if(p<0xC0){ this.busSync(); return (p&1)? this.vdp.ctrlR() : this.vdp.dataR(); }
-    /* Super Sega decodes $F0-$FA fully: no controller mirror answers there. */
+    /* MasterDrive decodes $F0-$FA fully: no controller mirror answers there. */
     if(this.mode==='ss'&&p>=0xF0&&p<=0xFA) return (p>=0xF4)? this.dma[p-0xF4] : 0xFF;
     return (p&1)?this.padIn(1):this.padIn(0);
   }
@@ -1828,7 +1828,7 @@ class Machine{
   /* H counter: counts pixel pairs, 00-93 then E9-FF (171 values per line).
      Taken from the CPU's position in the current line. Hardware latches it on a
      TH edge (light gun); the live value is what an unlatched read approximates. */
-  /* CPU clock multiplier. Super Sega software sets its own step through $F3; the
+  /* CPU clock multiplier. MasterDrive software sets its own step through $F3; the
      enhancement layer's turbo step is for stock software (machine profile v7). */
   cpuMult(){ return this.mode==='ss' ? (this.turbo||1) : ((this.ael&&this.ael.turbo)||1); }
   /* The base clock: 3.579545 MHz, or 3.546893 MHz in PAL as on a PAL Master System
@@ -1842,7 +1842,7 @@ class Machine{
     const hc=Math.min(170,pix>>1);
     return hc<=0x93? hc : (hc+0x55)&0xFF;
   }
-  /* SC-3000 keyboard: always live in SG/SC-3000 mode, and on Super Sega when
+  /* SC-3000 keyboard: always live in SG/SC-3000 mode, and on MasterDrive when
      Feature Enable C bit 5 is set. */
   kbActive(){
     if(this.mode==='sg'||this.mode==='sc'||this.mode==='sf') return true;
@@ -1925,7 +1925,7 @@ class Machine{
     const p=port&0xFF;
     /* The FPGA debug unit is present regardless of which machine is being
        emulated: its purpose is inspecting stock software, so gating it behind
-       Super Sega mode would defeat it. Ports $FB-$FE sit outside the $00-$3F
+       MasterDrive mode would defeat it. Ports $FB-$FE sit outside the $00-$3F
        mirror range, so no SMS or GG title can reach them by accident. */
     if(p>=0xFB&&this.dbg){
       this.dbg.write(p,v); if(this.fpga) this.fpga.did('debug'); return; }
@@ -1959,7 +1959,7 @@ class Machine{
         case 0x09: this.slotSel=v; return;
         case 0x0A: this.wramBank=v&15; if(this.fpga) this.fpga.did('mapper'); return;   // 16 banks of 8 KB = 128 KB
 
-        case 0xF3:                                  /* turbo step, Super Sega only.
+        case 0xF3:                                  /* turbo step, MasterDrive only.
              Not $3F bits 6-4 (those are the TR output levels) and not $0B (the
              extended card bank register). $F3 sits outside the $00-$3F mirror
              range, so no SMS or GG title can reach it by writing a mirror. */
@@ -1981,7 +1981,7 @@ class Machine{
         case 0x15: { const w=this.wave[this.waveSel]; w.vol=v&15; w.pan=(v>>4)&3; return; }
       }
       if(p>=0xF4&&p<=0xFA){ this.dma[p-0xF4]=v; if(p===0xFA&&(v&0x80)) this.runDMA(); return; }
-      /* Super Sega decodes $07-$16 itself. The ports not written above ($0F/$10
+      /* MasterDrive decodes $07-$16 itself. The ports not written above ($0F/$10
          math result, $16 multitap) are read-only: a write must not fall through
          to the $3E/$3F mirror below. */
       if(p>=0x07&&p<=0x16) return;
@@ -1993,7 +1993,7 @@ class Machine{
         if(this.ptr) this.ptr.thWrite(this.th[0]);     // mouse/trackball is TH-clocked
         /* Turbo is NOT here. It was specified on $3F bits 6-4, but those are the
            TR output levels on real hardware: stock software driving TR would
-           silently change the clock, and Super Sega software could never use both.
+           silently change the clock, and MasterDrive software could never use both.
            Turbo is on its own port, $F3. */
       } else this.memCtl=v;
       return;
@@ -2342,7 +2342,7 @@ class Machine{
     if(typeof HACK!=='undefined'&&HACK.rs.freeze.length)
       for(const f of HACK.rs.freeze) this.wram[this.wramBank*0x2000+f.i]=f.v;
     /* Start = Pause: Master System, SG-1000 and SC-3000 (with the SF-7000) only. The
-       Game Gear has a Start of its own, and boosts (bar True TMS colours) never act on Super Sega software. */
+       Game Gear has a Start of its own, and boosts (bar True TMS colours) never act on MasterDrive software. */
     if(this.ael.startpause && this.btn.start && !this.prevStart &&
        (this.mode==='sms'||this.mode==='sg'||this.mode==='sc'||this.mode==='sf')) this.cpu.nmi();
     this.prevStart=this.btn.start;
@@ -2779,7 +2779,7 @@ function shutdownSequence(m){
    port A ($DC, 8 bits) and port B ($DD, bits 3-0). Rows 0-6 are keyboard, row 7
    is the two gamepads. Inputs have pull-ups and are active low, so a pressed key
    reads 0. Matrix layout per Charles MacDonald's SC-3000H notes.
-   NOTE: the Super Sega spec previously described row select on $3F bits 2-0 with
+   NOTE: the MasterDrive spec previously described row select on $3F bits 2-0 with
    data on $DC bits 6-0. That scheme is not what the hardware does and real
    SC-3000 software would not work with it; this follows the PPI. */
 const SK1100=[
@@ -2870,9 +2870,9 @@ function skName(e){
 
 /* ================= TMR SEGA header =================
    The header sits at $7FF0. Byte $7FFF carries the region in its high nibble and
-   the ROM size code in its low nibble. Region 8 identifies Super Sega software. */
+   the ROM size code in its low nibble. Region 8 identifies MasterDrive software. */
 const SEGA_REGION={3:'SMS Japan',4:'SMS Export',5:'GG Japan',6:'GG Export',
-  7:'GG International',8:'Super Sega'};
+  7:'GG International',8:'MasterDrive'};
 const SEGA_REGION_MODE={3:'sms',4:'sms',5:'gg',6:'gg',7:'gg',8:'ss'};
 function parseSegaHeader(cart){
   if(!cart||!cart.length) return {found:false};
@@ -3144,7 +3144,7 @@ function makeFDC(){
      1. It can watch every bus cycle without costing the program anything.
      2. It can hold the CPU between instructions and draw over the screen, so a
         debug overlay works on ANY software - including a commercial cartridge
-        that knows nothing about Super Sega.
+        that knows nothing about MasterDrive.
      3. Its trace buffer lives in FPGA-side memory, so it survives the crash or
         reset that destroyed the program state you want to look at.
      4. It can break on a bus condition, not just a program counter value.
@@ -3305,7 +3305,7 @@ function dbgOverlayLines(m){
   const hex=(v,n)=>'$'+(v>>>0).toString(16).toUpperCase().padStart(n||2,'0');
   const V=m.vdp, D=m.dbg;
   const L=[];
-  L.push('SUPER SEGA DEBUG');
+  L.push('MASTERDRIVE DEBUG');
   L.push((BOOTMACH[m.mode]||m.mode).toUpperCase()+'  '+(V.vmode?V.vmode():'?')+
          '  '+V.height()+' LINES  '+Math.round(m.cpuMult()*100)+'PCT');
   L.push('DISP '+((V.reg[1]&0x40)?'ON ':'OFF')+
@@ -3556,7 +3556,7 @@ function makeLab(m){
 }
 
 /* --- hardware feasibility: which target can actually implement each setting --- */
-const TARGETS={sms:'Master System',smsfm:'Mark III / SMS + FM',gg:'Game Gear',ss:'Super Sega',emu:'Emulator only'};
+const TARGETS={sms:'Master System',smsfm:'Mark III / SMS + FM',gg:'Game Gear',ss:'MasterDrive',emu:'Emulator only'};
 function feasibility(m){
   const L=m.lab, P=m.psg, F=m.fm, rows=[];
   const isBinary=v=>Math.abs(v)<0.02||Math.abs(Math.abs(v)-1)<0.02;
@@ -3570,24 +3570,24 @@ function feasibility(m){
 
   if(panned) rows.push(panNonBinary
     ? ['PSG panning (continuous)','emu','The SN76489 in the Game Gear ASIC gates each channel to each side. It has one output per side, not a per-channel level, so only hard left / right / both exist in silicon.']
-    : ['PSG panning (hard L/R)','gg','Port $06 does exactly this on Game Gear and Super Sega. A plain Master System is mono and cannot.']);
-  if(gained) rows.push(['PSG channel levels','sms','Achievable on any target as a ROM data change: the attenuation values the driver writes are edited. Live mixing needs Super Sega.']);
+    : ['PSG panning (hard L/R)','gg','Port $06 does exactly this on Game Gear and MasterDrive. A plain Master System is mono and cannot.']);
+  if(gained) rows.push(['PSG channel levels','sms','Achievable on any target as a ROM data change: the attenuation values the driver writes are edited. Live mixing needs MasterDrive.']);
   if(fmPanned) rows.push(fmPanPerChannel
     ? ['FM panning (per channel)','emu','The YM2413 has a single mono output pin. Panning individual FM channels needs nine separate DACs, which no member of this hardware family has.']
     : ['FM panning (global)','smsfm','A single pan of the whole FM output is an analog mixer change, so it is buildable — but not per channel.']);
-  if(fmGainPerChannel) rows.push(['FM channel levels','smsfm','Achievable by editing the volume nibble the driver writes per channel. Live per-channel mixing is emulator or Super Sega.']);
+  if(fmGainPerChannel) rows.push(['FM channel levels','smsfm','Achievable by editing the volume nibble the driver writes per channel. Live per-channel mixing is emulator or MasterDrive.']);
   if(P.duty.some(v=>Math.abs(v-0.5)>0.02)) rows.push(['PSG duty cycle','emu','The SN76489 generates a fixed 50 percent square. Duty is not a register on this chip, so no driver or patch can change it.']);
   if(P.transpose.some(v=>v)||F.transpose.some(v=>v)) rows.push(['Channel pitch offset','sms','Achievable on any target as a ROM data change: transpose the note values in the music data.']);
   if(F.instOv.some(v=>v>=0)) rows.push(['FM instrument override','smsfm','Achievable as a ROM data change: rewrite the instrument nibble the driver writes to $30-$38.']);
   if(P.mute.some(v=>v)||F.mute.some(v=>v)) rows.push(['Channel mute','sms','Achievable as a ROM data change by silencing that channel in the music data.']);
   if(L.route.some((v,i)=>v!==i)) rows.push(['PSG to FM channel routing','ss','Part of the translation layer, so it follows the same target.']);
   const act=(L.layers||[]).filter(x=>x.on);
-  if(act.length) rows.push(['Channel layering ('+act.length+')','ss','Super Sega does this in the co-processor: it watches the source channel and drives a second channel in parallel. On stock hardware the sound driver must be rewritten to write both, which is per-game work.']);
+  if(act.length) rows.push(['Channel layering ('+act.length+')','ss','MasterDrive does this in the co-processor: it watches the source channel and drives a second channel in parallel. On stock hardware the sound driver must be rewritten to write both, which is per-game work.']);
   if(act.some(x=>x.delay>0)) rows.push(['Layer delay / echo','ss','Needs the write stream buffered for a few frames, which the co-processor has RAM for. No stock Sega 8-bit sound driver does this.']);
-  if(L.psg2fm) rows.push(['PSG to FM translation','ss','Super Sega can do this in hardware: the co-processor watches PSG port writes and drives the YM2413. On a Mark III it needs a replacement sound driver, which is per-game work.']);
+  if(L.psg2fm) rows.push(['PSG to FM translation','ss','MasterDrive can do this in hardware: the co-processor watches PSG port writes and drives the YM2413. On a Mark III it needs a replacement sound driver, which is per-game work.']);
   if(L.fm2psg) rows.push(['FM to PSG mirror','ss','Same mechanism in reverse. Note the PSG has three tone channels against the FM unit\'s nine, so only the first three are mirrored.']);
   if(m.dual) rows.push(['Dual-run capture','emu','Requires executing the game twice per frame from a saved state, which no cartridge or console can do. The hardware equivalent is a per-game driver patch making the driver write both chips - legal on any FM-equipped Mark III, and the natural form of a real ROM hack.']);
-  if(L.psg2fm||L.fm2psg||m.dual) rows.push(['Both chips sounding at once','smsfm','Legal on any FM-equipped Mark III — the hardware allows it, the games simply never do it. Super Sega does it automatically.']);
+  if(L.psg2fm||L.fm2psg||m.dual) rows.push(['Both chips sounding at once','smsfm','Legal on any FM-equipped Mark III — the hardware allows it, the games simply never do it. MasterDrive does it automatically.']);
   if(!rows.length) rows.push(['No changes yet','sms','Stock behaviour.']);
   return rows;
 }
@@ -3816,7 +3816,7 @@ function makeMSX(bios,sub,cart,mapper,expanded,slot2){
 
 
 /* ================= AY-3-8910 -> SN76489 translation =================
-   MSX AY runs at 1.7897725 MHz with f = clk/(16*p); the Super Sega PSG runs at
+   MSX AY runs at 1.7897725 MHz with f = clk/(16*p); the MasterDrive PSG runs at
    3.579545 MHz with f = clk/(32*p). Both reduce to 111860.78/p, so tone periods
    transfer 1:1 with no conversion. Volume inverts (AY 15=loud, SN 0=loud).
    The AY's hardware envelope has no PSG equivalent and is run in software here. */
@@ -4199,7 +4199,7 @@ function msxGfxColour(V,v,bpp){
 
 /* ================= sprite dump =================
    Converts tracked graphics into three deliverables: a PNG sheet for artists,
-   Super Sega 4bpp planar tile data for the target, and a manifest tying them
+   MasterDrive 4bpp planar tile data for the target, and a manifest tying them
    together with the classification and motion measurements. */
 function msxBuildSpriteDump(V,objs,filter){
   const items=[];
@@ -4224,7 +4224,7 @@ function msxBuildSpriteDump(V,objs,filter){
         tiles[base+r*4]=b0; tiles[base+r*4+1]=b1; tiles[base+r*4+2]=b2; tiles[base+r*4+3]=b3;
       }
     }
-    // per-sprite palette in Super Sega 12-bit
+    // per-sprite palette in MasterDrive 12-bit
     const pal=cols.map(v=>{
       if(g.bpp===8){ const r=(v>>2)&7,gg=(v>>5)&7,b=v&3;
         return {r:Math.round(r*15/7),g:Math.round(gg*15/7),b:Math.round(b*15/3)}; }
@@ -4298,7 +4298,7 @@ function msxObjectsCopy(V){
   return {ops:V.cmdLog.length,unique:objs.length,tiles,objs,
     sizes:[...bySize.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8)};
 }
-/* ---- MSX hardware sprite table (maps straight onto Super Sega sprites) ---- */
+/* ---- MSX hardware sprite table (maps straight onto MasterDrive sprites) ---- */
 function msxSprites(V){
   const g=V.geo();
   const satBase=((V.reg[5]&0x7F)<<7)|((V.reg[11]&3)<<15);
@@ -4325,13 +4325,13 @@ function msxObjects(V){
     uniq.get(sig).count++;
   }
   const objs=[...uniq.values()].sort((a,b)=>b.count-a.count);
-  // Super Sega sprite tile cost: 8x8 tiles, 4bpp
+  // MasterDrive sprite tile cost: 8x8 tiles, 4bpp
   let tiles=0;
   for(const o of objs) tiles += Math.ceil(o.nx/8)*Math.ceil(o.ny/8);
   return {transfers:V.objLog.length, unique:objs.length, tiles,
     sizes:[...bySize.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8), objs};
 }
-/* ---- converter: MSX screen -> Super Sega unique-cell assets ---- */
+/* ---- converter: MSX screen -> MasterDrive unique-cell assets ---- */
 function msxConvert(V){
   const g=V.geo(); const H=192, page=(V.reg[2]&0x60)>>5;
   const px=new Uint8Array(256*H);      // source pixel indices
@@ -4358,7 +4358,7 @@ function msxConvert(V){
     if(id===undefined){ id=order.length; cells.set(k,id); order.push(buf); }
     nt[cy*32+cx]=id;
   }
-  // global colour set -> Super Sega palettes (16 per palette, up to 8)
+  // global colour set -> MasterDrive palettes (16 per palette, up to 8)
   const used=[...new Set(px)].sort((a,b)=>a-b);
   const toRGB12=v=>{
     if(g.bpp===8){ const r=(v>>2)&7,gg=(v>>5)&7,b=v&3;
@@ -4366,7 +4366,7 @@ function msxConvert(V){
     const p=V.pal[v&15]; return {r:Math.round(((p>>8)&7)*15/7),g:Math.round(((p>>4)&7)*15/7),b:Math.round((p&7)*15/7)};
   };
   const pals=[]; for(let i=0;i<used.length;i+=16) pals.push(used.slice(i,i+16));
-  // emit Super Sega 4bpp tiles (colour index = position within its palette)
+  // emit MasterDrive 4bpp tiles (colour index = position within its palette)
   const idx=new Map(); used.forEach((v,i)=>idx.set(v,i));
   const tiles=new Uint8Array(order.length*32);
   order.forEach((buf,t)=>{
@@ -4382,7 +4382,7 @@ function msxConvert(V){
 }
 
 
-/* ================= Super Sega Lab: compare two builds of one game =================
+/* ================= MasterDrive Lab: compare two builds of one game =================
    SMS and Game Gear releases of the same title are different programs, so code and
    level data do not splice. What DOES transfer is asset data: palettes, tiles and
    sprite patterns, all of which are the same formats in both. The lab captures both
@@ -4412,7 +4412,7 @@ function labFind(rom,bytes){
   return hits;
 }
 /* Transplant the donor's palette into the base ROM. The base must be running in
-   Super Sega native CRAM mode for 12-bit entries to mean anything. */
+   MasterDrive native CRAM mode for 12-bit entries to mean anything. */
 function labTransplantPalette(base,donor){
   let at=-1, how='';
   if(base.palTable){ at=base.palTable.start; how='traced: the palette routine reads from here'; }
@@ -4478,7 +4478,7 @@ function labRegions(reg){
 }
 /* Build a composite VDP state: the base engine's registers, with chosen regions
    and palette taken from either build. */
-/* Render a state to a framebuffer. Super Sega always shows the full 256x192, so a
+/* Render a state to a framebuffer. MasterDrive always shows the full 256x192, so a
    Game Gear build composed here is uncropped — its art at Master System size. */
 
 
@@ -4529,7 +4529,7 @@ function labCompositeLive(mBase,mDonor,mOut,choices){
     if(to>=r.from){ V.vram.set(D.vram.subarray(r.from,to+1), r.from); used.push(r.label); }
   }
   V.reg[1]|=0x40;                             // display on
-  V.reg[0]=(V.reg[0]&~0x0E)|0x04;             // Super Sega always renders Mode 4 at 256x192
+  V.reg[0]=(V.reg[0]&~0x0E)|0x04;             // MasterDrive always renders Mode 4 at 256x192
   const out=new Uint32Array(256*192);
   for(let y=0;y<192;y++){ V.line=y; V.renderLine(y); out.set(V.fb.subarray(0,256), y*256); }
   return {fb:out,fromDonor:used};
@@ -4570,7 +4570,7 @@ const BOOTFONT={
  '#':'6cfe6c6cfe6c0000','!':'1818181818001800','?':'7cc60c1818001800',"'":'1818000000000000',
  '"':'6c6c000000000000','k':'0c1c1c38387c7c00'
 };
-const BOOTMACH={sms:'Master System',gg:'Game Gear',ss:'Super Sega',
+const BOOTMACH={sms:'Master System',gg:'Game Gear',ss:'MasterDrive',
   sg:'SG-1000',sc:'SC-3000',msx:'MSX2'};
 const BOOT={
  TILE_BLANK:0, TILE_FONT:1,        /* font starts at tile 1 */
@@ -4656,7 +4656,7 @@ function bootItems(m){
 function bootDraw(m){
   const V=m.vdp;
   for(let i=0x3800;i<0x3F00;i+=2){ V.vram[i]=BOOT.TILE_UI; V.vram[i+1]=0; }
-  bootPut(m,1,1,'SUPER SEGA',1);
+  bootPut(m,1,1,'MASTERDRIVE',1);
   bootPut(m,22,1,'BOOT ROM',2);
   bootBar(m,2,BOOT.TILE_UI+1,2);
   const items=bootItems(m)[BOOT.screen]||[];
@@ -4693,7 +4693,7 @@ function bootRender(m){ bootDraw(m);
 }
 
 /* ---------------- UI ---------------- */
-const MODEN={sms:'Master System',gg:'Game Gear',ss:'Super Sega',sg:'SG-1000',sc:'SC-3000',msx:'MSX2'};
+const MODEN={sms:'Master System',gg:'Game Gear',ss:'MasterDrive',sg:'SG-1000',sc:'SC-3000',msx:'MSX2'};
 const m=new Machine();
 m.lab=makeLab(m);
 m.psg.onChange=ch=>{ if(!m.layerBusy) m.chUse.psg[ch]=m.frameNo;
@@ -4933,7 +4933,7 @@ function refresh(){
   let t='<tr><th>Reg</th><th>Val</th><th>Reg</th><th>Val</th></tr>';
   for(let i=0;i<8;i++) t+='<tr><td class="k">R'+i+'</td><td class="v">$'+hex(V.reg[i])+'</td>'+
     '<td class="k">R'+(i+8)+'</td><td class="v">$'+hex(V.reg[i+8])+'</td></tr>';
-  t+='<tr><th colspan=4>Bank 1 (Super Sega)</th></tr>';
+  t+='<tr><th colspan=4>Bank 1 (MasterDrive)</th></tr>';
   for(let i=0;i<10;i++) t+='<tr><td class="k">1:'+i+'</td><td class="v">$'+hex(V.reg[16+i])+'</td><td colspan=2>'+
     ['Window tilemap base','Line V-offset base','Feature Enable B','VRAM bank','Render banks','Sprite palette base','Collision base','Feature Enable C','Text window pattern base','Text window colours'][i]+'</td></tr>';
   t+='<tr><th colspan=4>Z80</th></tr>';
@@ -5053,7 +5053,7 @@ $('ff').addEventListener('touchstart',e=>{e.preventDefault();ffOn=true},{passive
 $('ff').addEventListener('touchend',e=>{e.preventDefault();ffOn=false},{passive:false});
 
 $('shot').onclick=()=>{ const a=document.createElement('a');
-  a.download=(m.romName||'supersega')+'.png'; a.href=cv.toDataURL('image/png'); a.click(); };
+  a.download=(m.romName||'masterdrive')+'.png'; a.href=cv.toDataURL('image/png'); a.click(); };
 
 $('sv').onclick=()=>{ if(!m.cart){log('no ROM');return;}
   try{ STATES[slotIdx()]={t:new Date().toLocaleTimeString(),d:saveState(m)};
@@ -5310,7 +5310,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   $('dbgcopy').onclick=()=>{
     const R=DBG.lastReport||[];
     if(!R.length){ log('run the self test first'); return; }
-    const txt='Super Sega self test\n'+R.map(r=>(r.ok?'[ok]   ':'[FAIL] ')+
+    const txt='MasterDrive self test\n'+R.map(r=>(r.ok?'[ok]   ':'[FAIL] ')+
       r.group+' / '+r.name+(r.detail?'  - '+r.detail:'')).join('\n');
     if(navigator.clipboard) navigator.clipboard.writeText(txt).then(
       ()=>log('report copied to the clipboard'),()=>log('copy failed'));
@@ -5549,7 +5549,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   };
   $('dbgfpgareset').onclick=()=>{ if(m.fpga){ m.fpga.reset(); log('FPGA counters reset'); } };
 
-  /* ---- Super Sega Lab: two live builds, one composite ---- */
+  /* ---- MasterDrive Lab: two live builds, one composite ---- */
   const LAB={A:null,B:null,mA:null,mB:null,mC:null,playing:false,route:'both',
     frames:0,raf:0,records:[],
     choices:{palette:'base',sprPat:'base',bgPat:'base',name:'base',sat:'base'}};
@@ -5730,7 +5730,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
     }
     const litOf=fb=>{let n=0;for(let i=0;i<fb.length;i++) if((fb[i]&0xFFFFFF)!==0)n++;return n;};
     const rep={
-      format:'supersega-merge-report', v:1, generatedAt:new Date().toISOString(),
+      format:'masterdrive-merge-report', v:1, generatedAt:new Date().toISOString(),
       builds:{
         A:{name:LAB.A.name,machine:LAB.A.mode,bytes:LAB.A.data.length,
            paletteDepth:labPalette({mode:LAB.A.mode,cram:LAB.mA.vdp.cram})[0].depth,
@@ -6007,7 +6007,7 @@ $('pwroff').onclick=async ()=>{
 };
 $('cardfmt').onclick=()=>{ if(!confirm('Format the save card? All saves are erased.')) return;
   m.card=cardFormat(); cardPut(m); refresh(); log('card formatted: 16 slots, 112 pages free'); };
-$('cardexp').onclick=()=>{ dl('supersega.card',new Blob([cardGet(m)],{type:'application/octet-stream'}));
+$('cardexp').onclick=()=>{ dl('masterdrive.card',new Blob([cardGet(m)],{type:'application/octet-stream'}));
   log('card image exported, 32768 bytes'); };
 $('cardimp').onchange=e=>{ const f=e.target.files[0]; if(!f) return;
   f.arrayBuffer().then(b=>{ const c=new Uint8Array(b);
@@ -6140,7 +6140,7 @@ document.addEventListener('click',e=>{
     window.__rebuildMix(); buildFeas(); log('sound settings reset'); };
 
   $('sndexp').onclick=()=>{
-    const cfg={format:'supersega-sound-patch',v:1,rom:m.romId||null,name:m.romName||null,
+    const cfg={format:'masterdrive-sound-patch',v:1,rom:m.romId||null,name:m.romName||null,
       psg:{gain:m.psg.gain,pan:m.psg.pan,transpose:m.psg.transpose,duty:m.psg.duty,mute:m.psg.mute,solo:m.psg.solo},
       fm:{gain:m.fm.gain,pan:m.fm.pan,transpose:m.fm.transpose,inst:m.fm.instOv,mute:m.fm.mute,solo:m.fm.solo},
       dual:m.dual, layers:m.lab.layers,
@@ -6158,7 +6158,7 @@ document.addEventListener('click',e=>{
     for(const [n,tg,note] of rows) t+='| '+n+' | '+TARGETS[tg]+' | '+note+' |\n';
     t+='\n## Settings\n\n```json\n'+JSON.stringify({psg:{gain:m.psg.gain,pan:m.psg.pan},
       fm:{gain:m.fm.gain,pan:m.fm.pan},lab:m.lab},null,2)+'\n```\n';
-    t+='\n## Building a real cartridge patch\n\nOn Super Sega none of this requires a ROM change: the enhancement layer applies the settings at runtime. ';
+    t+='\n## Building a real cartridge patch\n\nOn MasterDrive none of this requires a ROM change: the enhancement layer applies the settings at runtime. ';
     t+='For a patch that runs on stock hardware, the game\'s sound driver has to be located first, then:\n\n';
     t+='- Channel level changes become edits to the attenuation values the driver writes.\n';
     t+='- Panning requires a Game Gear target and writes to port $06; it is impossible on a mono Master System.\n';
@@ -6626,7 +6626,7 @@ const MSX={bios:null,sub:null,cart:null,mach:null,cpu:null,fb:new Uint32Array(25
     if(!MSX.mach){ log('nothing to export'); return; }
     const V=MSX.mach.V;
     const tr=msxTrackObjects(V);
-    const out={format:'supersega-session-log',v:1,
+    const out={format:'masterdrive-session-log',v:1,
       rom:MSX.name||null, recordedAt:new Date().toISOString(),
       frames:MSX.frames, screenMode:V.geo().scr,
       totals:{commandOps:V.cmdLog.length,vramWrites:V.vramWrites,
@@ -6669,7 +6669,7 @@ const MSX={bios:null,sub:null,cart:null,mach:null,cpu:null,fb:new Uint32Array(25
     }
     h+='<tr><th>Object graphics</th><th></th></tr>';
     h+='<tr><td>via CPU transfers</td><td class="v">'+ot.unique+' unique from '+ot.transfers+
-       ' transfers · '+ot.tiles+' Super Sega tiles</td></tr>';
+       ' transfers · '+ot.tiles+' MasterDrive tiles</td></tr>';
     h+='<tr><td>via VRAM&#8594;VRAM copies</td><td class="v">'+oc.unique+' unique · '+
        (oc.tiles||0)+' tiles'+(oc.sizes.length?' · sizes '+oc.sizes.slice(0,3).map(x=>x[0]+'&#215;'+x[1]).join(', '):'')+'</td></tr>';
     h+='<tr><td>Dominant transfer size</td><td class="v">'+
@@ -6838,11 +6838,11 @@ const MSX={bios:null,sub:null,cart:null,mach:null,cpu:null,fb:new Uint32Array(25
     return cv;
   }
   function manifest(d){
-    return {format:'supersega-sprite-dump',v:1,
+    return {format:'masterdrive-sprite-dump',v:1,
       rom:MSX.name||null, screen:MSX.mach.V.geo().scr,
       profile:(msxProfileList()[MSX.prof]||{}).name||null,
       sheet:{width:d.dim.w,height:d.dim.h,transparentIndex:0},
-      tileFormat:'SMS/Super Sega 4bpp planar, 32 bytes per 8x8 tile',
+      tileFormat:'SMS/MasterDrive 4bpp planar, 32 bytes per 8x8 tile',
       sprites:d.items.map((it,i)=>({
         index:i, x:it.sx, y:it.sy, w:it.gfx.w, h:it.gfx.h,
         tilesWide:it.tw, tilesHigh:it.th, tileBytes:it.tiles.length,
@@ -6946,7 +6946,7 @@ const MSX={bios:null,sub:null,cart:null,mach:null,cpu:null,fb:new Uint32Array(25
     h+='<tr><td>Cells needing quantisation</td><td>'+(r.cellsOver16===0
         ? ok('none — reproduces exactly')
         : bad(r.cellsOver16+' of 768'))+'</td></tr>';
-    h+='<tr><td>Super Sega palettes needed</td><td class="v">'+r.palettes.length+' of 8</td></tr>';
+    h+='<tr><td>MasterDrive palettes needed</td><td class="v">'+r.palettes.length+' of 8</td></tr>';
     $('mconvout').innerHTML=h;
     log('converted screen: '+r.unique+' unique tiles, '+r.coloursUsed+' colours, '+
         (r.cellsOver16===0?'lossless':r.cellsOver16+' cells need quantising'));
@@ -6954,7 +6954,7 @@ const MSX={bios:null,sub:null,cart:null,mach:null,cpu:null,fb:new Uint32Array(25
   $('mexp').onclick=()=>{
     if(!MSX.conv){ log('run the conversion first'); return; }
     const r=MSX.conv;
-    const out={format:'supersega-assets',v:1,source:MSX.name||null,screen:r.mode,
+    const out={format:'masterdrive-assets',v:1,source:MSX.name||null,screen:r.mode,
       uniqueTiles:r.unique,dedupPercent:+r.dedup.toFixed(1),coloursUsed:r.coloursUsed,
       maxColoursPerCell:r.maxColsPerCell,cellsNeedingQuantisation:r.cellsOver16,
       palettes:r.palettes,nameTable:Array.from(r.nameTable),
@@ -6968,10 +6968,10 @@ const MSX={bios:null,sub:null,cart:null,mach:null,cpu:null,fb:new Uint32Array(25
 })();
 
 draw(); refresh();
-log('Super Sega emulator ready. Load a .sms or .gg ROM to begin.');
+log('MasterDrive emulator ready. Load a .sms or .gg ROM to begin.');
 log('Modes: SG-1000 / Master System / Game Gear run stock hardware behaviour.');
 log('SG-1000 uses TMS9918 modes 0-3, linear ROM and 1 KB mirrored RAM.');
-log('Super Sega adds GG 12-bit CRAM on the SMS raster, extended VDP register banks,');
+log('MasterDrive adds GG 12-bit CRAM on the SMS raster, extended VDP register banks,');
 log('window layer, line offset tables, ESAT sprites, DMA, dual slot, math unit and turbo.');
 </script>
 </body>

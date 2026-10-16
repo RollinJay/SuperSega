@@ -1,4 +1,4 @@
-// Super Sega - save slot read-out for the APF bridge
+// MasterDrive - save slot read-out for the APF bridge
 //
 // Answers APF bridge reads at $2xxx_xxxx from the machine's cartridge-RAM
 // save port. Each read fetches all four bytes of the 32-bit word in the
@@ -16,7 +16,7 @@
 // transaction (>800 ns) to complete. This one takes about 18 clk_sys cycles.
 `default_nettype none
 
-module ss_save_unload (
+module mdr_save_unload (
     input  wire        clk_74a,
     input  wire        bridge_rd,
     input  wire        bridge_endian_little,

@@ -1,6 +1,6 @@
-// Super Sega - Pocket platform-layer simulation.
+// MasterDrive - Pocket platform-layer simulation.
 //
-// Drives tb_pocket_top (ss_pocket + machine + PSRAM model) the way the APF
+// Drives tb_pocket_top (mdr_pocket + machine + PSRAM model) the way the APF
 // does: the core is held in reset, the cartridge is written over the bridge
 // (data slot 0 at $1000_0000, 32-bit big-endian words), optionally a save
 // (slot 1 at $2000_0000), the persisted interact settings are written, then

@@ -1,4 +1,4 @@
-// Super Sega - clock generation for the Analogue Pocket (Cyclone V altera_pll)
+// MasterDrive - clock generation for the Analogue Pocket (Cyclone V altera_pll)
 //
 //   outclk_0  53.693175 MHz  machine clock: 15 x 3.579545 MHz (CPU base),
 //                            10 x 5.369318 MHz (pixel)
@@ -13,7 +13,7 @@
 // (fractional VCO) at compile time and reports the frequencies it achieved.
 // Check the fitter report that outclk_0 is within a few ppm of 53.693175 MHz.
 `timescale 1 ps / 1 ps
-module ss_pll (
+module mdr_pll (
     input  wire refclk,      // 74.25 MHz
     input  wire rst,
     output wire outclk_0,

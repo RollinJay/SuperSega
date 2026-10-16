@@ -1,5 +1,5 @@
 'use strict';
-/* Headless loader for the Super Sega emulator.
+/* Headless loader for the MasterDrive emulator.
    Runs the page's single <script> inside a vm context whose DOM is a permissive
    stub, then exposes the machine classes and helpers on the returned object.
    Used by the conformance probes and by the RTL vector generators: the machine
@@ -70,7 +70,7 @@ function loadEmu(htmlPath, opts) {
   };
   ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx;
   vm.createContext(ctx);
-  vm.runInContext(code, ctx, { filename: 'supersega-emulator.js' });
+  vm.runInContext(code, ctx, { filename: 'masterdrive-emulator.js' });
   // Top-level class/const bindings live in the context's script scope; a second
   // script in the same context can see them and copy them out.
   vm.runInContext(`globalThis.__X = {

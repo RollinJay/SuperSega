@@ -1,22 +1,22 @@
-// Super Sega - I/O port decode and system registers
+// MasterDrive - I/O port decode and system registers
 //
 // Every IN/OUT is resolved at the CPU's I/O sample point (io_sample), the same
 // instant Gearsystem performs the access. Read data is combinational so it is
 // valid at that edge.
 //
 // Port map (machine profile v7):
-//   $00-$06  Game Gear system ports (GG and Super Sega modes)
-//   $07-$16  Super Sega registers (Super Sega mode): PCM, slot select, work RAM
+//   $00-$06  Game Gear system ports (GG and MasterDrive modes)
+//   $07-$16  MasterDrive registers (MasterDrive mode): PCM, slot select, work RAM
 //            bank, card bank, math unit, wavetable, multitap detection
 //   $00-$3F  otherwise: even = memory control ($3E), odd = I/O control ($3F)
 //   $40-$7F  write: PSG; read: V counter (even) / H counter (odd)
 //   $80-$BF  VDP data (even) / control (odd)
 //   $C0-$FF  controllers $DC/$DD (mirrored on SMS); SK-1100 PPI at $DC-$DF when
-//            the keyboard is live; FM $F0-$F2; Super Sega $F3 turbo, $F4-$FA DMA,
-//            $FB-$FF debug unit (reads in Super Sega mode only)
+//            the keyboard is live; FM $F0-$F2; MasterDrive $F3 turbo, $F4-$FA DMA,
+//            $FB-$FF debug unit (reads in MasterDrive mode only)
 `default_nettype none
 
-module ss_io (
+module mdr_io (
     input  wire        clk,
     input  wire        rst,
     input  wire [2:0]  mode,
@@ -79,7 +79,7 @@ module ss_io (
     reg [7:0] dma [0:6];
     reg [7:0] ppi_c, ppi_ctl;
     // Debug unit control port ($FB). The debug unit itself is not in this core
-    // yet; the port is written in every mode, read back in Super Sega mode, and,
+    // yet; the port is written in every mode, read back in MasterDrive mode, and,
     // like the machine's debug unit, survives a machine reset.
     reg [7:0] dbg_ctl = 8'h00;
 
@@ -138,7 +138,7 @@ module ss_io (
     wire [11:0] kb_m = kb_ghosting ? kb_closed : rm[kb_row];
 
     // ------------------------------------------------------------ pads
-    // SMS / GG port $DC and $DD (active low). Super Sega: Genesis 3-button pads,
+    // SMS / GG port $DC and $DD (active low). MasterDrive: Genesis 3-button pads,
     // TH high = U D L R B C, TH low = U D 0 0 A Start.
     wire th_a = io_ctl[5], th_b = io_ctl[7];
     reg [7:0] dc, dd;
@@ -204,7 +204,7 @@ module ss_io (
         end else if (ss && port >= 8'hF0 && port <= 8'hFA) begin
             rdata = (port >= 8'hF4) ? dma[dmai] : 8'hFF;
         end else if (ss && port >= 8'hFB) begin
-            // Debug unit, Super Sega mode only (the stock modes read the
+            // Debug unit, MasterDrive mode only (the stock modes read the
             // controller mirror here). $FC/$FD status: bit 7 debug host attached,
             // bit 6 set, bit 0 trace buffer full; this core has neither.
             rdata = (port == 8'hFB) ? dbg_ctl : (port <= 8'hFD) ? 8'h40 : 8'hFF;

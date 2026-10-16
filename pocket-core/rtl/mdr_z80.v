@@ -1,4 +1,4 @@
-// Super Sega - Z80 wrapper
+// MasterDrive - Z80 wrapper
 //
 // Wraps the TV80 core (MIT licence, third_party/tv80) with a clock enable so the
 // CPU runs at the turbo step's rate inside the 53.693175 MHz system clock, and
@@ -15,7 +15,7 @@
 // Bus strobes follow tv80s: they change only on enable edges.
 `default_nettype none
 
-module ss_z80 (
+module mdr_z80 (
     input  wire        clk,
     input  wire        reset_n,
     input  wire        cen,          // one pulse per T-state

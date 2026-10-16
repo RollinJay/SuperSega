@@ -1,14 +1,14 @@
-# Super Sega ROM Hack Maker — Framework Specification
+# MasterDrive ROM Hack Maker — Framework Specification
 
-*Draft 1 · 5 October 2026. This document defines the mod-making system inside the Super Sega emulator, the plugin model that adds games to it, and the launch roster. Related document: the Golden Axe Super Sega conversion plan (`golden-axe-super-sega-conversion.md`), which covers converting Golden Axe Warrior and Ax Battler to Super Sega hardware features.*
+*Draft 1 · 5 October 2026. This document defines the mod-making system inside the MasterDrive emulator, the plugin model that adds games to it, and the launch roster. Related document: the Golden Axe MasterDrive conversion plan (`golden-axe-masterdrive-conversion.md`), which covers converting Golden Axe Warrior and Ax Battler to MasterDrive hardware features.*
 
 ---
 
 ## 1. What the system is
 
-The Super Sega emulator includes a ROM hack maker: tools for making modified versions of existing games, called **mods**. Three rules set its shape.
+The MasterDrive emulator includes a ROM hack maker: tools for making modified versions of existing games, called **mods**. Three rules set its shape.
 
-1. **The maker exists only in the emulator.** The Super Sega console plays modded games. It does not make or apply mods.
+1. **The maker exists only in the emulator.** The MasterDrive console plays modded games. It does not make or apply mods.
 2. **Every mod is distributed as a patch.** A patch holds only the differences between the original game and the modded one, and each player applies it to their own copy of the original. No original game data ships with the emulator, a plugin, or a mod.
 3. **Games are added through plugins.** A plugin teaches the maker about one game: how to recognise it, where its code and data are, and how to edit them. The project makes the launch plugins. The community makes plugins for other games through the same interface.
 
@@ -40,7 +40,7 @@ Most cartridges carry a 16-byte header at `$7FF0` beginning with the text `TMR S
 |---|---|
 | 4 | Master System, sold outside Japan (*SMS Export*) |
 | 5, 6, 7 | Game Gear: Japan, outside Japan, worldwide (*GG Japan*, *GG Export*, *GG International*) |
-| 8 | Super Sega |
+| 8 | MasterDrive |
 
 The start-up program built into Master Systems sold outside Japan (the **BIOS**) refuses to boot a cartridge whose checksum is wrong. The Game Gear does not check it, and Game Gear games commonly leave it at zero.
 
@@ -58,7 +58,7 @@ The start-up program built into Master Systems sold outside Japan (the **BIOS**)
 | Patch | A mod's distributable form. The maker writes **BPS** patches, which record the hashes of the base ROM and of the result, so a BPS patch refuses to apply to the wrong file |
 | Support tier | How much of a game a plugin exposes for editing (section 3) |
 | Baseline | A game supported well enough that new games can be built from it (tier 3) |
-| Target | The hardware a mod is built for: Master System, Game Gear or Super Sega (section 6) |
+| Target | The hardware a mod is built for: Master System, Game Gear or MasterDrive (section 6) |
 
 ---
 
@@ -104,7 +104,7 @@ A tier-0 manifest needs only identification. The values below are the real ones 
       "sha1": "901697a3535ad70190647f34ad5b30b695d54542"
     }
   ],
-  "targets": ["sms", "supersega"]
+  "targets": ["sms", "masterdrive"]
 }
 ```
 
@@ -191,13 +191,13 @@ Anything copied from a ROM: graphics, text, maps, music or code. A plugin descri
 
 | Target | Header region code | Features allowed | Runs on |
 |---|---|---|---|
-| Master System | 4 | Stock Master System hardware | Super Sega console, emulator SMS profile, original Master System |
-| Game Gear | 5–7 | Stock Game Gear hardware | Super Sega console (Game Gear mode), emulator GG profile, original Game Gear |
-| Super Sega | 8 | Super Sega extensions, each opted into as the Super Sega hardware specification requires | Super Sega console and emulator Super Sega profile only |
+| Master System | 4 | Stock Master System hardware | MasterDrive console, emulator SMS profile, original Master System |
+| Game Gear | 5–7 | Stock Game Gear hardware | MasterDrive console (Game Gear mode), emulator GG profile, original Game Gear |
+| MasterDrive | 8 | MasterDrive extensions, each opted into as the MasterDrive hardware specification requires | MasterDrive console and emulator MasterDrive profile only |
 
-The test step runs every build under its target's own profile, where Super Sega extensions do not exist, so a Master System or Game Gear mod that accidentally depends on one fails visibly before the patch is made.
+The test step runs every build under its target's own profile, where MasterDrive extensions do not exist, so a Master System or Game Gear mod that accidentally depends on one fails visibly before the patch is made.
 
-The Super Sega machine also has an Analogue Pocket implementation (`../pocket-core/docs/SuperSega_Pocket_Core_Design.md`). Its first milestone, so far checked in simulation only, runs Master System and Game Gear software and has the FM unit, but it does not yet draw every Super Sega extension (Technical Reference v3, §19). The emulator's Super Sega profile therefore stays the reference for testing Super Sega mods (section 5, step 4).
+The MasterDrive machine also has an Analogue Pocket implementation (`../pocket-core/docs/MasterDrive_Pocket_Core_Design.md`). Its first milestone, so far checked in simulation only, runs Master System and Game Gear software and has the FM unit, but it does not yet draw every MasterDrive extension (Technical Reference v3, §19). The emulator's MasterDrive profile therefore stays the reference for testing MasterDrive mods (section 5, step 4).
 
 ---
 
@@ -222,7 +222,7 @@ Free-space figures are probable, from static analysis (definitions in Appendix A
 
 **Golden Axe Warrior.** Planned role: the full-coverage reference plugin, because this one game contains every kind of editor the interface must support — overworld and dungeon maps, text, shops, item and enemy tables. The audit supports that role. The ROM pages slot 2 only and has a valid checksum. Its 16,484 bytes of probable free space are spread over 13 banks, and bank 1 ends in 1,213 zero bytes at `$7B33–$7FEF`, directly before the header: the largest trampoline site on the roster, pending a trace. Its text is plain ASCII in two forms — mixed-case dialogue ending in `$00`, and upper-case story text using `$FF` as a line break — so its text codec is close to trivial. Battery-backed save RAM is switched on by the routine at `$0444`, which first disables interrupts, and off by the one at `$043A`, which re-enables them. Its frame interrupt restores slot 2 exactly (section 4.5), so hooks may page directly.
 
-**Ax Battler.** Bases: the stock Game Gear ROM, where the Super Sega conversion starts, and the GG2SMS v1.2 build. The game contains routines for paging slot 1 (at `$00A2` and `$00B0`), but no `CALL` or `JP` to either exists, and the five places the value `$00B0` appears in bank 1 are the number 176 used as data. Slot 1 is otherwise written only at boot, so bank 1 behaves as fixed; a trace should confirm this. That makes `$7F98–$7FEF` (88 bytes of `$FF`, directly before the header) usable for the trampoline in the stock ROM. The GG2SMS build puts its pad-detection routine at `$7FA0–$7FBB`, leaving 60 bytes. Two zero-filled gaps in the never-paged first 1 KB, `$0053–$0065` and `$00B8–$00DF`, are a fallback once a trace shows nothing uses them. The slot-2 bookkeeping in section 4.5 applies to every hook. Caution: mods built on the stock engine inherit its stiffness; the improved engine becomes a separate base when it is frozen (open decision 5).
+**Ax Battler.** Bases: the stock Game Gear ROM, where the MasterDrive conversion starts, and the GG2SMS v1.2 build. The game contains routines for paging slot 1 (at `$00A2` and `$00B0`), but no `CALL` or `JP` to either exists, and the five places the value `$00B0` appears in bank 1 are the number 176 used as data. Slot 1 is otherwise written only at boot, so bank 1 behaves as fixed; a trace should confirm this. That makes `$7F98–$7FEF` (88 bytes of `$FF`, directly before the header) usable for the trampoline in the stock ROM. The GG2SMS build puts its pad-detection routine at `$7FA0–$7FBB`, leaving 60 bytes. Two zero-filled gaps in the never-paged first 1 KB, `$0053–$0065` and `$00B8–$00DF`, are a fallback once a trace shows nothing uses them. The slot-2 bookkeeping in section 4.5 applies to every hook. Caution: mods built on the stock engine inherit its stiffness; the improved engine becomes a separate base when it is frozen (open decision 5).
 
 **Master of Darkness.** The supplied ROM is the Master System version (header region 4, valid checksum), native 256×192. A Game Gear version was supplied first and set aside. The game pages slot 2 only. Banks 0 and 1 hold no `$FF` free space, but bank 1 ends in 87 zero bytes at `$7F99–$7FEF`, directly before the header: almost certainly padding, and the natural trampoline site once a trace confirms nothing reads it. The Master System version was also sold in Brazil, whose consoles run at 60 Hz, so 60 Hz play is a configuration it shipped in.
 
@@ -230,7 +230,7 @@ Free-space figures are probable, from static analysis (definitions in Appendix A
 
 **Fantasy Zone.** Tight on space: 2,962 bytes probably free, second only to Ax Battler's 2,231. Its fixed region has 242 bytes of `$FF`: the unused restart vectors at `$0008–$0037`, then `$003B–$0065` and `$7F59–$7FEF`. Hooks are therefore cheap, but new content needs expansion to 256 KB first. As a template it produces Fantasy Zone-like games — looping stages, enemy bases to destroy, a shop — rather than general shooters.
 
-**Aerial Assault.** The baseline is the Master System version (USA): header region 4, valid checksum, slot 2 paging only, and 63,294 bytes of probable free space, the most of any Master System title on the roster. Bank 1 ends in 479 bytes of `$FF` at `$7E11–$7FEF`, directly before the header: the trampoline site. Its sound driver (bank 7) handles both the PSG and the YM2413 FM chip built into Japanese Master Systems, but the FM half is switched off. The boot routine at `$00D9` writes 0 to the FM control port `$F2` and to the driver's mode flag at `$D000`; no other instruction in the ROM writes either one directly, and the game never reads `$F2` back, so it never checks for an FM unit. That matches its absence from community lists of FM-supporting games. Whether FM music data exists is untested. If it does, a small boot patch could give the game an FM soundtrack on Super Sega, which always has the FM chip; a Master System build would also need real FM detection, since most Master Systems have no FM chip. Test this in the emulator before planning any other audio work for the title. The Game Gear version (World) shares no banks with it, uses a different sound driver, and has only 452 bytes free, so it is identified (tier 0) only.
+**Aerial Assault.** The baseline is the Master System version (USA): header region 4, valid checksum, slot 2 paging only, and 63,294 bytes of probable free space, the most of any Master System title on the roster. Bank 1 ends in 479 bytes of `$FF` at `$7E11–$7FEF`, directly before the header: the trampoline site. Its sound driver (bank 7) handles both the PSG and the YM2413 FM chip built into Japanese Master Systems, but the FM half is switched off. The boot routine at `$00D9` writes 0 to the FM control port `$F2` and to the driver's mode flag at `$D000`; no other instruction in the ROM writes either one directly, and the game never reads `$F2` back, so it never checks for an FM unit. That matches its absence from community lists of FM-supporting games. Whether FM music data exists is untested. If it does, a small boot patch could give the game an FM soundtrack on MasterDrive, which always has the FM chip; a Master System build would also need real FM detection, since most Master Systems have no FM chip. Test this in the emulator before planning any other audio work for the title. The Game Gear version (World) shares no banks with it, uses a different sound driver, and has only 452 bytes free, so it is identified (tier 0) only.
 
 **Defenders of Oasis.** The most free space on the roster. Banks 25, 26 and 27 each begin with the developers' own marker text, `** Empty Bank **`, and are otherwise `$FF`; together with the end of bank 24 they hold 58,229 bytes. Banks 28–31 are byte-identical copies of banks 12–15, and may be reclaimable once a trace shows the game never maps them. Battery-backed save RAM is switched on by the routine at `$0EF4` and off by the one at `$0EFC`. The game writes slots 1 and 2 together at runtime — in a bank-switch helper starting at `$09F5`, and in register-restoring code at `$04D4` that appears to end its interrupt handler — so only bank 0 should be treated as fixed until a trace shows slot 1 always holds bank 1. Slot 0 is never paged: the `$FFFD` values found elsewhere are the number −3 used as data. Bank 0 has no trampoline candidates — its only gap is 64 zero bytes mid-bank at `$0A8C`. If a trace shows slot 1 always holds bank 1, the 879 zero bytes at `$7C81–$7FEF`, directly before the header, become the obvious site; otherwise the first hook needs room made for it, as with Astro Warrior. As a Game Gear game it raises the screen-size question in section 7.3.
 
@@ -265,7 +265,7 @@ Free-space figures are probable, from static analysis (definitions in Appendix A
 | 4 | Horizontal shooter template | **Decided:** Aerial Assault, Master System version | Sections 7.2 and 7.3 |
 | 5 | Ax Battler base ROM | Proposed: stock ROM at launch, improved engine added as a new base when frozen | Resolves whether Ax Battler is a launch or a later title |
 | 6 | Combining mods | Let mods ship project files so the maker can merge them | Without it, a player can run only one mod per game at a time |
-| 7 | Super Sega mapper limits | Maximum ROM size and save-RAM size | Expansion recipes for the Super Sega target depend on both. Machine profile v7: up to 4 MB is reachable with the stock 8-bit bank registers, so only sizes beyond 4 MB (open question Q2) and the save-RAM size (Q3) remain open (Technical Reference v3, §8 and §17) |
+| 7 | MasterDrive mapper limits | Maximum ROM size and save-RAM size | Expansion recipes for the MasterDrive target depend on both. Machine profile v7: up to 4 MB is reachable with the stock 8-bit bank registers, so only sizes beyond 4 MB (open question Q2) and the save-RAM size (Q3) remain open (Technical Reference v3, §8 and §17) |
 
 ---
 

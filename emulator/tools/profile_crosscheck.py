@@ -9,7 +9,7 @@ the code implementing it is present."""
 import json, re, sys
 
 if len(sys.argv)<3:
-    sys.exit('usage: profile_crosscheck.py emulator.html super_sega_machine_v7.json')
+    sys.exit('usage: profile_crosscheck.py emulator.html masterdrive_machine_v7.json')
 prof=json.load(open(sys.argv[2]))
 html=open(sys.argv[1]).read()
 js=re.search(r'<script>([\s\S]*)</script>',html).group(1)

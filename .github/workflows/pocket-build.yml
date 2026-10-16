@@ -37,7 +37,7 @@ jobs:
           grep -A12 "Slow 1100mV 85C Model Setup Summary" ap_core.sta.rpt || true
       - uses: actions/upload-artifact@v4
         with:
-          name: SuperSega-pocket
+          name: MasterDrive-pocket
           path: pocket-core/pocket/build/sdcard/
       - uses: actions/upload-artifact@v4
         if: always()

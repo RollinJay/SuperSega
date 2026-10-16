@@ -3,11 +3,11 @@
     "magic": "APF_VER_1",
     "metadata": {
       "platform_ids": [
-        "supersega"
+        "masterdrive"
       ],
-      "shortname": "SuperSega",
-      "description": "Super Sega 8-bit: SMS, Game Gear and Super Sega titles",
-      "author": "SuperSega",
+      "shortname": "MasterDrive",
+      "description": "Sega 8-bit computer and console: SG-1000, SC-3000, SMS, GG",
+      "author": "MasterDrive",
       "url": "",
       "version": "0.1.0",
       "date_release": "2026-10-12"

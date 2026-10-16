@@ -155,17 +155,17 @@ probe('M9c', 'A pending line IRQ is taken right after EI+1 instruction, not at t
 });
 
 // ---------------------------------------------------------------- I/O
-probe('M10a', 'Super Sega math result readable at $0F/$10 (was answered by the pad mirror)', () => {
+probe('M10a', 'MasterDrive math result readable at $0F/$10 (was answered by the pad mirror)', () => {
   const m = sms('ss');
   m.out(0x0C, 200); m.out(0x0D, 100); m.out(0x0E, 0);
   const lo = m.inp(0x0F), hi = m.inp(0x10);
   return { ok: ((hi << 8) | lo) === 20000, note: `read ${(hi << 8) | lo}, want 20000` };
 });
-probe('M10b', 'Super Sega multitap detection $16 and slot select $09 readback', () => {
+probe('M10b', 'MasterDrive multitap detection $16 and slot select $09 readback', () => {
   const m = sms('ss'); m.out(0x09, 0x02);
   return { ok: m.inp(0x16) === 0x81 && m.inp(0x09) === 0x02, note: `$16=${m.inp(0x16).toString(16)} $09=${m.inp(0x09).toString(16)}` };
 });
-probe('M38', 'Super Sega: writes to the read-only ports $0F, $10 and $16 are absorbed, not taken as $3E/$3F mirrors; on the Master System they still are (Technical Reference \u00a711)', () => {
+probe('M38', 'MasterDrive: writes to the read-only ports $0F, $10 and $16 are absorbed, not taken as $3E/$3F mirrors; on the Master System they still are (Technical Reference \u00a711)', () => {
   const s = sms('ss'); const mc = s.memCtl, ic = s.ioCtl;
   s.out(0x0F, 0x00); s.out(0x10, 0x00); s.out(0x16, 0x00);
   const m = sms('sms'); m.out(0x0F, 0x55); m.out(0x10, 0xAA);
@@ -306,14 +306,14 @@ probe('M30', 'Game Gear: only $C0/$DC and $C1/$DD answer above $C0 (Gearsystem)'
   return { ok: (a & 1) === 0 && (b & 1) === 0 && c === 0xFF && d === 0xFF, note: [a, b, c, d].map(v => v.toString(16)).join(' ') };
 });
 
-probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 or a Master System in a TMS mode raises none, Mode 4 does; Super Sega mode still raises it in a TMS mode (open question Q15) (machine profile stock_behaviour.vdp.line_counter)', () => {
+probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 or a Master System in a TMS mode raises none, Mode 4 does; MasterDrive mode still raises it in a TMS mode (open question Q15) (machine profile stock_behaviour.vdp.line_counter)', () => {
   const run = (mode, r0) => { const m = sms(mode); m.vdp.reg[0] = r0; m.vdp.reg[1] = 0x40; m.vdp.reg[10] = 0;  // IE1 set, counter 0
     m.vdp.irqLine = 0; for (let i = 0; i < 4; i++) m.vdp.scanline(); return m.vdp.irqLine ? 1 : 0; };
   const sgTms = run('sg', 0x10), smsTms = run('sms', 0x10), smsM4 = run('sms', 0x14), ssTms = run('ss', 0x10);
   return { ok: !sgTms && !smsTms && smsM4 && ssTms,
            note: `SG TMS ${sgTms}, SMS TMS ${smsTms}, SMS Mode 4 ${smsM4}, SS TMS ${ssTms}` };
 });
-probe('M41', 'Start = Pause boost: Start raises Pause in the Master System, SG-1000 and SC-3000 modes, not on the Game Gear (it has its own Start) nor for Super Sega software (machine profile enhancement_layer)', () => {
+probe('M41', 'Start = Pause boost: Start raises Pause in the Master System, SG-1000 and SC-3000 modes, not on the Game Gear (it has its own Start) nor for MasterDrive software (machine profile enhancement_layer)', () => {
   const res = ['sms', 'sg', 'sc', 'gg', 'ss'].map(mode => { const m = sms(mode); let n = 0;
     m.ael.startpause = true; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
     m.btn.start = 1; m.runFrame(); m.runFrame(); return n; });
@@ -334,7 +334,7 @@ probe('M31', 'Codemasters: banks 0,1,0 at power-on; registers only at $0000/$400
 });
 
 // ---------------------------------------------------------------- enhancement layer
-probe('M32', 'AEL pseudo-stereo: tone 0 left, tone 1 right, tone 2 both, until software writes $06; not applied to Super Sega software', () => {
+probe('M32', 'AEL pseudo-stereo: tone 0 left, tone 1 right, tone 2 both, until software writes $06; not applied to MasterDrive software', () => {
   const m = sms('sms'); m.ael.stereo = true; m.reset();
   const P = m.psg;
   P.write(0x80 | 0x0F); P.write(0x3F); P.write(0x90);      // tone 0 audible
@@ -344,7 +344,7 @@ probe('M32', 'AEL pseudo-stereo: tone 0 left, tone 1 right, tone 2 both, until s
   const t1 = P.sample(0);
   const g = sms('gg'); g.ael.stereo = true; g.reset();
   g.out(0x06, 0xFF); const set = g.psg.stereoSet;
-  const s = sms('ss'); s.ael.stereo = true; s.reset();   // Super Sega software: no boost
+  const s = sms('ss'); s.ael.stereo = true; s.reset();   // MasterDrive software: no boost
   const Q = s.psg; Q.write(0x80 | 0x0F); Q.write(0x3F); Q.write(0x90); Q.write(0xBF);
   const ts = Q.sample(0);
   return { ok: t0[0] !== 0 && t0[1] === 0 && t1[0] === 0 && t1[1] !== 0 && set === 1 && ts[0] !== 0 && ts[1] !== 0,
@@ -374,20 +374,20 @@ probe('M23', 'Overlapping sprites: the lowest-numbered sprite is on top', () => 
   const px = V.fb[10 * 256 + 42] >>> 0, want = V.colour(1, 1) >>> 0;
   return { ok: px === want && (V.status & 0x20) !== 0, note: `pixel ${px.toString(16)} want ${want.toString(16)}, collision ${(V.status >> 5) & 1}` };
 });
-probe('M33', 'Sprite-limit boost: 16 for stock software, but not imposed on Super Sega software', () => {
+probe('M33', 'Sprite-limit boost: 16 for stock software, but not imposed on MasterDrive software', () => {
   const a = sms('sms'); a.ael.sprlimit = true;
   const b = sms('ss'); b.ael.sprlimit = true;
   const la = a.vdp.spriteLimit(), lb = b.vdp.spriteLimit();
   b.vdp.reg[15] = 0x10; const lc = b.vdp.spriteLimit();
-  return { ok: la === 16 && lb === 8 && lc === 16, note: `SMS ${la}, Super Sega ${lb}, Super Sega with FEA bit 4 ${lc}` };
+  return { ok: la === 16 && lb === 8 && lc === 16, note: `SMS ${la}, MasterDrive ${lb}, MasterDrive with FEA bit 4 ${lc}` };
 });
-probe('M34', 'FM detection latch only in SMS and Super Sega modes; Game Gear $F2 reads $FF', () => {
+probe('M34', 'FM detection latch only in SMS and MasterDrive modes; Game Gear $F2 reads $FF', () => {
   const g = sms('gg'); g.out(0xF2, 0x01); const a = g.inp(0xF2);
   const s = sms('sms'); s.out(0xF2, 0x01); const b = s.inp(0xF2) & 3;
   return { ok: a === 0xFF && b === 1, note: `GG $F2=${a.toString(16)}, SMS $F2=${b}` };
 });
 
-probe('M35', 'AEL auto-fire (machine profile): in the stock modes button 2 toggles every two frames while C is held, and releasing C leaves the pad as it is; in Super Sega mode C is left to the software', () => {
+probe('M35', 'AEL auto-fire (machine profile): in the stock modes button 2 toggles every two frames while C is held, and releasing C leaves the pad as it is; in MasterDrive mode C is left to the software', () => {
   const a = sms('sms'); a.ael.autofire = true; a.btn.c = 1; a.btn.b = 0;
   const seq = [];
   for (let f = 0; f < 4; f++) { a.afTick = f; seq.push((a.inp(0xDC) >> 5) & 1); }   // 0 = pressed
@@ -397,9 +397,9 @@ probe('M35', 'AEL auto-fire (machine profile): in the stock modes button 2 toggl
   const sb = [];
   for (let f = 0; f < 4; f++) { s.afTick = f; sb.push((s.inp(0xDC) >> 4) & 1); }  // TH high: bit 4 = B
   return { ok: seq.join('') === '1100' && after === 1 && sb.join('') === '1111',
-           note: `SMS button 2 ${seq.join('')}, after release ${after}, Super Sega B ${sb.join('')}` };
+           note: `SMS button 2 ${seq.join('')}, after release ${after}, MasterDrive B ${sb.join('')}` };
 });
-probe('M36', 'Stock machine: $FB-$FF read as the controller mirror (SMS: even ports $DC, odd $DD; Game Gear $FF). The debug unit answers reads only in Super Sega mode', () => {
+probe('M36', 'Stock machine: $FB-$FF read as the controller mirror (SMS: even ports $DC, odd $DD; Game Gear $FF). The debug unit answers reads only in MasterDrive mode', () => {
   const a = sms('sms'); a.btn.up = 1;
   const dc = a.inp(0xDC), fc = a.inp(0xFC), dd = a.inp(0xDD), fb = a.inp(0xFB);
   const g = sms('gg'); const gfc = g.inp(0xFC);
@@ -408,7 +408,7 @@ probe('M36', 'Stock machine: $FB-$FF read as the controller mirror (SMS: even po
            note: `SMS $FC=${fc.toString(16)} ($DC ${dc.toString(16)}), GG $FC=${gfc.toString(16)}, SS $FC=${sfc.toString(16)}` };
 });
 
-probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-layer step sets the CPU clock in the stock modes but not in Super Sega mode, where $F3 decides; VRAM speed-up removes the bus synchroniser wait for stock software only', () => {
+probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-layer step sets the CPU clock in the stock modes but not in MasterDrive mode, where $F3 decides; VRAM speed-up removes the bus synchroniser wait for stock software only', () => {
   const a = sms('sms'); a.ael.turbo = 2;
   const s = sms('ss'); s.ael.turbo = 2;
   const ma = a.cpuMult ? a.cpuMult() : 1, ms = s.cpuMult ? s.cpuMult() : 1;

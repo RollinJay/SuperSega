@@ -1,5 +1,5 @@
 #
-# Super Sega - timing constraints (core side; the APF supplies its own)
+# MasterDrive - timing constraints (core side; the APF supplies its own)
 #
 # The machine clock (53.693175 MHz) and the two video clocks (5.369318 MHz,
 # 0 and 90 degrees) come from one PLL VCO and are kept in ONE group: the video
@@ -18,15 +18,15 @@ set_clock_groups -asynchronous \
 
 derive_clock_uncertainty
 
-# The CPU runs on a clock enable (ce_cpu in rtl/ss_top.v): at most once every
+# The CPU runs on a clock enable (ce_cpu in rtl/mdr_top.v): at most once every
 # 7 system clocks (200 % turbo), and never on two consecutive clocks. Every
 # register in the CPU core (tv80) changes only on an enable edge. The CPU
 # wrapper's bus strobes and data latch, the I/O decode, the VDP and the PSG take
 # what the CPU drives only on an enable edge too (the I/O sample point), so
 # paths from the CPU core to them have two clocks. The memory controller acts
-# between enable edges and keeps the one-clock requirement (ss_top registers
+# between enable edges and keeps the one-clock requirement (mdr_top registers
 # the CPU bus for it).
-set ss_cpu [get_registers {*|ss_z80:u_cpu|tv80_core:u_core|*}]
-set ss_cpu_side [get_registers {*|ss_z80:u_cpu|tv80_core:u_core|* *|ss_z80:u_cpu|rd_n* *|ss_z80:u_cpu|wr_n* *|ss_z80:u_cpu|iorq_n* *|ss_z80:u_cpu|mreq_n* *|ss_z80:u_cpu|di_reg* *|ss_top:u_machine|ss_io:u_io|* *|ss_top:u_machine|ss_vdp:u_vdp|* *|ss_top:u_machine|ss_psg:u_psg|*}]
+set ss_cpu [get_registers {*|mdr_z80:u_cpu|tv80_core:u_core|*}]
+set ss_cpu_side [get_registers {*|mdr_z80:u_cpu|tv80_core:u_core|* *|mdr_z80:u_cpu|rd_n* *|mdr_z80:u_cpu|wr_n* *|mdr_z80:u_cpu|iorq_n* *|mdr_z80:u_cpu|mreq_n* *|mdr_z80:u_cpu|di_reg* *|mdr_top:u_machine|mdr_io:u_io|* *|mdr_top:u_machine|mdr_vdp:u_vdp|* *|mdr_top:u_machine|mdr_psg:u_psg|*}]
 set_multicycle_path -setup -end 2 -from $ss_cpu -to $ss_cpu_side
 set_multicycle_path -hold  -end 1 -from $ss_cpu -to $ss_cpu_side

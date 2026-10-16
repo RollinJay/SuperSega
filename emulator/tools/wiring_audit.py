@@ -111,7 +111,7 @@ expect={
  'save card format':'function cardFormat','save profiles':'function cardProfiles',
  'icon capture':'captureIcon','sprite gallery':'collectGallery',
  'cartridge snapshot':'function cartSnapshot','standby shutdown':'function shutdownSequence',
- 'ROM wait states':'romWaitStates','Super Sega Lab':'function labMakeLive',
+ 'ROM wait states':'romWaitStates','MasterDrive Lab':'function labMakeLive',
  'live composite':'function labCompositeLive','engine match':'function labEngineMatch',
  'IPS builder':'function labBuildIPS','hack lab':'HACK','sound lab':'chUse',
 }
@@ -119,7 +119,7 @@ missing=[k for k,v in expect.items() if v not in js_raw]
 bad('declared subsystem missing from the build',missing)
 
 # ---------- report ----------
-print('WIRING AUDIT — supersega-emulator.html  (%.1f KB, %d lines)'%(len(h)/1024,h.count('\n')+1))
+print('WIRING AUDIT — masterdrive-emulator.html  (%.1f KB, %d lines)'%(len(h)/1024,h.count('\n')+1))
 print('='*68)
 print('  HTML ids %d · interactive controls %d · JS refs %d'%(len(idset),len(controls),len(refs)))
 print('  functions defined %d · tabs %d · panes %d'%(len(defs),len(tabs),len(panes)))

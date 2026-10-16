@@ -1,4 +1,4 @@
-// Super Sega - dual-port RAM, inferred as block RAM.
+// MasterDrive - dual-port RAM, inferred as block RAM.
 // Port A: read/write. Port B: read/write. Both synchronous, one-cycle read
 // latency. Separate clocks are allowed (clk_b may equal clk_a).
 //
@@ -9,7 +9,7 @@
 // the same cycle returns either value ("no_rw_check").
 `default_nettype none
 
-module ss_dpram #(
+module mdr_dpram #(
     parameter AW = 10,
     parameter DW = 8,
     parameter INIT_FILE = ""

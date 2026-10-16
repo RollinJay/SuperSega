@@ -1,5 +1,5 @@
 #!/bin/sh
-# Super Sega - build the Analogue Pocket core and the SD-card files.
+# MasterDrive - build the Analogue Pocket core and the SD-card files.
 #
 #   1. setup.sh assembles the Quartus project in build/ (fetching the APF framework)
 #   2. Quartus compiles it: quartus_sh from PATH if there is one, otherwise in the
@@ -7,13 +7,13 @@
 #   3. tools/reverse_rbf.py turns ap_core.rbf into bitstream.rbf_r, the form the
 #      Pocket loads
 #   4. build/sdcard/ gets the files to copy to the root of the SD card, and
-#      build/SuperSega-pocket.zip the same as one zip
+#      build/MasterDrive-pocket.zip the same as one zip
 #
 # usage: ./build_core.sh        (from anywhere; about 15 minutes)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$HERE/build
-CORE=SuperSega.SuperSega
+CORE=MasterDrive.MasterDrive
 IMAGE=raetro/quartus:pocket
 
 rm -rf "$OUT"
@@ -29,9 +29,9 @@ RBF=$OUT/src/fpga/output_files/ap_core.rbf
 test -s "$RBF" || { echo "no bitstream: $RBF" >&2; exit 1; }
 
 SD=$OUT/sdcard
-mkdir -p "$SD/Assets/supersega/common/test-roms"
+mkdir -p "$SD/Assets/masterdrive/common/test-roms"
 cp -r "$OUT/dist/." "$SD/"
-cp "$HERE"/../roms/*.sms "$HERE"/../roms/*.sg "$SD/Assets/supersega/common/test-roms/"
+cp "$HERE"/../roms/*.sms "$HERE"/../roms/*.sg "$SD/Assets/masterdrive/common/test-roms/"
 cp "$HERE/../TESTING.md" "$SD/Cores/$CORE/"
 # The bitstream contains third-party code whose licences (BSD-style, MIT) ask
 # for their notices to go with it: IKAOPLL, tv80 (its notice is the header of
@@ -42,12 +42,12 @@ sed -n '2,23s#^// \{0,1\}##p' "$HERE/../rtl/third_party/tv80/tv80_mcode.v" > "$S
 cp "$HERE/../rtl/third_party/tv80/LICENSE-T80" "$SD/Cores/$CORE/LICENSE-T80.txt"
 cp "$HERE/third_party/agg23/LICENSE" "$SD/Cores/$CORE/LICENSE-analogue-pocket-utils.txt"
 python3 "$HERE/tools/reverse_rbf.py" "$RBF" "$SD/Cores/$CORE/bitstream.rbf_r"
-(cd "$SD" && rm -f ../SuperSega-pocket.zip && python3 -c "
+(cd "$SD" && rm -f ../MasterDrive-pocket.zip && python3 -c "
 import os, zipfile
-with zipfile.ZipFile('../SuperSega-pocket.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+with zipfile.ZipFile('../MasterDrive-pocket.zip', 'w', zipfile.ZIP_DEFLATED) as z:
     for d, _, fs in os.walk('.'):
         if d != '.': z.write(d, os.path.relpath(d, '.'))
         for f in fs: z.write(os.path.join(d, f), os.path.relpath(os.path.join(d, f), '.'))
 ")
 echo "SD-card files: $SD"
-echo "zip:           $OUT/SuperSega-pocket.zip"
+echo "zip:           $OUT/MasterDrive-pocket.zip"

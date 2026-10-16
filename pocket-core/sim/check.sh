@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# Super Sega - Pocket core regression checks, run by CI (.github/workflows/checks.yml).
+# MasterDrive - Pocket core regression checks, run by CI (.github/workflows/checks.yml).
 #
 #   0. the Pocket definition files (input.json, interact.json) are within the
-#      platform's limits and match what pocket/ss_pocket.v reads and decodes
+#      platform's limits and match what pocket/mdr_pocket.v reads and decodes
 #   1. tools/mk_testrom.py reproduces roms/ byte for byte
 #   2. sim/z80: the Z80 wrapper's instruction timing matches the emulator's Z80
 #   3. sim/io: the SC-3000 keyboard's ghosting and the math unit's divide, which
 #      take several clocks in the core, match reference models
 #   4. sim/sys: the machine draws the same frames as the emulator's machine model
-#      for the VDP-height (NTSC and PAL), sprite-limit and Super Sega feature test
+#      for the VDP-height (NTSC and PAL), sprite-limit and MasterDrive feature test
 #      ROMs, for the I/O test ROM in Master System and Game Gear modes, for the
 #      VDP-height ROM in Game Gear mode, and for the four TMS9918-mode ROMs on the
 #      SG-1000 (Master System colours exactly, true TMS colours within the core's
 #      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
 #      follows the $F2 mute states with the right FM pitch and level (Master
-#      System and Super Sega modes) and has no FM in Game Gear mode, and a
+#      System and MasterDrive modes) and has no FM in Game Gear mode, and a
 #      tightly timed FM driver still plays at 200 % turbo; in PAL, frames come at
 #      49.70 Hz and the FM and PSG pitch follow the PAL clock; and the clock
-#      enables keep their spacing (a check inside ss_top)
+#      enables keep their spacing (a check inside mdr_top)
 #   5. sim/pocket: through the Pocket platform layer the frames match the machine
 #      simulation, NTSC and PAL (a headerless TMS ROM is detected as SG-1000 and
 #      drawn in true TMS colours, the default); the video timing the scaler sees
 #      is regular (PAL lines 345 or 346 pixel clocks), also across a switch from
 #      PAL to NTSC; Pocket A and B read as buttons 1 and 2 in Master System mode
-#      and B as button 1 in Super Sega mode; and the save slot reads back the
+#      and B as button 1 in MasterDrive mode; and the save slot reads back the
 #      loaded file with only the bytes the ROM writes changed
 #
 # usage: sim/check.sh [workdir]     (workdir defaults to a new temporary directory)
@@ -34,7 +34,7 @@ W=${1:-$(mktemp -d)}
 W=$(mkdir -p "$W" && cd "$W" && pwd)
 cd "$(dirname "$0")/.."                       # pocket-core/
 PC=$(pwd)
-PAGE=$PC/../emulator/supersega-emulator.html
+PAGE=$PC/../emulator/masterdrive-emulator.html
 JSDUMP=$PC/../emulator/tools/js_dump.js
 mkdir -p "$W/roms" "$W/sys" "$W/js" "$W/pocket"
 JOBS=$(nproc 2>/dev/null || echo 2)
@@ -63,7 +63,7 @@ grep -v '^PASS$\|finish called' "$W/io.log"
 
 step "4. machine simulation against the emulator (sim/sys)"
 build sys
-# name | ROM | mode | frames to run | frames to compare | tb_ss options | js_dump environment
+# name | ROM | mode | frames to run | frames to compare | tb_mdr options | js_dump environment
 #      | tolerance (empty: exact; the core's true TMS colours are rounded to 4 bits per channel)
 SYS_CASES=(
     "v192|vdp192.sms|sms|40|10 37||"
@@ -73,7 +73,7 @@ SYS_CASES=(
     "spr|spr12.sms|sms|11|10||"
     "spr16|spr12.sms|sms|11|10|-spr16|AEL=sprlimit"
     "spr16ovf|spr12.sms|sms|11|10|-spr16 -ovf|AEL=sprlimit,ovf"
-    "ssfeat|ssfeat.sms|ss|12|10 11||"
+    "mdrfeat|mdrfeat.sms|ss|12|10 11||"
     "gg192|vdp192.sms|gg|11|10||"
     "smsports|ports.sms|sms|11|10||"
     "ggports|ports.sms|gg|11|10||"
@@ -88,10 +88,10 @@ run_sys_case() {
     local name rom mode n dumps topt jenv tol
     IFS='|' read -r name rom mode n dumps topt jenv tol <<< "$1"
     # shellcheck disable=SC2086  # option and frame lists are meant to split
-    (cd "$PC/sim/sys" && ./obj/tb_ss "../../roms/$rom" "$mode" "$n" "$W/sys/$name" $topt $dumps) \
-        > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
+    (cd "$PC/sim/sys" && ./obj/tb_mdr "../../roms/$rom" "$mode" "$n" "$W/sys/$name" $topt $dumps) \
+        > "$W/sys/$name.log" 2>&1 || { echo "tb_mdr $name failed:"; cat "$W/sys/$name.log"; return 1; }
     grep -q ', 0 violations' "$W/sys/$name.log" \
-        || { echo "tb_ss $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
+        || { echo "tb_mdr $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
     # shellcheck disable=SC2086
     env $jenv node "$JSDUMP" "$PAGE" "$PC/roms/$rom" "$mode" "$W/js/$name" $dumps \
         > "$W/js/$name.log" 2>&1 || { echo "js_dump $name failed:"; cat "$W/js/$name.log"; return 1; }
@@ -101,7 +101,7 @@ export -f run_sys_case
 # in the two modes with the FM unit and in one without it, and the tightly timed
 # driver at 200 % turbo (the bus synchroniser must hold its writes); run
 # alongside the frame cases
-# name | ROM | mode | tb_ss options | check_fm_wav.py options
+# name | ROM | mode | tb_mdr options | check_fm_wav.py options
 FM_CASES=("fmsms|fm.sms|sms||" "fmss|fm.sms|ss||" "fmgg|fm.sms|gg||--no-fm" "fmturbo|fm_tight.sms|sms|-turbo 4|"
           "fmpal|fm.sms|sms|-pal|--pal" "fmturbopal|fm_tight.sms|sms|-pal -turbo 4|--pal")
 run_fm_case() {
@@ -109,10 +109,10 @@ run_fm_case() {
     IFS='|' read -r name rom mode topt opt <<< "$1"
     rm -f "$W/sys/$name.wav" "$W/sys/$name.txt"   # a reused work directory must not show an old result
     # shellcheck disable=SC2086  # topt is empty or a list of options
-    (cd "$PC/sim/sys" && ./obj/tb_ss "../../roms/$rom" "$mode" 50 "$W/sys/$name" -wav "$W/sys/$name.wav" $topt) \
-        > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
+    (cd "$PC/sim/sys" && ./obj/tb_mdr "../../roms/$rom" "$mode" 50 "$W/sys/$name" -wav "$W/sys/$name.wav" $topt) \
+        > "$W/sys/$name.log" 2>&1 || { echo "tb_mdr $name failed:"; cat "$W/sys/$name.log"; return 1; }
     grep -q ', 0 violations' "$W/sys/$name.log" \
-        || { echo "tb_ss $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
+        || { echo "tb_mdr $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
     # shellcheck disable=SC2086  # opt is empty or one flag
     python3 "$PC/tools/check_fm_wav.py" "$W/sys/$name.wav" $opt > "$W/sys/$name.txt" 2>&1 \
         || { echo "$name: FM sound check failed:"; cat "$W/sys/$name.txt"; return 1; }
@@ -157,7 +157,7 @@ build pocket
 #   never gives a frame of more than 313 lines
 POCKET_CASES=(
     "p224|vdp224.sms|40|37|ntsc"
-    "pss|ssfeat.sms|12|10 11|ntsc"
+    "pss|mdrfeat.sms|12|10 11|ntsc"
     "pggports|ports.sms|11|-system 2 10|ntsc"
     "pbutton|ports.sms|11|-system 3 -hold 5 10|ntsc"
     "pbtn1|ports.sms|11|-system 1 -hold 4 10|ntsc"
@@ -196,16 +196,16 @@ PY
 export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
 fail=0
-for pair in "p224_37 v224_37" "pss_10 ssfeat_10" "pss_11 ssfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
+for pair in "p224_37 v224_37" "pss_10 mdrfeat_10" "pss_11 mdrfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
             "p224pal_37 v224pal_37"; do
     set -- $pair
     printf '%-12s Pocket vs machine simulation: ' "$1"
     python3 tools/ppmdiff.py "$W/pocket/$1.ppm" "$W/sys/$2.ppm" || fail=1
 done
 [ "$fail" = 0 ]
-# Pocket button -> port $DC: Super Sega mode, B = the pad's B (button 1 with TH
+# Pocket button -> port $DC: MasterDrive mode, B = the pad's B (button 1 with TH
 # high); Master System mode, A = button 1 and B = button 2 (Technical Reference §6)
-for c in 'pbutton|Super Sega mode, Pocket B held|$EF|button 1' \
+for c in 'pbutton|MasterDrive mode, Pocket B held|$EF|button 1' \
          'pbtn1|Master System, Pocket A held|$EF|button 1' \
          'pbtn2|Master System, Pocket B held|$DF|button 2'; do
     IFS='|' read -r name what want btn <<< "$c"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build super_sega_machine_v7.json from v6.
+"""Build masterdrive_machine_v7.json from v6.
 
 v7 folds in the updates to the machine that were made in other chats, the
 stock-hardware behaviour the emulator was corrected to follow (which every
@@ -10,7 +10,7 @@ inserts one only when it is missing, so run on the committed v7 the script
 reproduces it byte for byte.
 Usage: make_profile_v7.py v6.json v7.json
 """
-import json, sys, copy
+import json, sys, copy, re
 
 src, dst = sys.argv[1], sys.argv[2]
 v6 = json.load(open(src))
@@ -29,7 +29,7 @@ def put_after(d, after, key, value):
 
 LATER = '(after the October 2026 package) '
 
-p['$schema'] = 'super-sega-machine-block/v7'
+p['$schema'] = 'masterdrive-machine-block/v7'
 p['supersedes'] = 'super_sega_machine_v6.json'
 p['scope'] = (
     'This file defines the machine: the console hardware, the jobs its FPGA performs '
@@ -37,7 +37,7 @@ p['scope'] = (
     'console, the HTML5 emulator\'s machine model and the Analogue Pocket core. '
     'Emulator-only features (ROM hack maker, MSX porting tools, Lab composite, merge '
     'report, the app\'s Debug tab, filters, FM dual-run capture, save states) are not '
-    'part of the machine and are listed separately in SuperSega_v7_Reconciliation.md.')
+    'part of the machine and are listed separately in MasterDrive_v7_Reconciliation.md.')
 
 changes = []
 def change(text): changes.append(text)
@@ -45,23 +45,23 @@ def change(text): changes.append(text)
 # ------------------------------------------------------------------ ports $00-$05
 pm = p['port_map']['registers']
 pm['0x00'] = ('Game Gear port 0: bit 7 Start (0 = pressed), bit 6 region (1 = export), '
-              'bits 5-0 read 0. Decoded in Game Gear AND Super Sega modes.')
-pm['0x01-0x05'] = 'Game Gear serial / EXT link registers, Game Gear and Super Sega modes'
-change('Port $00 is decoded in Super Sega mode as well as Game Gear mode. v6 said GG mode '
+              'bits 5-0 read 0. Decoded in Game Gear AND MasterDrive modes.')
+pm['0x01-0x05'] = 'Game Gear serial / EXT link registers, Game Gear and MasterDrive modes'
+change('Port $00 is decoded in MasterDrive mode as well as Game Gear mode. v6 said GG mode '
        'only, but the Golden Axe conversion plan reverts Ax Battler\'s GG2SMS Start patch and '
        'relies on the stock $00 read, and the emulator already decoded it in both modes. '
        'Format corrected: bits 5-0 read 0 (the emulator returned 1s, so bit 5 reported PAL).')
-change('Ports $01-$05 (Game Gear serial/EXT link) listed explicitly for GG and Super Sega '
+change('Ports $01-$05 (Game Gear serial/EXT link) listed explicitly for GG and MasterDrive '
        'modes; v6 named the serial link under input.multiplayer but gave no ports.')
 
 p['port_map']['io_chip_disable'] = (
     '$3E bit 2 disables the controller decode (the $DC/$DD mirror across $C0-$FF) on the '
-    'Master System and on Super Sega. It has no effect on the Game Gear, even in SMS mode. '
-    'It does not affect $F2 (FM detection) or Super Sega\'s fully decoded $F0-$FF window.')
-change('$3E bit 2 scope specified: controller decode only; not on Game Gear; not $F2 or Super Sega\'s $F0-$FF.')
+    'Master System and on MasterDrive. It has no effect on the Game Gear, even in SMS mode. '
+    'It does not affect $F2 (FM detection) or MasterDrive\'s fully decoded $F0-$FF window.')
+change('$3E bit 2 scope specified: controller decode only; not on Game Gear; not $F2 or MasterDrive\'s $F0-$FF.')
 
-p['port_map']['super_sega_read_values'] = {
-    '0x07-0x16': 'decoded by the FPGA in Super Sega mode; ports with no readable register return $FF, never the controller mirror',
+p['port_map']['masterdrive_read_values'] = {
+    '0x07-0x16': 'decoded by the FPGA in MasterDrive mode; ports with no readable register return $FF, never the controller mirror',
     '0x08': 'PCM FIFO fill, bits 6-4',
     '0x09': 'slot source select, as written',
     '0x0B': 'extended card bank, as written',
@@ -73,18 +73,18 @@ p['port_map']['super_sega_read_values'] = {
     '0xFB-0xFF': ('debug unit: $FB the control value as written; $FC and $FD status (bit 7 debug host attached, '
                   'bit 6 set, bit 0 trace buffer full); $FE and $FF $FF'),
 }
-change('Read values of the Super Sega registers inside $07-$16 and $F0-$FA specified. The '
+change('Read values of the MasterDrive registers inside $07-$16 and $F0-$FA specified. The '
        'emulator answered every read in $07-$16 from the controller mirror, so the math '
        'result, slot readback and multitap detection could not be read.')
-pm['0xFB-0xFF'] = 'debug unit (see debug_facility); reads answer only in Super Sega mode'
+pm['0xFB-0xFF'] = 'debug unit (see debug_facility); reads answer only in MasterDrive mode'
 p['debug_facility']['availability'] = (
     'Writes reach the debug unit in every machine mode, since its purpose is inspecting stock software; stock '
-    'hardware ignores writes to $FB-$FF. Reads of $FB-$FF answer from the debug unit only in Super Sega mode. In the '
+    'hardware ignores writes to $FB-$FF. Reads of $FB-$FF answer from the debug unit only in MasterDrive mode. In the '
     'stock modes they read as on the stock machine (the controller mirror; $FF on the Game Gear), because stock '
     'software may read its pads there.')
-p['debug_facility']['read_values'] = p['port_map']['super_sega_read_values']['0xFB-0xFF']
+p['debug_facility']['read_values'] = p['port_map']['masterdrive_read_values']['0xFB-0xFF']
 change('Debug unit port reads: in the stock modes $FB-$FF read as on the stock machine (the controller mirror; $FF '
-       'on the Game Gear), and the debug unit answers reads only in Super Sega mode, which therefore decodes $F0-$FF '
+       'on the Game Gear), and the debug unit answers reads only in MasterDrive mode, which therefore decodes $F0-$FF '
        'fully. Writes reach the debug unit in every mode, as before. The emulator answered $FB-$FD reads in every '
        'mode, so stock software reading its pads at those mirror addresses saw the debug status instead.')
 
@@ -109,24 +109,24 @@ change(LATER + 'Port map corrected to match the Technical Reference and both imp
        'SK-1100 keyboard is live, when the PPI answers there (v6 named only the PPI).')
 
 put_after(p['port_map'], 'mirror_scheme', 'mode_scope', (
-    'Writes to the Super Sega registers at 0x07-0x16 take effect only in Super Sega mode, as do writes to VDP '
-    'bank 0 R11-R15 (vdp_registers.bank_0_scope). 0x06 is a register in the Super Sega and Game Gear modes. In '
+    'Writes to the MasterDrive registers at 0x07-0x16 take effect only in MasterDrive mode, as do writes to VDP '
+    'bank 0 R11-R15 (vdp_registers.bank_0_scope). 0x06 is a register in the MasterDrive and Game Gear modes. In '
     'every other mode these ports and registers do what they do on the stock machine.'))
 p['port_map']['open_risk'] = (
-    'Super Sega registers at 0x06-0x16 sit inside that mirror range and must be decoded specifically, as the '
-    'Game Gear already does. Because they are decoded only in Super Sega mode (mode_scope), stock software '
-    'running in its own mode is unaffected. The risk is old code running in Super Sega mode - a retagged or '
-    'converted title, or a stock cartridge started in Super Sega mode as software_detection option 2 '
-    'proposes - that writes a mirror address in 0x06-0x16 instead of 0x3E/0x3F: it reaches a Super Sega '
+    'MasterDrive registers at 0x06-0x16 sit inside that mirror range and must be decoded specifically, as the '
+    'Game Gear already does. Because they are decoded only in MasterDrive mode (mode_scope), stock software '
+    'running in its own mode is unaffected. The risk is old code running in MasterDrive mode - a retagged or '
+    'converted title, or a stock cartridge started in MasterDrive mode as software_detection option 2 '
+    'proposes - that writes a mirror address in 0x06-0x16 instead of 0x3E/0x3F: it reaches a MasterDrive '
     'register instead. Documentation calls mirror use highly unrecommended for homebrew, which implies '
     'commercial software does it. NOT YET RESOLVED - candidate fix is to relocate these registers above 0xF0 '
     '(open question Q1).')
 put_after(p['vdp_registers'], 'bank_0', 'bank_0_scope', (
-    'Registers 11-15 take effect only in Super Sega mode; in the other modes they are ignored, as on the '
+    'Registers 11-15 take effect only in MasterDrive mode; in the other modes they are ignored, as on the '
     'stock VDP.'))
-change(LATER + 'Writes to $07-$16 and to VDP bank 0 R11-R15 stated to take effect only in Super Sega mode '
+change(LATER + 'Writes to $07-$16 and to VDP bank 0 R11-R15 stated to take effect only in MasterDrive mode '
        '(port_map.mode_scope, vdp_registers.bank_0_scope), as both implementations do. Q1 and '
-       'port_map.open_risk now name the case at risk: old code running in Super Sega mode that writes a '
+       'port_map.open_risk now name the case at risk: old code running in MasterDrive mode that writes a '
        '$3E/$3F mirror address in $06-$16. They said any old title.')
 
 # ------------------------------------------------------------------ colour
@@ -146,7 +146,7 @@ change('Native 12-bit CRAM write order specified as the Game Gear byte-latch sch
 p['audio']['fm']['audio_control'] = {
     'write': '$F2 bits 1-0 select the mute/enable state',
     'read': '$F2 returns bits 1-0 of the last value written (bits 7-5 carry a C-sync '
-            'counter on the Japanese SMS; Super Sega returns 0 there)',
+            'counter on the Japanese SMS; MasterDrive returns 0 there)',
     'detection': 'Software disables the I/O chip ($3E bit 2) before reading $F2 so the '
                  'controller decode does not drive the bus; the FM latch must still answer.',
     'source': 'MAME sms.cpp smsj_audio_control_r',
@@ -157,7 +157,7 @@ change('$F2 readback specified, including that it works with the I/O chip disabl
 # ------------------------------------------------------------------ stock behaviour
 p['stock_behaviour'] = {
     'note': ('Behaviour of the stock parts that every implementation must reproduce. These '
-             'are not Super Sega additions; they are listed because the emulator had them '
+             'are not MasterDrive additions; they are listed because the emulator had them '
              'wrong until October 2026 and the Pocket core is verified against it.'),
     'cpu': {
         'halt': 'An interrupt taken in HALT returns to the instruction after HALT.',
@@ -206,7 +206,7 @@ p['stock_behaviour'] = {
         'line_counter': ('On lines 0 to height inclusive (one line past the display) the counter counts down; '
                          'on reaching 0 it reloads from R10 and raises the line interrupt. On other lines it is '
                          'reloaded from R10. Mode 4 only as stock (TMS modes raise no line interrupt); whether '
-                         'Super Sega runs it in the TMS modes is open question Q15.'),
+                         'MasterDrive runs it in the TMS modes is open question Q15.'),
         'line_timing': '228 CPU cycles per line, 262 lines NTSC, 313 PAL; the overrun of the last instruction of a line belongs to the next line.',
     },
     'psg': {
@@ -218,12 +218,12 @@ p['stock_behaviour'] = {
     },
     'io': {
         'low_port_reads': ('Reads of $00-$3F return $FF on the Master System, and on the Game Gear and '
-                           'Super Sega for every port they do not decode as a register.'),
+                           'MasterDrive for every port they do not decode as a register.'),
         'tr_readback': ('A TR pin configured as an output ($3F bit 0 or 2 clear) reads back the level '
                         'driven: $DC bit 5 for port A, $DD bit 3 for port B.'),
         'game_gear_decode': ('Above $C0 the Game Gear answers only $C0/$DC (port A) and $C1/$DD (port B, '
                              'with bits 7-6 = $3F bits 7-6); every other port reads $FF, $F2 included (no FM).'),
-        'fm_latch': 'The $F2 FM detection latch answers in Master System and Super Sega modes only.',
+        'fm_latch': 'The $F2 FM detection latch answers in Master System and MasterDrive modes only.',
         'source': 'Gearsystem SmsIOPorts / GameGearIOPorts',
     },
     'verification': ('Batman Returns (Europe) SMS in PAL at frames 30, 60, 120, 200, 500, 900 and 1500, and Batman '
@@ -280,15 +280,15 @@ change('Cartridge reach and save-RAM size recorded as open, with the facts that 
 # ------------------------------------------------------------------ software detection
 p['software_detection'] = {
     'status': 'OPEN',
-    'question': ('How does one ROM tell, at run time, that it is on a Super Sega? Extended '
-                 'features are reachable only in Super Sega mode, which the header region '
+    'question': ('How does one ROM tell, at run time, that it is on a MasterDrive? Extended '
+                 'features are reachable only in MasterDrive mode, which the header region '
                  '(8) selects, and an export SMS BIOS refuses region 8. A single ROM for both '
                  'machines therefore cannot use region 8.'),
     'options': [
         'Two ROMs from one source (what the Super Mario Land DX port does now).',
-        'A boot-menu option to run a region-4 cartridge in Super Sega mode, plus a read-only '
+        'A boot-menu option to run a region-4 cartridge in MasterDrive mode, plus a read-only '
         'machine ID register the ROM can test.',
-        'An unlock sequence that switches a running region-4 title into Super Sega mode.',
+        'An unlock sequence that switches a running region-4 title into MasterDrive mode.',
     ],
     'source': 'Super Mario Land DX port design, distribution question',
 }
@@ -366,7 +366,7 @@ change('Stock behaviour extended: sprite Y wrap rule (Gearsystem/MAME), 224/240-
        'per-line VDP event timing, PSG noise rate and 2 dB volume steps, low-port reads, TR '
        'readback and Game Gear port decoding. The emulator had the noise an octave high, a '
        'linear volume curve, the controller mirror answering $00-$3F, and no TR readback.')
-change(LATER + 'The $F2 FM detection latch answers only in Master System and Super Sega modes '
+change(LATER + 'The $F2 FM detection latch answers only in Master System and MasterDrive modes '
        '(stock_behaviour.io.fm_latch); the emulator answered in the Game Gear, SC-3000 and SF-7000 modes too. The '
        'package made this change without listing it here.')
 
@@ -395,7 +395,7 @@ p['cpu']['turbo']['enable'] = ('Feature Enable A bit 6 - off at reset. A write t
 jobs = p['fpga_partition']['fpga_jobs']
 if not any('debug' in j.lower() for j in jobs):
     jobs.insert(jobs.index('video compositing and output') if 'video compositing and output' in jobs else len(jobs), 'debug unit')
-p['input']['keyboard']['enable'] = ('Feature Enable C bit 5 on Super Sega; always live in SG-1000 (keyboard attached), '
+p['input']['keyboard']['enable'] = ('Feature Enable C bit 5 on MasterDrive; always live in SG-1000 (keyboard attached), '
                                     'SC-3000 and SF-7000 modes')
 p['input']['keyboard']['port_c_readback'] = 'Reading port C returns its output latch: the last value written, or 0 after a mode word.'
 p['debug_facility']['trace_buffer'] = ('FPGA-side, mirrored to FRAM on a fault, so it outlives the crash that destroyed '
@@ -442,17 +442,17 @@ p['enhancement_layer'] = {
                 'emulator from its AEL panel, on the Analogue Pocket core from the core settings '
                 '(Interact) menu.'),
     'precedence': ('Explicit software intent wins. Every boost acts only on software running in the stock modes '
-                   '(SG-1000, SC-3000, Master System, Game Gear): Super Sega software sets these features itself and '
+                   '(SG-1000, SC-3000, Master System, Game Gear): MasterDrive software sets these features itself and '
                    'reads C as a button of its own. Pseudo-stereo also stops once software writes $06. Start = Pause '
                    'applies in the Master System, SG-1000 and SC-3000 modes (the Game Gear has a Start button of its own). '
-                   'The TMS colour boost is the one exception: it also acts on Super Sega software\'s TMS modes (Q11).'),
+                   'The TMS colour boost is the one exception: it also acts on MasterDrive software\'s TMS modes (Q11).'),
     'boosts': {
         'sprite_limit': '16 sprites per line instead of 8 in Mode 4, and instead of 4 in the TMS modes.',
         'overflow_stock': ('With the raised limit, status bit 6 is still set by a 9th sprite on a line, for software that '
                            'reads it as logic. Mode 4 only: in the TMS modes it has no effect.'),
         'start_pause': 'Start on the pad raises the Pause NMI (SMS, SG-1000, SC-3000 modes).',
         'turbo': ('A turbo step (125-200 %) for stock software in the SMS, GG, SG-1000 and SC-3000 modes. '
-                  'Super Sega software sets its own step through $F3.'),
+                  'MasterDrive software sets its own step through $F3.'),
         'vram_boost': 'No VDP access wait (bus synchroniser bypassed) while a turbo step is active.',
         'autofire': ('While C is held, button 2 repeats: it toggles every two frames (15 Hz at 60 Hz). '
                      'The pad state itself is not changed, so releasing C leaves button 2 as the pad has it.'),
@@ -478,8 +478,8 @@ change(LATER + 'The enhancement-layer design document the profile cites (SuperSe
 p['open_questions'] = [
     {'id': 'Q1', 'topic': 'Port mirror range', 'status': 'open',
      'detail': ('Registers $06-$16 sit in the $3E/$3F mirror range. Stock software in its own mode is unaffected '
-                '(port_map.mode_scope); the risk is old code running in Super Sega mode - a retagged or converted '
-                'title, or a stock cartridge started in Super Sega mode (software_detection option 2) - that '
+                '(port_map.mode_scope); the risk is old code running in MasterDrive mode - a retagged or converted '
+                'title, or a stock cartridge started in MasterDrive mode (software_detection option 2) - that '
                 'writes a $3E/$3F mirror address in $06-$16. Relocation above $F0 is the candidate fix.')},
     {'id': 'Q2', 'topic': 'Maximum ROM size and mapper layout above 4 MB', 'status': 'open',
      'detail': 'See media.cartridge_slot.sega_mapper_reach.'},
@@ -491,7 +491,7 @@ p['open_questions'] = [
      'detail': 'Coupled: unique-cell mode requires VRAM expansion (Feature Enable B bit 4).'},
     {'id': 'Q6', 'topic': 'Turbo default for retagged ROMs', 'status': 'resolved',
      'detail': ('Off at reset. A title enables it itself (Feature Enable A bit 6, then $F3). The enhancement '
-                'layer\'s turbo boost is for unmodified software in the stock modes and does not apply to Super Sega titles.')},
+                'layer\'s turbo boost is for unmodified software in the stock modes and does not apply to MasterDrive titles.')},
     {'id': 'Q7', 'topic': 'Math unit divide', 'status': 'open', 'detail': 'See math_unit.divide_open.'},
     {'id': 'Q8', 'topic': 'Run-time machine detection', 'status': 'open', 'detail': 'See software_detection.'},
     {'id': 'Q9', 'topic': 'Work RAM bank readback at $0A', 'status': 'open',
@@ -500,7 +500,7 @@ p['open_questions'] = [
      'detail': 'A hack-maker workflow, not a machine question; listed so it is not lost.'},
     {'id': 'Q11', 'topic': 'Default of the TMS colour boost', 'status': 'resolved',
      'detail': ('Decided by the owner in October 2026: true TMS9918 colours are on at power-on, the one '
-                'exception to every boost starting off, and the boost also acts on the TMS modes of Super Sega '
+                'exception to every boost starting off, and the boost also acts on the TMS modes of MasterDrive '
                 'software. The emulator already did both; the Pocket core does the same.')},
     {'id': 'Q13', 'topic': 'Feature Enable C bit 4 (ESAT 2-byte)', 'status': 'open',
      'detail': ('ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still '
@@ -514,12 +514,12 @@ p['open_questions'] = [
                 'emulator applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only '
                 'software running at 200 %.')},
     {'id': 'Q15', 'topic': 'Line interrupts in the TMS9918 (legacy) modes', 'status': 'open',
-     'detail': ('v5 made line interrupts in the legacy modes a Super Sega enhancement '
+     'detail': ('v5 made line interrupts in the legacy modes a MasterDrive enhancement '
                 '(video.legacy_modes.enhancements.line_interrupts), but no enable bit was ever assigned; as stock, '
                 'TMS modes raise none (stock_behaviour.vdp.line_counter), and both implementations follow that in '
-                'the stock modes. In Super Sega mode both raise them in the TMS modes whenever R0 bit 4 is set. '
+                'the stock modes. In MasterDrive mode both raise them in the TMS modes whenever R0 bit 4 is set. '
                 'Should the line counter run in the legacy '
-                'modes on Super Sega, and what enables it?')},
+                'modes on MasterDrive, and what enables it?')},
     {'id': 'Q16', 'topic': 'Register layouts defined only by the emulator', 'status': 'open',
      'detail': ('The bit layouts of the DMA engine ($F4-$FA), PCM control ($08 write), the wavetable ($11-$15), '
                 'slot select ($09), the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the '
@@ -559,7 +559,7 @@ p['open_questions'] = [
                 'because their turbo is a multiple of the base clock. Should PAL turbo be those, or the NTSC '
                 'frequencies?')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
-     'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
+     'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for MasterDrive software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
                 'is selected. Should the machine apply them in the TMS modes, and if so, what do those modes '
                 'draw below line 192?')},
@@ -579,7 +579,7 @@ le['enable'] = ('OPEN - no enable bit is defined, and whether the line counter r
                 'undecided (open question Q15)')
 p['compatibility']['sg_software'] = (
     'An unmodified SG-1000 ROM renders with the fixed TMS palette, 4 sprites per line and no line interrupts, '
-    'exactly as on real hardware, until Feature Enable C bits 0-1 are set. Whether Super Sega software can '
+    'exactly as on real hardware, until Feature Enable C bits 0-1 are set. Whether MasterDrive software can '
     'enable line interrupts in the legacy modes is open question Q15.')
 order = p['implementation_order']
 order[[i for i, s in enumerate(order) if s.startswith('11. ')][0]] = (
@@ -623,7 +623,7 @@ change(LATER + 'The TMS9918 modes written down (video.legacy_modes: tables, tran
        'gives the mode bits instead of claiming real-hardware behaviour for every combination. Open questions Q18 '
        '(status bits 4-0, transparent sprites) and Q19 (several mode bits at once) added.')
 change(LATER + 'Q11 resolved by the owner: True TMS colours is on at power-on, the one exception to every boost '
-       'starting off, and it also acts on Super Sega software\'s TMS modes. enhancement_layer.default and '
+       'starting off, and it also acts on MasterDrive software\'s TMS modes. enhancement_layer.default and '
        'precedence say so. The sprite-limit boost now says what both implementations do in the TMS modes '
        '(4 -> 16); it said "4 -> 8 or 16". The stock-overflow-flag boost is stated to act in Mode 4 only.')
 
@@ -657,7 +657,7 @@ p['input']['stock_mapping'] = (
     'the Pause button on the Master System, SG-1000 and SC-3000 (enhancement_layer start_pause, on at power-on). '
     'C is used only by the auto-fire boost. A Mega Drive pad plugged into a Master System gives B and C as '
     'buttons 1 and 2; the console uses A and B so that the pad\'s first two buttons are the old consoles\' two. '
-    'Super Sega software reads the pad as a Mega Drive pad (controller). Decided by the owner, October 2026.')
+    'MasterDrive software reads the pad as a Mega Drive pad (controller). Decided by the owner, October 2026.')
 p['enhancement_layer']['default'] = (
     'Every boost but two is off at power-on, so the machine behaves as stock hardware: True TMS colours starts on, '
     'so SG-1000 and SC-3000 software shows the colours it was made for (Q11), and Start = Pause starts on, because '
@@ -674,11 +674,33 @@ change(LATER + 'Stock-mode controller mapping decided by the owner (input.stock_
 change(LATER + 'Open question Q22 added: the turbo frequencies in PAL. Both implementations run the turbo '
        'steps as percentages of the PAL clock (cpu.turbo.clock_generation).')
 
+change(LATER + 'The machine is renamed MasterDrive (formerly Super Sega), the owner\'s choice: an all-in-one Sega 8-bit '
+       'computer and console concept, with updates. Every name in the profile follows, the machine id and two keys '
+       'included (video.mode4.height_selection.masterdrive, port_map.masterdrive_read_values).')
+
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body
 p['open_questions'].sort(key=lambda q: int(q['id'][1:]))
 front = ['$schema', 'supersedes', 'scope', 'glossary', 'v7_changes']
 out = {k: p[k] for k in front}
 out.update({k: v for k, v in p.items() if k not in front})
+
+# The machine was called Super Sega until October 2026. Every name inherited from
+# v6 is renamed here, so the profile comes out the same from v6 or from itself.
+# (The old name is built from parts so that a search for it finds only history.)
+OLD = 'Super' + ' Sega'
+OLD_KEY = 'super' + '_sega'
+OLD_ID = 'SUPER' + '_SEGA'
+def renamed(o):
+    if isinstance(o, dict):
+        return {(k.replace(OLD_KEY, 'masterdrive') if k != 'supersedes' else k): renamed(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [renamed(v) for v in o]
+    if isinstance(o, str):
+        if o == OLD_ID:
+            return 'MASTERDRIVE'
+        return re.sub(r'(?<!formerly )' + OLD, 'MasterDrive', o)
+    return o
+out = renamed(out)
 json.dump(out, open(dst, 'w'), indent=1, ensure_ascii=False)
 print(f'{len(changes)} changes; sections: {len(p)}')

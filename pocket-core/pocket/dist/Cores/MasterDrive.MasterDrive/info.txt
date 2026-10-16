@@ -1,13 +1,13 @@
-Super Sega 8-bit machine core (milestone 1, untested on hardware).
+MasterDrive 8-bit machine core (milestone 1, untested on hardware).
 
 Runs Master System, Game Gear, SG-1000 and SC-3000 software on the Super
 Sega machine model: Z80, VDP (Mode 4 at 192/224/240 lines, Game Gear CRAM,
 the four TMS9918 picture modes), PSG, the FM unit (a YM2413, as IKAOPLL) in
-Master System and Super Sega modes, Sega, Codemasters and Korean mappers,
-cartridge saves. Super Sega titles run, but ESAT, the window and text
+Master System and MasterDrive modes, Sega, Codemasters and Korean mappers,
+cartridge saves. MasterDrive titles run, but ESAT, the window and text
 layers, line tables and unique-cell mode are not drawn yet.
 
-ROMs go in /Assets/supersega/common/. The Pocket's buttons are the
+ROMs go in /Assets/masterdrive/common/. The Pocket's buttons are the
 console's Mega Drive pad: A = A, B = B, Y = C, Start = Start. Master System
 and Game Gear games read A as button 1 and B as button 2; Start pauses
 (Game Gear: Start), Select = Pause too, and Y is auto-fire for button 2
@@ -17,6 +17,6 @@ Settings > Controls. A docked USB keyboard is the SC-3000 SK-1100 keyboard.
 Boost options in the core settings are the machine's enhancement layer. All
 but True TMS colours and Start = Pause are off by default, and they
 act only on Master System, Game Gear, SG-1000 and SC-3000 software (True
-TMS colours also acts on Super Sega titles' TMS9918 modes).
+TMS colours also acts on MasterDrive titles' TMS9918 modes).
 
 Licence: MIT (LICENSE.txt). Third-party licences: the LICENSE-*.txt files.
