@@ -2318,7 +2318,8 @@ class Machine{
       p0:this.page[0],p1:this.page[1],p2:this.page[2],ramSel:this.ramSel,
       wramBank:this.wramBank,slotSel:this.slotSel,cardBank:this.cardBank,fmReg:this.fmReg,
       ei:C.eiPend,lc:this.lineCarry||0,hl:V.hsLatch,vl:V.vsLatch,
-      lva:this.lastVdpAccess,lfm:this.lastFm,lfd:this.lastFmData};   /* the bus synchroniser's references */
+      lva:this.lastVdpAccess,lfm:this.lastFm,lfd:this.lastFmData,    /* the bus synchroniser's references */
+      tb:this.turbo};                                                 /* and the $F3 step they are scaled for */
   }
   restoreFrom(s){
     this.ram.set(s.ram); this.wram.set(s.wram); this.vdp.vram.set(s.vram); this.vdp.cram.set(s.cram);
@@ -2330,7 +2331,7 @@ class Machine{
     this.page[0]=o.p0;this.page[1]=o.p1;this.page[2]=o.p2;this.ramSel=o.ramSel;
     this.wramBank=o.wramBank;this.slotSel=o.slotSel;this.cardBank=o.cardBank;this.fmReg=o.fmReg;
     C.eiPend=o.ei;this.lineCarry=o.lc;V.hsLatch=o.hl;V.vsLatch=o.vl;
-    this.lastVdpAccess=o.lva;this.lastFm=o.lfm;this.lastFmData=o.lfd;
+    this.lastVdpAccess=o.lva;this.lastFm=o.lfm;this.lastFmData=o.lfd;this.turbo=o.tb;
   }
   /* Dual-run capture: execute the game's own sound driver twice, once with the FM
      unit reported present and once absent, so BOTH native soundtracks are obtained.
