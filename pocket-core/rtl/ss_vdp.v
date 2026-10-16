@@ -874,7 +874,9 @@ module ss_vdp (
     // video out: line N is shown during VDP line N+2
     // =====================================================================
     // Raster: 342 pixels per line (228 base cycles x 1.5); active 256 pixels from
-    // pixel PX_ACTIVE. The composite of line N starts at line N's render event and
+    // pixel PX_ACTIVE. Pixels leave on ce_pix, which is never held; in PAL, where
+    // machine time is held one clock in 109.63 (ss_top), a line lasts 345 or 346
+    // pixel enables, and the output waits at pixel 341 for the next line start. The composite of line N starts at line N's render event and
     // can run into line N+1 (up to ~80 pixels with 16 magnified sprites), so the
     // output ring holds four lines and line N is read a whole line later, during
     // VDP line N+2. Nothing the CPU sees depends on this delay.
@@ -882,8 +884,9 @@ module ss_vdp (
     localparam PX_ACTIVE = 9'd64;
     wire [8:0] out_ln = (ln >= 9'd2) ? ln - 9'd2 : ln + lines - 9'd2;
     wire [8:0] px_rel = px - PX_ACTIVE;
-    // registered read of the output ring; px is stable for ten clocks before
-    // each pixel enable, so ol_q always holds the pixel at px
+    // registered read of the output ring; px changes only on a pixel enable or at
+    // a line start (outside the active area), so at every pixel enable in the
+    // active area ol_q holds the pixel at px
     reg [11:0] ol_q;
     always @(posedge clk) ol_q <= out_line[{out_ln[1:0], px_rel[7:0]}];
 
@@ -892,7 +895,6 @@ module ss_vdp (
             px <= 9'd0; vid_de <= 1'b0; vid_hs <= 1'b0; vid_vs <= 1'b0; vid_rgb <= 12'h000;
             vid_frame <= 1'b0;
         end else begin
-            if (ce_cyc && hc == 8'd227) px <= 9'd0;           // realign at each line start
             if (ce_pix) begin
                 vid_hs <= 1'b0; vid_vs <= 1'b0; vid_frame <= 1'b0; vid_de <= 1'b0; vid_rgb <= 12'h000;
                 if (px < 9'd341) px <= px + 9'd1;
@@ -910,6 +912,9 @@ module ss_vdp (
                     end
                 end
             end
+            // each output line starts at the VDP's line start; this wins over a
+            // pixel enable in the same clock
+            if (ce_cyc && hc == 8'd227) px <= 9'd0;
         end
     end
 

@@ -28,7 +28,7 @@ The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in eit
 | Sound | PSG with stereo, and the FM unit (the YM2413, as IKAOPLL) in Master System and Super Sega modes, with the four `$F2` states (PSG only, FM only, neither, both). Games that check for FM find it and play their FM music. FM is checked with a test ROM in simulation, not yet with games. No PCM/wavetable |
 | Saves | cartridge RAM saved to the SD card (32 KB `.sav`). Save states would be a feature of the Pocket platform layer, not of the machine, and are not planned in this milestone |
 | Enhancement-layer boosts | sprite limit (Mode 4 and the TMS modes), stock overflow flag, turbo, VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop — all off by default — and True TMS colours (Q11) and Start = Pause (the pad has no Pause button), on by default. All are switchable in the settings menu and act only on Master System, Game Gear, SG-1000 and SC-3000 software, except True TMS colours, which also acts on Super Sega software's TMS modes |
-| Not yet | PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, the PAL CPU clock (§3), sleep |
+| Not yet | PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, sleep |
 
 ## 3. Clocks
 
@@ -42,7 +42,7 @@ One PLL from the Pocket's 74.25 MHz reference makes three clocks from a single V
 
 Inside the machine everything runs on `clk_sys` with clock enables: the CPU enable (every 15 clocks at 100 %, or a fractional accumulator for the turbo steps), the base-cycle enable for the VDP's timing and the FM chip's master clock, the PSG enable (÷16), and the pixel enable (÷10). Because the three PLL outputs share a VCO, the video stage samples the machine's video registers directly; the constraints keep the three clocks in one group so those paths are timed rather than cut.
 
-**PAL.** The machine's PAL CPU clock is 3.546893 MHz (Technical Reference §1). The Pocket core uses the NTSC master clock in PAL mode too, so PAL frames run at 50.16 Hz instead of the PAL console's 49.70 Hz (0.9 % fast). A second PLL setting would fix it; not done.
+**PAL.** The machine's PAL CPU clock is 3.546893 MHz (Technical Reference §1). The clocks above stay as they are; instead, in PAL the machine's time stands still for one `clk_sys` in every 109.63 (32,652 in every 3,579,545, an exact accumulator in `ss_top`). Every base cycle is then 15 or 16 `clk_sys`, 3.546893 MHz on average with no drift, and everything that counts base cycles or machine clocks runs at the PAL rate: the CPU and turbo (so the turbo steps become the same percentages of the PAL clock, open question Q22), the VDP's timing, the PSG and the FM chip. Frames come at 49.70 a second. The pixel enable is never held, so pixels still leave at the fixed 5.369318 MHz pixel clock: the VDP starts each output line at its own line start, and a PAL line is 345 or 346 pixel clocks (§7). The TV standard is taken only while the machine is in reset, and changing the Video setting restarts it (§10). The alternative, a second PLL setting, would change the clocks the Pocket's video scaler and the constraints see and could not be simulated here; it remains the fallback if the scaler does not accept the uneven PAL lines (`ss_top`'s `PAL_LINE_LOCK = 1` would first try lines of exactly 345, 0.04 % fast).
 
 ## 4. Memory
 
@@ -83,7 +83,7 @@ SG-1000/SC-3000 cartridge RAM is not battery-backed and is not saved.
 
 | | |
 |---|---|
-| Line | 342 pixels at 5.369318 MHz (228 CPU cycles × 1.5) |
+| Line | 342 pixels at 5.369318 MHz (228 CPU cycles × 1.5); in PAL 345 or 346 pixel clocks, the picture still 342 pixels (§3) |
 | Active picture | 256 pixels from pixel 64; Game Gear window 160 × 144 (lines 24–167, pixels 48–207) |
 | Latency | the VDP draws line N into a four-line ring buffer; it leaves during VDP line N + 2 |
 | Sync | VS: one pixel at the start of VDP line *height* + 2; HS: one pixel at pixel 4 of every line |
@@ -147,7 +147,7 @@ All settings are marked to persist, so the Pocket keeps them between sessions. B
 | Reset | action |
 | System | Auto, Master System, Game Gear, Super Sega, SG-1000, SC-3000 |
 | Region | Export, Japan |
-| Video | NTSC 60 Hz, PAL 50 Hz |
+| Video | NTSC 60 Hz, PAL 50 Hz; a change restarts the machine on the new standard |
 | Mapper | Sega, Codemasters, Korean, Korean MSX |
 | Boost: Sprites/line | Stock (8; 4 in the TMS modes), 16, 16 with the stock overflow flag (a ninth sprite; Mode 4 only) |
 | Boost: CPU turbo | Off, 125 %, 150 %, 175 %, 200 % (stock software; Super Sega titles set their own) |
@@ -211,6 +211,7 @@ Everything below is simulation (Verilator 5.020, iverilog) except the last row, 
 | I/O test ROM (`roms/ports.sms`): 18 ports read in Master System, Game Gear and Super Sega modes, idle and with button 1 held | RTL = emulator, except `$FC`/`$FD` bit 7 in Super Sega mode (no debug host) |
 | FM test ROM (`roms/fm.sms`): a PSG tone (440.4 Hz) and an FM sine (user instrument, 1001.4 Hz) while `$F2` steps through 0, 1, 3, 2, 0, captured at 48 kHz and checked by `tools/check_fm_wav.py` | each chip heard exactly in the `$F2` states that select it, on both sides; FM pitch 1001.4 Hz; FM ÷ PSG fundamental 0.390 (planned 0.391); in Game Gear mode the PSG alone in every state |
 | FM at turbo (`roms/fm_tight.sms`): the same sounds with a driver that leaves the chip little more than its minimum time at 100 %, run at 200 % turbo | as `fm.sms`: the bus synchroniser holds the FM writes (without the hold, no FM at all) |
+| PAL: frame timing, sound and video (`tb_ss -pal`, `tb_pocket -set 108 1`, `check_fm_wav.py --pal`) | frames every 1,080,310–1,080,320 `clk_sys` (49.70 Hz), NTSC exactly 896,040 (59.92 Hz); base cycles every 15 or 16 clocks in PAL, 15 in NTSC, pixels every 10, CPU enables never on consecutive clocks (an enable check in `ss_top`, simulation only); PSG 436.4 Hz and FM 992.2 Hz in PAL, also at 200 % turbo; through the Pocket layer PAL lines of 345 or 346 pixel clocks, 313 a frame, the same picture as the machine simulation; a switch from PAL to NTSC mid-frame restarts the machine with no frame longer than 313 lines |
 | Auto-fire with C held (`-afire -holdc`) | button 2 toggles every two frames in Master System mode; no effect in Super Sega mode |
 | Pocket buttons held, Master System and Super Sega modes (`tb_pocket -hold`) | Master System: A reads as button 1 and B as button 2; Super Sega: B reads as button 1 (the pad's B with TH high) and A only through the TH multiplex. `sim/check.sh` checks all three |
 | Verilator lint of `core_top` with the APF's `core_bridge_cmd` (project tree from `pocket/setup.sh`) | elaborates; only style warnings, the substantive ones in the template's own code |
@@ -231,7 +232,7 @@ Not yet done: anything on hardware.
 2. Super Sega render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
 3. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
 4. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
-5. Cartridge wait state at 200 % (Q12), PAL clock, a proper audio decimation filter.
+5. Cartridge wait state at 200 % (Q12), a proper audio decimation filter.
 
 ## 16. Decisions needed
 

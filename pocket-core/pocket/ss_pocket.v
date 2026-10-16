@@ -112,7 +112,12 @@ module ss_pocket (
                 12'h0F0: reset_req <= 8'hFF;
                 12'h100: set_system  <= bridge_wr_data[2:0];
                 12'h104: set_region  <= bridge_wr_data[0];
-                12'h108: set_pal     <= bridge_wr_data[0];
+                12'h108: begin
+                    set_pal <= bridge_wr_data[0];
+                    // a change restarts the machine on the new standard (it is
+                    // latched only in reset, below)
+                    if (bridge_wr_data[0] != set_pal) reset_req <= 8'hFF;
+                end
                 12'h10C: set_mapper  <= bridge_wr_data[1:0];
                 12'h110: set_ggfull  <= bridge_wr_data[0];
                 12'h114: set_spr     <= bridge_wr_data[1:0];
@@ -204,8 +209,12 @@ module ss_pocket (
     wire        s_dl      = ss2[1];
     wire        s_loaded  = ss2[0];
 
+    // The reset request is a count in clk_74a; one flip-flop there gives the
+    // synchroniser a single clean bit (a change of the Video setting now uses it).
+    reg       rst_ok_74 = 1'b0;
+    always @(posedge clk_74a) rst_ok_74 <= apf_reset_n && (reset_req == 8'd0);
     reg [2:0] rst_sync;
-    always @(posedge clk_sys) rst_sync <= {rst_sync[1:0], apf_reset_n && pll_locked && (reset_req == 8'd0)};
+    always @(posedge clk_sys) rst_sync <= {rst_sync[1:0], rst_ok_74 && pll_locked};
     wire sys_reset_n = rst_sync[2];
 
     // =====================================================================
@@ -297,6 +306,9 @@ module ss_pocket (
     // the machine
     // =====================================================================
     wire        m_reset = !sys_reset_n || s_dl || !s_loaded;
+    // the TV standard is part of the machine: it changes only in reset
+    reg         m_pal = 1'b0;
+    always @(posedge clk_sys) if (m_reset) m_pal <= s_pal;
     wire        rom_req;
     wire [23:0] rom_addr;
     reg         rom_ack;
@@ -317,7 +329,7 @@ module ss_pocket (
 
     ss_top u_machine (
         .clk_sys(clk_sys), .reset(m_reset),
-        .mode(mode), .mapper(s_mapper), .pal(s_pal), .jp_region(s_region),
+        .mode(mode), .mapper(s_mapper), .pal(m_pal), .jp_region(s_region),
         .timing_gg(1'b1), .sc_ram32(s_scram32),
         .rom_mask(s_rommask), .card_present(1'b0), .card_mask(19'd0),
         .gg_crop(mode == 3'd1 && !s_ggfull),
@@ -558,9 +570,11 @@ module ss_pocket (
     // video: into the pixel clock domain
     // =====================================================================
     // clk_vid is clk_sys / 10 from the same PLL. The machine's video registers
-    // change once per 10 clk_sys cycles (on vid_ce), so every clk_sys -> clk_vid
-    // path has at least one clk_sys period; the two clocks are constrained as
-    // related, not asynchronous (core_constraints.sdc).
+    // change once per 10 clk_sys cycles (on vid_ce, which PAL never holds), so
+    // every clk_sys -> clk_vid path has at least one clk_sys period; the two
+    // clocks are constrained as related, not asynchronous (core_constraints.sdc).
+    // A PAL line is 345 or 346 pixel clocks (ss_top: machine time is held one
+    // clock in 109.63); the scaler sees regular DE, HS and VS otherwise.
     reg [11:0] v_bgr;
     reg        v_de, v_hs, v_vs;
     always @(posedge clk_vid) begin

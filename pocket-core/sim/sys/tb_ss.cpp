@@ -163,6 +163,21 @@ int main(int argc, char** argv) {
             }
         }
 
+        // frame timing: clk_sys and base cycles between VS pulses
+        if (t->vid_ce && t->vid_vs) {
+            static uint64_t vs_sys = 0; static uint32_t vs_cyc = 0; static long nvs = 0;
+            static uint64_t mn = ~0ull, mx = 0, tot = 0; static uint32_t cmn = ~0u, cmx = 0; static long nmeas = 0;
+            if (nvs >= 2) {
+                uint64_t d = sys - vs_sys; uint32_t c = t->dbg_cycles - vs_cyc;
+                if (d < mn) mn = d; if (d > mx) mx = d; if (c < cmn) cmn = c; if (c > cmx) cmx = c;
+                tot += d; nmeas++;
+                if (frame + 1 == frames)
+                    printf("frame timing over %ld frames: clk_sys %llu-%llu (mean %.3f, %.4f Hz at 53693175), base cycles %u-%u\n",
+                           nmeas, (unsigned long long)mn, (unsigned long long)mx, (double)tot / nmeas,
+                           53693175.0 * nmeas / tot, cmn, cmx);
+            }
+            vs_sys = sys; vs_cyc = t->dbg_cycles; nvs++;
+        }
         // video capture
         if (t->vid_ce) {
             if (t->vid_vs) {
@@ -202,6 +217,7 @@ int main(int argc, char** argv) {
         fclose(wav_f);
     }
     printf("frames %ld sys %llu dumped %ld traced %ld\n", frame, (unsigned long long)sys, dumped, traced);
+    t->final();
     delete t;
     return 0;
 }

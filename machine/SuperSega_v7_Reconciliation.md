@@ -34,7 +34,7 @@ Work on Super Sega has happened in several chats: the machine design itself, the
 
 ## 2. Machine changes in v7
 
-All are recorded in the profile's `v7_changes` (20 entries in the package, 42 now; §7 lists the later changes). The ones that change behaviour:
+All are recorded in the profile's `v7_changes` (20 entries in the package, 43 now; §7 lists the later changes). The ones that change behaviour:
 
 | Change | Source | Emulator | Pocket RTL |
 |---|---|---|---|
@@ -53,7 +53,7 @@ All are recorded in the profile's `v7_changes` (20 entries in the package, 42 no
 | FM detection latch only in Master System and Super Sega modes | review | fixed | yes |
 | Stock-hardware behaviour (CPU, VDP, PSG, I/O) listed in `stock_behaviour` | SML DX port, Gearsystem | fixed | yes |
 
-Open items are in the profile's `open_questions` (Q1–Q14 in the package; Q15–Q21 were added since, §7). New in this round: **Q11**, whether the TMS-colour boost should default off like every other boost (the emulator defaults it on; since resolved, §7); **Q12**, the one-wait-state cartridge access at 200 % turbo (emulator has it, Pocket core does not yet); **Q13**, Feature Enable C bit 4 (ESAT 2-byte) contradicting the 2-byte ESAT decision; **Q14**, the PCM FIFO fill reading at `$08`, which cannot encode a 64-byte FIFO in three bits.
+Open items are in the profile's `open_questions` (Q1–Q14 in the package; Q15–Q22 were added since, §7). New in this round: **Q11**, whether the TMS-colour boost should default off like every other boost (the emulator defaults it on; since resolved, §7); **Q12**, the one-wait-state cartridge access at 200 % turbo (emulator has it, Pocket core does not yet); **Q13**, Feature Enable C bit 4 (ESAT 2-byte) contradicting the 2-byte ESAT decision; **Q14**, the PCM FIFO fill reading at `$08`, which cannot encode a 64-byte FIFO in three bits.
 
 ## 3. Emulator machine-model fixes
 
@@ -145,7 +145,7 @@ The repository corrected the following after the package was imported; each mach
 7. Q13 gives the ESAT history as the profile records it: 2 bytes per sprite since v5.
 8. Technical Reference §19 has rows for the math unit, work RAM banking, the card slot, multitap, the Game Gear serial registers, mouse and trackball, the link cable and the PAL clock, and the Pocket design document's §2 matches (implementation status, not a machine change).
 9. Save states are no longer listed as a missing Pocket core feature: they would belong to the Pocket platform layer, not the machine, and are not planned in this milestone (Pocket design document only).
-10. The PAL CPU clock is defined as 3.546893 MHz, as on a PAL Master System. Neither implementation uses it yet: both run PAL at the NTSC clock (50.16 Hz frames instead of 49.70 Hz). PAL turbo frequencies are not defined yet.
+10. The PAL CPU clock is defined as 3.546893 MHz, as on a PAL Master System. Both implementations now use it (M49 in the emulator; the Pocket core below); before, both ran PAL at the NTSC clock (50.16 Hz frames instead of 49.70 Hz). PAL turbo frequencies are open question Q22.
 11. Writes to `$07`–`$16` and to VDP registers 11–15 take effect only in Super Sega mode, and Q1 now names the real risk: old code run in Super Sega mode that writes a `$3E`/`$3F` mirror address.
 12. Register layouts that only the emulator defines (DMA engine, PCM control, wavetable, slot select, VDP base registers, window split) are recorded as open question Q16.
 13. The height cases are written out: with M4 and M2 set, M1 and M3 both set give 192 lines, and so does Feature Enable B height 11.
@@ -160,6 +160,7 @@ The repository corrected the following after the package was imported; each mach
 22. Both documents give the four `$F2` states (0 PSG only, the power-on state; 1 FM only; 2 neither; 3 both), from MAME's `sms_m.cpp`; they said only that bits 1–0 select a mute state. The emulator was corrected to them (M46). Open question Q20 records that the balance of FM and PSG on the original is not known; both implementations make one FM channel at full volume peak at half a PSG channel at full volume.
 23. Open question Q21 recorded that at turbo, software written for 100 % can write the FM chip faster than it accepts writes (12 master-clock cycles after an address, 84 after data). The owner decided it: the bus synchroniser holds the CPU on a write to `$F0`/`$F1` until the chip can take it, as it does for the VDP (Technical Reference §1). Both documents give the chip's write timing (§7). The emulator (M47) and the Pocket core do this.
 24. The pad in the stock modes is written down (Technical Reference §6, profile `input.stock_mapping`), as the owner decided: the console reads its Mega Drive pad's A as button 1 and B as button 2, and Start is the Game Gear's Start or, through the Start = Pause boost, the Pause button. Start = Pause is now on at power-on, the second boost that starts on (§15). The documents said only that the pad gives B and C with TH high, as a Mega Drive pad does; the emulator already read A and B (M48).
+25. Open question Q22 records the turbo frequencies in PAL, which the documents define only at the NTSC clock; both implementations run the same percentages of the PAL clock.
 
 ### Emulator
 
@@ -193,3 +194,4 @@ Application changes: the page runs machine frames at the machine's own rate (59.
 - The FM unit is fitted: IKAOPLL (BSD 2-Clause, `rtl/third_party/ikaopll`, unchanged), a YM2413 core reverse-engineered from die shots of the chip, on the 3.579545 MHz base clock, with the four `$F2` states and the balance of Q20. Software that checks for FM now finds it. An FM test ROM (`roms/fm.sms`) is captured as audio and checked in `sim/check.sh` (`tools/check_fm_wav.py`): each chip heard exactly in the states that select it, the FM pitch and the balance; and in Game Gear mode, which has no FM unit, the PSG alone.
 - At turbo the bus synchroniser holds the CPU on FM writes until the chip can take them (Q21). A second FM test ROM (`roms/fm_tight.sms`), whose driver leaves the chip little more than the minimum time at 100 %, is checked at 200 % turbo in `sim/check.sh`; without the hold it played no FM.
 - The Pocket's buttons are the console's Mega Drive pad in every mode: A (east) = A, B (south) = B, Y = C. So in the stock modes A is button 1 and B button 2 (they were B and A), and in Super Sega mode each button keeps its letter (Y was A and A was C). Start = Pause is on by default. `sim/check.sh` reads port `$DC` with each held.
+- PAL runs on the PAL clock (3.546893 MHz): in PAL, machine time stands still for one system clock in every 109.63, so every base cycle, the CPU, turbo, the VDP's timing, the PSG and the FM chip run at the PAL rate and frames come at 49.70 a second. The Pocket's pixel clock is not held, so a PAL line reaches its scaler as 345 or 346 pixel clocks instead of 342; nothing else the scaler sees changes. Changing the Video setting restarts the machine. `sim/check.sh` checks the frame timing, PAL FM pitch, PAL at 200 % turbo, the video timing through the Pocket layer, and a switch from PAL to NTSC in the middle of a frame.

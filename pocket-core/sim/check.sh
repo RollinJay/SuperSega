@@ -15,12 +15,16 @@
 #      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
 #      follows the $F2 mute states with the right FM pitch and level (Master
 #      System and Super Sega modes) and has no FM in Game Gear mode, and a
-#      tightly timed FM driver still plays at 200 % turbo
+#      tightly timed FM driver still plays at 200 % turbo; in PAL, frames come at
+#      49.70 Hz and the FM and PSG pitch follow the PAL clock; and the clock
+#      enables keep their spacing (a check inside ss_top)
 #   5. sim/pocket: through the Pocket platform layer the frames match the machine
-#      simulation (a headerless TMS ROM is detected as SG-1000 and drawn in true
-#      TMS colours, the default), Pocket B reads as button 1 in Super Sega mode,
-#      and the save slot reads back the loaded file with only the bytes the ROM
-#      writes changed
+#      simulation, NTSC and PAL (a headerless TMS ROM is detected as SG-1000 and
+#      drawn in true TMS colours, the default); the video timing the scaler sees
+#      is regular (PAL lines 345 or 346 pixel clocks), also across a switch from
+#      PAL to NTSC; Pocket A and B read as buttons 1 and 2 in Master System mode
+#      and B as button 1 in Super Sega mode; and the save slot reads back the
+#      loaded file with only the bytes the ROM writes changed
 #
 # usage: sim/check.sh [workdir]     (workdir defaults to a new temporary directory)
 # Needs what README.md lists for the simulations: Verilator 5, iverilog,
@@ -86,6 +90,8 @@ run_sys_case() {
     # shellcheck disable=SC2086  # option and frame lists are meant to split
     (cd "$PC/sim/sys" && ./obj/tb_ss "../../roms/$rom" "$mode" "$n" "$W/sys/$name" $topt $dumps) \
         > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
+    grep -q ', 0 violations' "$W/sys/$name.log" \
+        || { echo "tb_ss $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
     # shellcheck disable=SC2086
     env $jenv node "$JSDUMP" "$PAGE" "$PC/roms/$rom" "$mode" "$W/js/$name" $dumps \
         > "$W/js/$name.log" 2>&1 || { echo "js_dump $name failed:"; cat "$W/js/$name.log"; return 1; }
@@ -96,7 +102,8 @@ export -f run_sys_case
 # driver at 200 % turbo (the bus synchroniser must hold its writes); run
 # alongside the frame cases
 # name | ROM | mode | tb_ss options | check_fm_wav.py options
-FM_CASES=("fmsms|fm.sms|sms||" "fmss|fm.sms|ss||" "fmgg|fm.sms|gg||--no-fm" "fmturbo|fm_tight.sms|sms|-turbo 4|")
+FM_CASES=("fmsms|fm.sms|sms||" "fmss|fm.sms|ss||" "fmgg|fm.sms|gg||--no-fm" "fmturbo|fm_tight.sms|sms|-turbo 4|"
+          "fmpal|fm.sms|sms|-pal|--pal" "fmturbopal|fm_tight.sms|sms|-pal -turbo 4|--pal")
 run_fm_case() {
     local name rom mode topt opt
     IFS='|' read -r name rom mode topt opt <<< "$1"
@@ -104,6 +111,8 @@ run_fm_case() {
     # shellcheck disable=SC2086  # topt is empty or a list of options
     (cd "$PC/sim/sys" && ./obj/tb_ss "../../roms/$rom" "$mode" 50 "$W/sys/$name" -wav "$W/sys/$name.wav" $topt) \
         > "$W/sys/$name.log" 2>&1 || { echo "tb_ss $name failed:"; cat "$W/sys/$name.log"; return 1; }
+    grep -q ', 0 violations' "$W/sys/$name.log" \
+        || { echo "tb_ss $name: clock enable check failed:"; grep 'enable check' "$W/sys/$name.log"; return 1; }
     # shellcheck disable=SC2086  # opt is empty or one flag
     python3 "$PC/tools/check_fm_wav.py" "$W/sys/$name.wav" $opt > "$W/sys/$name.txt" 2>&1 \
         || { echo "$name: FM sound check failed:"; cat "$W/sys/$name.txt"; return 1; }
@@ -130,35 +139,65 @@ for c in "${FM_CASES[@]}"; do
     printf '%-9s %-12s %-4s %-9s FM sound ($F2 states, pitch, level): ' "$name" "$rom" "$mode" "$topt"
     tail -n 1 "$W/sys/$name.txt" 2>/dev/null || echo "no result"
 done
+# frame timing: NTSC 262 lines of 228 base cycles (3420 clk_sys each); PAL 313
+# lines at 3.546893 MHz, so 1080310-1080320 clk_sys a frame (49.70 Hz)
+for c in "v224|clk_sys 896040-896040|59.92 Hz" "v224pal|clk_sys 1080310-1080320|49.70 Hz"; do
+    IFS='|' read -r name want hz <<< "$c"
+    printf '%-9s frame timing %s: ' "$name" "$hz"
+    if grep -qF "$want" "$W/sys/$name.log"; then echo "$want"; else echo "WRONG:"; grep 'frame timing' "$W/sys/$name.log"; fail=1; fi
+done
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"
 build pocket
-# name | ROM | frames to run | options and frames to dump
+# name | ROM | frames to run | options and frames to dump | video timing to expect
+#   ntsc: every line 342 pixel clocks, every frame 89604; pal: lines of 345 or
+#   346 (machine time is held, the pixel clock is not), frames 108031-108032,
+#   313 lines; toggle: PAL switched to NTSC mid-frame restarts the machine and
+#   never gives a frame of more than 313 lines
 POCKET_CASES=(
-    "p224|vdp224.sms|40|37"
-    "pss|ssfeat.sms|12|10 11"
-    "pggports|ports.sms|11|-system 2 10"
-    "pbutton|ports.sms|11|-system 3 -hold 5 10"
-    "pbtn1|ports.sms|11|-system 1 -hold 4 10"
-    "pbtn2|ports.sms|11|-system 1 -hold 5 10"
-    "psave|save.sms|10|-save ../../roms/save_in.sav"
-    "ptms|tms_g2.sg|47|46"
+    "p224|vdp224.sms|40|37|ntsc"
+    "pss|ssfeat.sms|12|10 11|ntsc"
+    "pggports|ports.sms|11|-system 2 10|ntsc"
+    "pbutton|ports.sms|11|-system 3 -hold 5 10|ntsc"
+    "pbtn1|ports.sms|11|-system 1 -hold 4 10|ntsc"
+    "pbtn2|ports.sms|11|-system 1 -hold 5 10|ntsc"
+    "psave|save.sms|10|-save ../../roms/save_in.sav|ntsc"
+    "ptms|tms_g2.sg|47|46|ntsc"
+    "p224pal|vdp224.sms|40|-set 108 1 37|pal"
+    "ptoggle|vdp224.sms|30|-set 108 1 -setat 20 200000 108 0|toggle"
 )
 run_pocket_case() {
-    local name rom n args extra=()
-    IFS='|' read -r name rom n args <<< "$1"
+    local name rom n args tim tline x extra=() need=()
+    IFS='|' read -r name rom n args tim <<< "$1"
     if [ "$name" = psave ]; then extra=(-readsave "$W/pocket/back.sav"); fi
     # shellcheck disable=SC2086
     (cd "$PC/sim/pocket" && ./obj/tb_pocket "../../roms/$rom" "$n" "$W/pocket/$name" $args ${extra[@]+"${extra[@]}"}) \
         > "$W/pocket/$name.log" 2>&1 || { echo "tb_pocket $name failed:"; cat "$W/pocket/$name.log"; return 1; }
     grep -q 'slot-word errors 0 ' "$W/pocket/$name.log" \
         || { echo "tb_pocket $name: scaler slot-word errors:"; cat "$W/pocket/$name.log"; return 1; }
+    tline=$(grep '^timing:' "$W/pocket/$name.log")
+    case "$tim" in
+        ntsc) need=('HS period 342-342' 'VS period 89604-89604') ;;
+        pal)  need=('HS period 345-346' 'VS period 108031-108032' 'HS per frame 313-313') ;;
+    esac
+    need+=('wide HS/VS 0;' 'skip 0')
+    for x in "${need[@]}"; do
+        grep -qF -- "$x" <<< "$tline" || { echo "tb_pocket $name: video timing, expected '$x':"; echo "$tline"; return 1; }
+    done
+    if [ "$tim" = toggle ]; then
+        python3 - "$tline" <<'PY' || { echo "tb_pocket $name: a frame outside 262-313 lines:"; echo "$tline"; return 1; }
+import re, sys
+lo, hi = map(int, re.search(r'HS per frame (\d+)-(\d+)', sys.argv[1]).groups())
+sys.exit(0 if 262 <= lo and hi <= 313 else 1)
+PY
+    fi
 }
 export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
 fail=0
-for pair in "p224_37 v224_37" "pss_10 ssfeat_10" "pss_11 ssfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46"; do
+for pair in "p224_37 v224_37" "pss_10 ssfeat_10" "pss_11 ssfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
+            "p224pal_37 v224pal_37"; do
     set -- $pair
     printf '%-12s Pocket vs machine simulation: ' "$1"
     python3 tools/ppmdiff.py "$W/pocket/$1.ppm" "$W/sys/$2.ppm" || fail=1

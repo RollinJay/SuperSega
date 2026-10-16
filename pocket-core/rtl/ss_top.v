@@ -6,19 +6,23 @@
 //
 //   clocks   all logic runs on clk_sys with clock enables:
 //            base cycle 3.579545 MHz = sys/15 (VDP timing, PSG = base/16,
-//            YM2413 master clock)
-//            CPU 100/125/150/175/200 % of base (turbo, Super Sega only)
-//            pixel 5.369318 MHz = sys/10
+//            YM2413 master clock); in PAL 3.546893 MHz, machine time being
+//            held for one clk_sys in every 109.63
+//            CPU 100/125/150/175/200 % of base (turbo: Super Sega software's
+//            $F3, or the enhancement layer's step for stock software)
+//            pixel 5.369318 MHz = sys/10, never held
 //   bus sync at turbo steps above 100 % the CPU is held on VDP port accesses
 //            until the VDP's next access slot: 16 base cycles in blanking,
-//            29 in active display (machine profile, official Sega figures)
+//            29 in active display (machine profile, official Sega figures),
+//            and on FM writes until the YM2413 can take them
 `default_nettype none
 
 module ss_top #(
     // The FM unit is part of the machine (a YM2413, IKAOPLL here). FM_FITTED = 0
     // leaves it out: the $F2 detection latch then does not answer, so software
     // that probes for FM falls back to its PSG music instead of playing silence.
-    parameter FM_FITTED = 1
+    parameter FM_FITTED = 1,
+    parameter PAL_LINE_LOCK = 0
 ) (
     input  wire        clk_sys,
     input  wire        reset,
@@ -101,12 +105,39 @@ module ss_top #(
     wire fm_here = FM_FITTED != 0 && (mode == 3'd0 || ss);   // the FM unit: SMS and Super Sega modes
 
     // ------------------------------------------------------------ clock enables
+    // Machine time. NTSC: every clk_sys is a machine clock and the base cycle is
+    // clk_sys / 15 = 3.579545 MHz. PAL: machine time stands still for one clk_sys
+    // in every 109.63 (32652 in 3579545, the difference of the two base clocks
+    // over the NTSC one), so the machine runs on 15 x 3.546893 MHz on average.
+    // Every base cycle is then 15 or 16 clk_sys, 3.546893 MHz on average with no
+    // drift, and everything that counts base cycles or machine clocks (CPU and
+    // turbo, VDP timing, PSG, FM chip, bus synchroniser) runs at the PAL clock.
+    // The pixel enable is NOT held: pixels leave at clk_sys / 10, in step with
+    // the platform's fixed pixel clock, and the VDP starts each output line at
+    // its own line start, so a PAL line is 345 or 346 pixel clocks long.
+    // PAL_LINE_LOCK = 1 holds one clock in 115 instead: every PAL line is then
+    // exactly 345 pixel clocks, and the base clock 430 ppm fast.
+    localparam [21:0] PAL_ADD = (PAL_LINE_LOCK != 0) ? 22'd1   : 22'd32652;
+    localparam [21:0] PAL_MOD = (PAL_LINE_LOCK != 0) ? 22'd115 : 22'd3579545;
+    reg  [21:0] pacc = 22'd0;
+    reg         hold = 1'b0;           // this clk_sys is not a machine clock
+    wire [22:0] pacc_next = {1'b0, pacc} + {1'b0, PAL_ADD};
+    always @(posedge clk_sys) begin
+        if (reset || !pal) begin
+            pacc <= 22'd0; hold <= 1'b0;
+        end else if (pacc_next >= {1'b0, PAL_MOD}) begin
+            pacc <= pacc_next[21:0] - PAL_MOD; hold <= 1'b1;
+        end else begin
+            pacc <= pacc_next[21:0]; hold <= 1'b0;
+        end
+    end
+
     reg  [3:0]  div15;
     reg  [3:0]  div10;
     reg  [3:0]  div16;
     reg  [10:0] tacc;
     reg  [31:0] cycles;
-    wire        ce_base = (div15 == 4'd0);
+    wire        ce_base = !hold && (div15 == 4'd0);
     wire        ce_pix  = (div10 == 4'd0);
     wire        ce_psg  = ce_base && (div16 == 4'd0);
     wire [2:0]  turbo_step;
@@ -117,7 +148,7 @@ module ss_top #(
                              (step_eff == 3'd3) ? 8'd175 : (step_eff == 3'd4) ? 8'd200 : 8'd100;
     wire        turbo_on = (step_eff != 3'd0);
     wire [10:0] tacc_next = tacc + {3'd0, turbo_rate};
-    wire        ce_turbo = (tacc_next >= 11'd1500);
+    wire        ce_turbo = !hold && (tacc_next >= 11'd1500);
     // Two CPU enables are never on consecutive clocks (they can meet only when
     // the turbo step changes), so every CPU register path has at least two
     // clocks; core_constraints.sdc relies on this.
@@ -129,15 +160,60 @@ module ss_top #(
         if (reset) begin
             div15 <= 4'd0; div10 <= 4'd0; div16 <= 4'd0; tacc <= 11'd0; cycles <= 32'd0;
         end else begin
-            div15 <= (div15 == 4'd14) ? 4'd0 : div15 + 4'd1;
             div10 <= (div10 == 4'd9) ? 4'd0 : div10 + 4'd1;
+            if (!hold) begin
+                div15 <= (div15 == 4'd14) ? 4'd0 : div15 + 4'd1;
+                tacc <= ce_turbo ? tacc_next - 11'd1500 : tacc_next;
+            end
             if (ce_base) begin
                 div16 <= div16 + 4'd1;
                 cycles <= cycles + 32'd1;
             end
-            tacc <= ce_turbo ? tacc_next - 11'd1500 : tacc_next;
         end
     end
+`ifdef VERILATOR
+    // Simulation check of the clock enables, reported at the end of the run
+    // ("enable check ... 0 violations"; sim/check.sh requires it): a base cycle
+    // every 15 clk_sys (15 or 16 in PAL), a pixel every 10, CPU enables never on
+    // consecutive clocks (core_constraints.sdc relies on it), and the TV
+    // standard changing only in reset.
+    integer sp_b = 0, sp_c = 0, sp_p = 0, viol = 0;
+    integer mn_b = 99, mx_b = 0, mn_c = 99, mx_c = 0, mn_p = 99, mx_p = 0;
+    reg     pal_d = 1'b0;
+    always @(posedge clk_sys) begin
+        pal_d <= pal;
+        if (!reset && pal != pal_d) viol = viol + 1;
+        if (!reset) begin
+            sp_b = sp_b + 1; sp_c = sp_c + 1; sp_p = sp_p + 1;
+            if (ce_base) begin
+                if (cycles > 2) begin
+                    if (sp_b < mn_b) mn_b = sp_b;
+                    if (sp_b > mx_b) mx_b = sp_b;
+                    if (sp_b != 15 && !(pal && sp_b == 16)) viol = viol + 1;
+                end
+                sp_b = 0;
+            end
+            if (ce_cpu) begin
+                if (cycles > 2) begin
+                    if (sp_c < mn_c) mn_c = sp_c;
+                    if (sp_c > mx_c) mx_c = sp_c;
+                    if (sp_c < 2) viol = viol + 1;
+                end
+                sp_c = 0;
+            end
+            if (ce_pix) begin
+                if (cycles > 2) begin
+                    if (sp_p < mn_p) mn_p = sp_p;
+                    if (sp_p > mx_p) mx_p = sp_p;
+                    if (sp_p != 10) viol = viol + 1;
+                end
+                sp_p = 0;
+            end
+        end
+    end
+    final $display("enable check (clk_sys between enables): base %0d-%0d cpu %0d-%0d pixel %0d-%0d, %0d violations",
+                   mn_b, mx_b, mn_c, mx_c, mn_p, mx_p, viol);
+`endif
     assign dbg_cycles = cycles;
 
     // ------------------------------------------------------------ CPU

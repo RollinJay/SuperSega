@@ -44,20 +44,20 @@ If these work, the core loads, draws, plays both sound chips and reads the butto
 - **Codemasters games** (Micro Machines, Cosmic Spacehead and others) and **Korean-mapper games:** set Core Settings > Mapper, then Reset. The core does not detect the mapper.
 - **SC-3000 cartridges:** set System to SC-3000 (they look the same as SG-1000 cartridges). The SK-1100 keyboard is implemented but untested on the Pocket.
 - **A Master System game without a "TMR SEGA" header** (a few Japanese ones) of 64 KB or less starts as SG-1000: set System to Master System.
-- **PAL-only games:** set Video to PAL 50 Hz.
+- **PAL-only games:** set Video to PAL 50 Hz. Changing Video restarts the game.
 
 ## Won't work yet
 
 - **Super Sega graphics extensions:** extended sprite attributes, 16 × 16 and magnified sprites in Mode 4 (the Master System's picture mode), window and text layers, line tables and unique-cell mode.
 - PCM and wavetable sound, the DMA engine, the SF-7000 and floppy disks, cards, cassettes, the mouse and trackball, multitaps, the link cable.
 - Pocket save states (Memories) and sleep.
-- PAL games run very slightly fast (50.16 frames a second instead of 49.70).
 
 ## Unknown until it runs
 
 - Whether the core loads at all. Quartus's timing analysis passes at every temperature and voltage it models, so timing is not expected to be the problem, but only the hardware proves it.
 - Loading large ROMs (the biggest Master System games are 1 MB) from the Pocket's memory.
 - Picture scaling and aspect on the Pocket's screen and on a TV through the Dock.
+- PAL: whether the picture is steady. The core keeps the Pocket's video clock fixed and makes PAL lines slightly uneven (345 or 346 pixel clocks); the Pocket's Developer > Statistics overlay should show 49.70 frames a second in PAL and 59.92 in NTSC.
 - Audio level, clicks or pops, and whether FM music is too loud or too quiet beside the PSG (the balance is a provisional choice: open question Q20 in the Technical Reference).
 - How the Pocket's own button remapping behaves with this core.
 

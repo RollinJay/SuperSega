@@ -18,9 +18,11 @@ import wave
 
 import numpy as np
 
-FRAME = 262 * 228 / 3579545.0          # NTSC frame, seconds
-PSG_HZ = 3579545 / (32 * 254)          # tone period $0FE
-FM_HZ = 330 * 2 ** 5 * (3579545 / 72) / 2 ** 19   # F-number 330, block 5
+PAL = '--pal' in sys.argv              # PAL machine: 313 lines at 3.546893 MHz
+BASE = 3546893 if PAL else 3579545
+FRAME = (313 if PAL else 262) * 228 / BASE   # frame, seconds
+PSG_HZ = BASE / (32 * 254)             # tone period $0FE
+FM_HZ = 330 * 2 ** 5 * (BASE / 72) / 2 ** 19   # F-number 330, block 5
 STEPS = [0, 1, 3, 2, 0]                # $F2 for frames 0-9, 10-19, ...
 HEADROOM = 41 / 64                    # the mixer's scale before the 16-bit output
 # fundamental of a full-volume PSG square (+-8191): 4/pi x 8191
@@ -70,6 +72,11 @@ def main():
             print(f'step {k} $F2={f2} {name}: PSG {p:7.0f} ({"on" if want_psg else "off"}), '
                   f'FM {f:6.0f} ({"on" if want_fm else "off"}) {"ok" if ok else "WRONG"}')
             bad += not ok
+            if want_psg and ch == 0:
+                hz = peak(x, rate, PSG_HZ * 0.9, PSG_HZ * 1.1)
+                good = abs(hz / PSG_HZ - 1) < 0.002
+                print(f'        PSG pitch {hz:.2f} Hz, expected {PSG_HZ:.2f} {"ok" if good else "WRONG"}')
+                bad += not good
             if want_fm and ch == 0:
                 hz = peak(x, rate, FM_HZ * 0.9, FM_HZ * 1.1)
                 good = abs(hz / FM_HZ - 1) < 0.002

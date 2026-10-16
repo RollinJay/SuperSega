@@ -26,6 +26,7 @@ module tb_pocket_top (
     output wire        video_de,
     output wire        video_hs,
     output wire        video_vs,
+    output wire        video_skip,
     output wire signed [15:0] audio_l,
     output wire signed [15:0] audio_r
 );
@@ -47,7 +48,7 @@ module tb_pocket_top (
         .cram0_cre(cre), .cram0_ce0_n(ce0_n), .cram0_ce1_n(ce1_n), .cram0_oe_n(oe_n),
         .cram0_we_n(we_n), .cram0_ub_n(ub_n), .cram0_lb_n(lb_n),
         .video_rgb(video_rgb), .video_de(video_de), .video_hs(video_hs), .video_vs(video_vs),
-        .video_skip(), .audio_l(audio_l), .audio_r(audio_r));
+        .video_skip(video_skip), .audio_l(audio_l), .audio_r(audio_r));
 
     psram_model #(.AW(20)) u_psram (
         .a(a), .dq(dq), .wait_o(wt), .clk(pclk), .adv_n(adv_n), .cre(cre),

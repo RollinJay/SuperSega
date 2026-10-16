@@ -40,7 +40,7 @@ roms/                 the generated test ROMs (homebrew, made by tools/mk_testro
 
 Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check.sh` run the emulator in `../emulator/`), Python 3 with numpy and Pillow, and Yosys 0.33 for the resource estimate.
 
-`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear, the four TMS9918 modes), the FM test ROM must sound as its `$F2` settings say (`tools/check_fm_wav.py`), and the Pocket platform simulation must draw the same frames as the machine simulation, read Pocket B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
+`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, Super Sega mode, Game Gear, the four TMS9918 modes), the FM test ROM must sound as its `$F2` settings say (`tools/check_fm_wav.py`), the PAL frame rate and pitch must follow the PAL clock, and the Pocket platform simulation must draw the same frames as the machine simulation (NTSC and PAL) with regular video timing, read the Pocket's A and B as buttons 1 and 2 in Master System mode and B as button 1 in Super Sega mode, and read the save slot back byte-exact. It takes about four minutes on four cores.
 
 ```sh
 python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, fm, fm_tight, ssfeat, ports, tms_* test ROMs
@@ -57,13 +57,15 @@ cd sim/sys && ./build.sh && mkdir -p out
 #           -tmsapprox (TMS modes in the Master System approximation; true TMS colours by default)
 #   hold C: -holdc ; audio: -wav file.wav
 ./obj/tb_ss ../../roms/fm.sms sms 50 out/fm -wav out/fm.wav          # FM; check with:
-python3 ../../tools/check_fm_wav.py out/fm.wav                  # (--no-fm for gg, sg, sc)
+python3 ../../tools/check_fm_wav.py out/fm.wav                  # (--no-fm for gg, sg, sc; --pal with -pal)
 ./obj/tb_ss ../../roms/ports.sms ss 11 out/io 10                # I/O decode test; decode with:
 python3 ../../tools/read_ports_ppm.py out/io_10.ppm [other.ppm]
 cd ../pocket && ./build.sh && mkdir -p out
 ./obj/tb_pocket ../../roms/vdp224.sms 40 out/p 37               # through the Pocket layer
 ./obj/tb_pocket ../../roms/save.sms 10 out/s -save ../../roms/save_in.sav -readsave out/back.sav
 ./obj/tb_pocket ../../roms/ports.sms 11 out/k -system 3 -hold 5 10   # Super Sega mode, Pocket B held
+./obj/tb_pocket ../../roms/vdp224.sms 40 out/pal -set 108 1 37         # PAL (interact $108 = 1); prints the video timing
+./obj/tb_pocket ../../roms/vdp224.sms 30 out/t -set 108 1 -setat 20 200000 108 0   # switch to NTSC in frame 20
 python3 ../../tools/ppmdiff.py a.ppm b.ppm [side_by_side.png] [--tol 2]
 ```
 

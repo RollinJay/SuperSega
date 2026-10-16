@@ -410,13 +410,13 @@ change('Review fixes: Feature Enable A bit 6 (turbo) added to the register table
 cpu = p['cpu']
 put_after(cpu, 'base_clock_hz', 'pal_clock_hz', 3546893)
 cpu['turbo']['clock_generation'] = ('FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock (PAL '
-                                    'turbo frequencies are not defined yet); VDP, PSG and FM stay at 1x')
+                                    'turbo frequencies: open question Q22); VDP, PSG and FM stay at 1x')
 put_after(cpu, 'pal_clock_hz', 'clock_standards', (
     'base_clock_hz is the NTSC clock. In PAL the CPU runs at pal_clock_hz, as on a PAL Master System, so a '
     '313-line frame of 228 cycles per line is 49.70 Hz (at the NTSC clock it would be 50.16 Hz).'))
 change(LATER + 'PAL CPU clock defined: 3.546893 MHz, as on a PAL Master System, giving 49.70 Hz frames. v6 gave '
-       'only the NTSC clock. The emulator and the Pocket core both still run PAL at the NTSC clock (50.16 Hz). '
-       'The turbo frequencies are stated for the NTSC clock; PAL ones are not defined yet.')
+       'only the NTSC clock. Both implementations now run PAL on it (they ran it at the NTSC clock, 50.16 Hz). '
+       'The turbo frequencies are stated for the NTSC clock; PAL ones are open question Q22.')
 put_after(cpu, 'clock_standards', 'reset_state', (
     'At hand-over to software: PC $0000, SP $DFF0 (where the Master System BIOS leaves it), interrupts disabled '
     '(IFF1 = IFF2 = 0) and interrupt mode 0, as after a Z80 reset; software selects IM 1 itself.'))
@@ -553,6 +553,11 @@ p['open_questions'] = [
                 'little more than the minimum at 100 % played no FM at 200 %. Decided by the owner in October '
                 '2026: at turbo the bus synchroniser holds the CPU on a write to $F0/$F1 until the chip can take '
                 'it, as it does for the VDP (cpu.turbo.fm_writes). Both implementations do this.')},
+    {'id': 'Q22', 'topic': 'PAL turbo clocks', 'status': 'open',
+     'detail': ('The turbo steps are defined at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. In PAL both '
+                'implementations run the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz, '
+                'because their turbo is a multiple of the base clock. Should PAL turbo be those, or the NTSC '
+                'frequencies?')},
     {'id': 'Q17', 'topic': 'Feature Enable B height in the TMS modes', 'status': 'open',
      'detail': ('Feature Enable B bits 7-6 select 224 or 240 lines for Super Sega software, but the documents '
                 'define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode '
@@ -665,6 +670,9 @@ change(LATER + 'Stock-mode controller mapping decided by the owner (input.stock_
        'is button 1 and B is button 2, and Start is the Game Gear\'s Start or, through Start = Pause, the Pause '
        'button; Start = Pause is now on at power-on, the second boost that starts on. The documents said only '
        'that the pad gives B and C with TH high, as a Mega Drive pad does; the emulator already used A and B.')
+
+change(LATER + 'Open question Q22 added: the turbo frequencies in PAL. Both implementations run the turbo '
+       'steps as percentages of the PAL clock (cpu.turbo.clock_generation).')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

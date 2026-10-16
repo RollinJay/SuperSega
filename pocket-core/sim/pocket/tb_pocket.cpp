@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <map>
 
 static std::vector<uint8_t> load(const char* p) {
     FILE* f = fopen(p, "rb");
@@ -55,8 +56,13 @@ static void step() {
     t->eval();
 }
 // run until the next rising edge of clk_74a has been evaluated
+static void on_vid_edge();
 static void tick74() {
-    for (;;) { bool was = t->clk_74a; step(); if (!was && t->clk_74a) return; }
+    for (;;) {
+        bool was = t->clk_74a; step();
+        if (vid_rose) { vid_rose = false; on_vid_edge(); }
+        if (!was && t->clk_74a) return;
+    }
 }
 
 // video capture state
@@ -68,7 +74,38 @@ static int slot_word = -1, slot_errors = 0, last_slot = -1;
 static long dumped = 0;
 static int frame_w = 0;
 
+// scaler-side timing, in clk_vid cycles
+static uint64_t vcyc = 0, last_hs = 0, last_vs = 0;
+static long hs_n = 0, vs_n = 0, hs_mn = 1 << 30, hs_mx = 0, vs_mn = 1 << 30, vs_mx = 0;
+static long ln_mn = 1 << 30, ln_mx = 0, lines_in_frame = 0, de_run = 0, de_mn = 1 << 30, de_mx = 0;
+static long del_mn = 1 << 30, del_mx = 0, de_lines = 0, vshs_mn = 1 << 30, wide = 0, skips = 0;
+static std::map<long, long> hs_hist;
+static bool hs_prev = false, vs_prev = false;
+static void timing_edge() {
+    vcyc++;
+    bool hs = t->video_hs, vs = t->video_vs, de = t->video_de;
+    if (t->video_skip) skips++;
+    if ((hs && hs_prev) || (vs && vs_prev)) wide++;                 // HS and VS must be one cycle
+    if (vs && !vs_prev) {
+        if (vs_n >= 2) {
+            long d = (long)(vcyc - last_vs);
+            if (d < vs_mn) vs_mn = d; if (d > vs_mx) vs_mx = d;
+            if (lines_in_frame < ln_mn) ln_mn = lines_in_frame; if (lines_in_frame > ln_mx) ln_mx = lines_in_frame;
+            if (de_lines < del_mn) del_mn = de_lines; if (de_lines > del_mx) del_mx = de_lines;
+        }
+        last_vs = vcyc; vs_n++; lines_in_frame = 0; de_lines = 0;
+    }
+    if (hs && !hs_prev) {
+        if (vs_n >= 2) { long d = (long)(vcyc - last_hs); if (d < hs_mn) hs_mn = d; if (d > hs_mx) hs_mx = d; hs_hist[d]++; }
+        if (vs_n >= 1) { long g = (long)(vcyc - last_vs); if (g < vshs_mn && g < 400) vshs_mn = g; }
+        last_hs = vcyc; hs_n++; lines_in_frame++;
+    }
+    if (de) de_run++;
+    else if (de_run) { if (vs_n >= 2) { if (de_run < de_mn) de_mn = de_run; if (de_run > de_mx) de_mx = de_run; } de_run = 0; de_lines++; }
+    hs_prev = hs; vs_prev = vs;
+}
 static void on_vid_edge() {
+    timing_edge();
     if (t->video_vs) {
         if (dumps.count(frame + 1)) {
             int w = frame_w ? frame_w : 256, h = fy ? fy : 192;
@@ -138,6 +175,7 @@ static void slot_load(uint16_t id, uint32_t base, const std::vector<uint8_t>& d)
     }
 }
 
+static long setat_f = -1, setat_d = 0; static uint32_t setat_a = 0, setat_v = 0;
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     if (argc < 4) { fprintf(stderr, "usage: tb_pocket rom frames outprefix [options] [dumps...]\n"); return 1; }
@@ -152,6 +190,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-system")) sets.push_back({0x100, (uint32_t)atoi(argv[++i])});
         else if (!strcmp(argv[i], "-set")) { uint32_t a = strtoul(argv[i + 1], 0, 16); uint32_t v = atoi(argv[i + 2]); i += 2; sets.push_back({a, v}); }
         else if (!strcmp(argv[i], "-gap")) gap = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-setat")) { setat_f = atol(argv[i + 1]); setat_d = atol(argv[i + 2]);
+            setat_a = strtoul(argv[i + 3], 0, 16); setat_v = atoi(argv[i + 4]); i += 4; }
         else if (!strcmp(argv[i], "-save")) savefile = argv[++i];
         else if (!strcmp(argv[i], "-readsave")) readsave = argv[++i];
         else if (!strcmp(argv[i], "-hold")) hold |= 1u << atoi(argv[++i]);
@@ -188,8 +228,18 @@ int main(int argc, char** argv) {
         if (phase >= 90 && phase < 96) k |= 1u << 5;            // face_b = button 1
         if (gg && phase >= 60 && phase < 66) k |= 1u << 15;     // Start
         t->cont1_key = k;
+        if (setat_f >= 0 && frame == setat_f) {
+            run_sys_cycles(setat_d);
+            printf("interact write $%03X = %u in frame %ld\n", setat_a, setat_v, frame);
+            bridge_write(setat_a, setat_v);
+            setat_f = -1;
+        }
         run_sys_cycles(1000);
     }
+    printf("timing: HS period %ld-%ld", hs_mn, hs_mx);
+    for (auto& h : hs_hist) if (h.second > 2) printf(" [%ld x%ld]", h.first, h.second);
+    printf("; VS period %ld-%ld (%.4f-%.4f Hz); HS per frame %ld-%ld; DE run %ld-%ld; DE lines %ld-%ld; VS->HS min %ld; wide HS/VS %ld; skip %ld\n",
+           vs_mn, vs_mx, 5369317.5 / vs_mx, 5369317.5 / vs_mn, ln_mn, ln_mx, de_mn, de_mx, del_mn, del_mx, vshs_mn, wide, skips);
     printf("frames %ld dumped %ld slot %d slot-word errors %d save_present %d\n",
            frame, dumped, last_slot, slot_errors, (int)t->save_present);
 
