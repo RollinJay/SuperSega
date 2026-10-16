@@ -104,8 +104,8 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       <option value="2">200%</option>
     </select>
     <select id="rommode" title="How cartridge reads are timed">
-      <option value="shadow">ROM in RAM</option>
-      <option value="cart">Cartridge timing</option>
+      <option value="cart" selected>Cartridge timing</option>
+      <option value="shadow">ROM in RAM (what-if)</option>
     </select>
     <select id="romns" title="Cartridge ROM access time">
       <option value="250">250ns</option><option value="200">200ns</option>
@@ -819,7 +819,7 @@ class Z80{
     /* EI sets eiPend; it survives until the NEXT instruction starts, so the
        interrupt check that follows EI itself sees it and waits one instruction. */
     this.eiPend=0;
-    if(this.halt){ this.tc+=4; return 4; }
+    if(this.halt){ const w=this.bus.haltWait?this.bus.haltWait(this.PC):0; this.tc+=4+w; return 4+w; }   /* HALT repeats M1 reads */
     const t0=this.tc;
     let idx=4,d=0,op=this.fetch();
     this.Rr=(this.Rr&0x80)|((this.Rr+1)&0x7F);
@@ -1650,7 +1650,9 @@ class Machine{
                                                    // 32 = DRAM $8000-$FFFF, work RAM disabled
     /* The ROM access setting belongs to the page, not the machine: it survives
        reset, a mode change and a new cartridge (the selects keep showing it). */
-    if(this.romMode===undefined) this.romMode='shadow';   // 'shadow' = copied to fast RAM, 'cart' = cartridge timing
+    /* 'cart' = the machine's cartridge timing: a 250 ns ROM, one wait state per read at
+       200 % (Q12); 'shadow' = an emulator what-if, the ROM copied to fast RAM */
+    if(this.romMode===undefined) this.romMode='cart';
     if(this.romNs===undefined) this.romNs=250;             // period mask ROM access time
     this.waitPenalty=0;
     this.player={last:new Int16Array(128), score:new Float32Array(64), best:-1};
@@ -1677,7 +1679,9 @@ class Machine{
     return (this.slotSel>>(frame-1))&1;              // frames 1,2
   }
   rd(a){
-    if(this.ws && a<0xC000){ this.waitPenalty+=this.ws; this.cpu.tc+=this.ws;
+    /* the cartridge and card slots: one wait state per read at 200 % (Q12); in
+       SF-7000 mode $0000-$BFFF is the disk system's RAM and IPL, not a cartridge */
+    if(this.ws && a<0xC000 && this.mode!=='sf'){ this.waitPenalty+=this.ws; this.cpu.tc+=this.ws;
       if(this.fpga) this.fpga.did('romWait'); }
     /* $3E enables. Disabled regions read as open bus rather than their contents. */
     if(this.mode==='sms'||this.mode==='gg'||this.mode==='ss'){
@@ -1865,6 +1869,8 @@ class Machine{
      $FF. $00 (Start / region) always answers. The gate is live, and what the
      registers were set to stays in force while it is closed. */
   mdIO(){ return this.mode==='ss' && !!(this.vdp.reg[15]&0x80); }
+  /* a halted CPU keeps making M1 reads at PC, so in the cartridge slot each takes the wait */
+  haltWait(pc){ return (this.ws && pc<0xC000 && this.mode!=='sf') ? this.ws : 0; }
   /* The base clock: 3.579545 MHz, or 3.546893 MHz in PAL as on a PAL Master System
      (Technical Reference section 1). The VDP, PSG and FM chip run on it, so a PAL
      frame (313 lines of 228 cycles) comes at 49.70 Hz and an NTSC one at 59.92 Hz. */
@@ -2124,6 +2130,7 @@ class Machine{
   rebaseSync(before){                           /* call after a change, with the step it had before */
     const after=this.cpuMult();
     if(after===before) return;
+    this.ws=this.romWaitStates();                /* the cartridge wait follows the step at once (Q12) */
     const tc=this.cpu.tc, k=after/before;
     if(this.lastFm!=null) this.lastFm=tc-(tc-this.lastFm)*k;
     if(this.lastVdpAccess!=null) this.lastVdpAccess=tc-(tc-this.lastVdpAccess)*k;
@@ -2356,7 +2363,7 @@ class Machine{
     this.page[0]=o.p0;this.page[1]=o.p1;this.page[2]=o.p2;this.ramSel=o.ramSel;
     this.wramBank=o.wramBank;this.slotSel=o.slotSel;this.cardBank=o.cardBank;this.fmReg=o.fmReg;
     C.eiPend=o.ei;this.lineCarry=o.lc;V.hsLatch=o.hl;V.vsLatch=o.vl;
-    this.lastVdpAccess=o.lva;this.lastFm=o.lfm;this.lastFmData=o.lfd;this.turbo=o.tb;
+    this.lastVdpAccess=o.lva;this.lastFm=o.lfm;this.lastFmData=o.lfd;this.turbo=o.tb;this.ws=this.romWaitStates();
   }
   /* Dual-run capture: execute the game's own sound driver twice, once with the FM
      unit reported present and once absent, so BOTH native soundtracks are obtained.
@@ -5921,9 +5928,8 @@ function romNote(){
   const mult=m.cpuMult();
   const f=m.baseHz()*mult, T=1e9/f, win=2*T-50;
   if(m.romMode==='shadow'){
-    el.innerHTML='ROM copied into fast RAM at load, so reads never stall. '+
-      'Removes the ceiling turbo would otherwise hit. A '+(m.cart?(m.cart.length/1048576).toFixed(2):'0')+
-      ' MB cartridge takes about '+((m.cart?m.cart.length:0)*250e-9).toFixed(2)+' s to copy on hardware.';
+    el.innerHTML='What-if, not the machine: the ROM copied into fast RAM, so reads never stall and turbo '+
+      'hits no cartridge ceiling. The machine reads its cartridge with one wait state at 200 % (Q12).';
   } else {
     el.innerHTML='Access window at this step: <b>'+win.toFixed(0)+' ns</b> · ROM: <b>'+m.romNs+
       ' ns</b> → '+(ws? '<span class="pill y">'+ws+' wait state'+(ws===1?'':'s')+'</span>'

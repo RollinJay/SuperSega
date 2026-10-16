@@ -673,6 +673,21 @@ probe('M59', 'Cartridge save RAM (Q3): 32 KB, two banks of 16 KB as the 315-5235
            note: `bank 0 $8000 ${hex(got[0])}, $A000 ${hex(got[1])}; bank 1 $8000 ${hex(got[2])}, $BFFF ${hex(got[3])}` };
 });
 
+probe('M60', 'Cartridge wait state at 200 % (Q12, kept): the machine reads its cartridge as a 250 ns ROM, so at 200 % every read in $0000-$BFFF takes one wait state and a NOP in ROM takes 5 T-states (4 at 175 %, and 4 in work RAM); the wait follows a mid-frame $F3 step change at once; a halted CPU in ROM takes it on its M1 reads too; SF-7000 RAM never waits (Technical Reference \u00a71)', () => {
+  const m = sms('ss'); m.cart = new Uint8Array(0x8000);           // all NOPs
+  const def = m.romMode === 'cart' && m.romNs === 250;
+  m.vdp.reg[15] = 0x40; m.out(0xF3, 4);                          // 200 %, in mid-frame
+  const ws = m.ws;
+  m.cpu.PC = 0x0000; const rom200 = m.cpu.step();
+  m.cpu.PC = 0xC000; m.wr(0xC000, 0x00); const ram200 = m.cpu.step();
+  m.cpu.PC = 0x0100; m.cpu.halt = 1; const halt200 = m.cpu.step(); m.cpu.halt = 0;
+  m.out(0xF3, 3); m.cpu.PC = 0x0000; const rom175 = m.cpu.step();
+  const f = sms('sf'); f.ael.turbo = 2; f.ws = f.romWaitStates(); f.wr(0x0000, 0x00); f.cpu.PC = 0x0000;
+  const sf200 = f.cpu.step();
+  return { ok: def && ws === 1 && rom200 === 5 && ram200 === 4 && halt200 === 5 && rom175 === 4 && sf200 === 4,
+           note: `default ${m.romMode} ${m.romNs} ns; 200 %: ROM NOP ${rom200} T, RAM ${ram200}, HALT ${halt200}; 175 %: ${rom175}; SF-7000 at 200 %: ${sf200}` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

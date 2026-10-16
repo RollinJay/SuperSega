@@ -50,6 +50,11 @@ pcm=prof['audio']['pcm']
 chk('PCM FIFO %d bytes, fill read as bytes / 8 saturating at 7'%pcm['fifo_bytes'],
     'saturating at 7' in pcm['fill_readback'] and 'if(this.pcm.fifo.length<%d)'%pcm['fifo_bytes'] in js
     and 'Math.min(7,this.pcm.fifo.length>>3)<<4' in js)
+cw=prof['cpu']['turbo']['cartridge_wait']
+ns=re.search(r'(\d+) ns cartridge ROM', cw)
+chk('cartridge timing the default, a %s ns ROM'%(ns and ns.group(1)),
+    ns and "if(this.romMode===undefined) this.romMode='cart';" in js and
+    'if(this.romNs===undefined) this.romNs=%s;'%ns.group(1) in js)
 mid=prof['software_detection']['machine_id']
 chk('machine ID %s at port %s'%(mid['value'], mid['port']),
     'const MACHINE_ID=%s;'%hexlit(mid['value']) in js and 'if(p===%s) return MACHINE_ID;'%hexlit(mid['port']) in js)

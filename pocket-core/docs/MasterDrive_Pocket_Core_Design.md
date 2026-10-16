@@ -203,7 +203,8 @@ Everything below is simulation (Verilator 5.020, iverilog) except the last row, 
 | Sprite-limit test ROM: stock / 16 / 16 + stock flag | RTL = emulator, overflow flag as specified |
 | MasterDrive feature ROM: register banks, native and extended CRAM with palette aliasing, Feature Enable B 224 lines, 16 sprites, 200 % turbo with VRAM writes during the display | RTL = emulator; the write loop runs 34.7 times a frame (1719 cycles per 64 writes), as the synchroniser's slot spacing predicts |
 | Turbo: instructions per frame at 125–200 % | 1.250 / 1.500 / 1.749 / 1.999 ×, picture unchanged |
-| ROM latency at 200 % turbo | no wait states up to 11 clocks (12 before the memory controller's register stage, §11); the PSRAM path takes about 9 |
+| ROM latency at 200 % turbo | no memory wait states up to 11 clocks (12 before the memory controller's register stage, §11); the PSRAM path takes about 9. The machine's own cartridge wait state (Q12) adds one T-state to every cartridge read at 200 % |
+| Cartridge wait state at 200 % (`roms/romwait.sms`): 2,000 NOPs from cartridge ROM and from work RAM, at 200 % and 175 %, NTSC and PAL | RTL = emulator; at 200 % the ROM run ends five lines after the RAM run, at 175 % both end on the same line |
 | PSG: tone `$0FE` | 440.4 Hz (expected 440.4); pseudo-stereo puts it left only in Master System mode and leaves it centred in MasterDrive mode |
 | **Pocket platform** (bridge model → loader → PSRAM model → machine → video at the pixel clock) | Batman SMS frames 200/500 and GG 200/500 identical to Gearsystem; scaler slot words correct on every line |
 | Cartridge load at the APF's maximum bridge rate | passes |
@@ -232,9 +233,9 @@ Not yet done: anything on hardware.
 
 1. **Hardware bring-up**: first boot on a Pocket (the user's hands-on testing, guided by `TESTING.md`). The Quartus build and timing are done (§12).
 2. MasterDrive render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
-3. DMA engine, PCM and wavetable (once their register layouts are written down, Q16), and the math unit divide (once Q7 is decided).
+3. DMA engine, PCM and wavetable (once their register layouts are written down, Q16).
 4. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
-5. Cartridge wait state at 200 % (Q12), a proper audio decimation filter.
+5. A proper audio decimation filter.
 
 ## 16. Decisions needed
 

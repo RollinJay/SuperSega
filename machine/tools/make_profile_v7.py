@@ -524,10 +524,10 @@ p['open_questions'] = [
      'detail': ('$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returned '
                 'the fill modulo 8, so a full FIFO read as empty. Decided by the owner in October 2026: bits 6-4 = '
                 'bytes queued / 8, saturating at 7 (audio.pcm.fill_readback).')},
-    {'id': 'Q12', 'topic': 'Cartridge wait state at 200 % turbo', 'status': 'open',
-     'detail': ('cpu.turbo.cartridge_wait gives one wait state per cartridge access at 200 % (250 ns ROM). The '
-                'emulator applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only '
-                'software running at 200 %.')},
+    {'id': 'Q12', 'topic': 'Cartridge wait state at 200 % turbo', 'status': 'resolved',
+     'detail': ('cpu.turbo.cartridge_wait gives one wait state per cartridge read at 200 % (250 ns ROM); the emulator '
+                'applied it only with its cartridge-timing setting and the Pocket core not at all. Decided by the owner '
+                'in October 2026: kept, and the Pocket core adds it. Both implementations now apply it.')},
     {'id': 'Q15', 'topic': 'Line interrupts in the TMS9918 (legacy) modes', 'status': 'open',
      'detail': ('v5 made line interrupts in the legacy modes a MasterDrive enhancement '
                 '(video.legacy_modes.enhancements.line_interrupts), but no enable bit was ever assigned; as stock, '
@@ -858,6 +858,23 @@ change(LATER + 'Q3 resolved by the owner: cartridge save RAM is 32 KB, two banks
        '(memory.cartridge_ram, media.mappers.sega.cart_ram). The emulator mirrored 2 x 8 KB and the Pocket core used '
        '16 KB of its 32 KB; both now map 2 x 16 KB. Open question Q24 added: what a save-card profile holds and what '
        'identifies a game on the card.')
+
+# ------------------------------------------------------------------ Q12 (decided by the owner, October 2026)
+p['cpu']['turbo']['cartridge_wait'] = (
+    'A 250 ns cartridge ROM is fast enough up to 175 %; at 200 %, in PAL as in NTSC, every read from the cartridge or '
+    'card slot ($0000-$BFFF; not the SF-7000\'s RAM and IPL) takes one wait state, a halted CPU\'s M1 reads included '
+    '(open question Q12, decided by the owner: kept). Code run from cartridge ROM therefore gains little at 200 % over '
+    '175 %; code in work RAM runs at the full 200 %. Whether cartridge writes take it too is open question Q25.')
+p['open_questions'] += [
+    {'id': 'Q25', 'topic': 'Cartridge writes at 200 %', 'status': 'open',
+     'detail': ('The cartridge wait state at 200 % (Q12, cpu.turbo.cartridge_wait) applies to reads, which a 250 ns ROM '
+                'limits; both implementations apply it to reads only. Should writes to the cartridge slot (cartridge RAM '
+                'at $8000-$BFFF, mapper registers) take it too?')},
+]
+change(LATER + 'Q12 resolved by the owner: the cartridge wait state at 200 % is kept (cpu.turbo.cartridge_wait), on every '
+       'read from the cartridge or card slot. The emulator applied it only with its cartridge-timing setting, which is '
+       'now its default (its ROM-in-RAM setting is an emulator what-if), and the Pocket core adds it. Open question Q25 '
+       'added: whether cartridge writes take it too.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

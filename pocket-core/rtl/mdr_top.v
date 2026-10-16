@@ -226,9 +226,10 @@ module mdr_top #(
     wire        int_n;
     reg         nmi_n;
 
+    wire        cart_wait_n;
     mdr_z80 u_cpu (
         .clk(clk_sys), .reset_n(~reset), .cen(ce_cpu),
-        .wait_n(mem_wait_n && sync_wait_n), .int_n(int_n), .nmi_n(nmi_n),
+        .wait_n(mem_wait_n && sync_wait_n && cart_wait_n), .int_n(int_n), .nmi_n(nmi_n),
         .a(a), .dout(cpu_dout), .din(cpu_din),
         .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
         .m1_n(m1_n), .rfsh_n(rfsh_n), .halt_n(halt_n),
@@ -362,6 +363,23 @@ module mdr_top #(
         end else if (ce_base && since_fm != 7'd127) since_fm <= since_fm + 7'd1;
     end
     assign sync_wait_n = !(vdp_hold || fm_hold);
+
+    // ------------------------------------------------------------ cartridge wait state
+    // At 200 % a 250 ns cartridge ROM needs one wait state on every read (Q12,
+    // kept): each memory read in $0000-$BFFF, the cartridge and card slots,
+    // gets one TW. Not in SF-7000 mode, where $0000-$BFFF is the disk system's
+    // RAM and IPL. The read is seen in T1 (m_rd_start, one clock after the CPU's
+    // pulse); the count steps at each CPU enable, so it is 1, holding wait_n
+    // low, exactly at the T2 enable, and the CPU repeats T2 once. The PSRAM
+    // answers inside the 200 % window by itself, so this is the machine's wait
+    // state, not the memory's. HALT's repeated M1 reads take it too.
+    reg  [1:0] cart_ws = 2'd0;
+    always @(posedge clk_sys) begin
+        if (reset) cart_ws <= 2'd0;
+        else if (m_rd_start && m_a < 16'hC000 && mode != 3'd4 && step_eff == 3'd4) cart_ws <= 2'd2;
+        else if (ce_cpu && cart_ws != 2'd0) cart_ws <= cart_ws - 2'd1;
+    end
+    assign cart_wait_n = (cart_ws != 2'd1);
 
     // ------------------------------------------------------------ audio
     wire signed [15:0] psg_l, psg_r;

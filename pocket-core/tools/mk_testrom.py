@@ -4,7 +4,7 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, romwait.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -506,14 +506,48 @@ def build_mdrregs():
     return _ports_rom([], True, [], rows=MDRREGS_ROWS, region=0x8C)
 
 
-def _ports_rom(first, gate, every, rows=None, region=0x4C):
+# romwait.sms: the cartridge wait state at 200 % (Q12). Region 8; Feature Enable A
+# bit 6 lets it set the turbo step. Each case sets the step, waits for the start
+# of line $21, runs ROMWAIT_NOPS NOPs (in ROM, or the same block copied to work
+# RAM at $C200) and reads the V counter. Row label: high nibble 0 ROM, 1 RAM; low
+# nibble the $F3 step (4 = 200 %, 3 = 175 %). At 200 % a NOP in ROM takes 5
+# T-states and in RAM 4, so the ROM rows end about four lines later; at 175 % no
+# wait applies and the two rows read the same.
+ROMWAIT_NOPS = 2000
+ROMWAIT_CASES = [(4, 'rom'), (4, 'ram'), (3, 'rom'), (3, 'ram')]
+
+
+def build_romwait():
+    """The cartridge wait state check (ROMWAIT_CASES), in the ports.sms layout."""
+    def run(a):
+        for i, (step, where) in enumerate(ROMWAIT_CASES):
+            a.db(0x3E, step, 0xD3, 0xF3)                   # LD A,step ; OUT ($F3),A
+            a.label(f'ws{i}a'); a.db(0xDB, 0x7E, 0xFE, 0x20, 0x20); a.rel(f'ws{i}a')   # wait for line $20
+            a.label(f'ws{i}b'); a.db(0xDB, 0x7E, 0xFE, 0x20, 0x28); a.rel(f'ws{i}b')   # ...then for line $21
+            if where == 'rom':
+                a.db(0xCD); a.ref16('nops')                # CALL nops
+            else:
+                a.db(0xCD); a.dw(0xC200)                   # CALL $C200
+            a.db(0xDB, 0x7E, 0x32); a.dw(0xC100 + i)       # IN A,($7E) ; LD ($C100+i),A
+        a.db(0xAF, 0xD3, 0xF3)                             # back to 100 % for drawing
+    def init(a):
+        a.db(0x3E, 0xC0, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)   # R15 = $C0: turbo writes, I/O registers
+        a.db(0x21); a.ref16('nops'); a.db(0x11); a.dw(0xC200); a.db(0x01); a.dw(ROMWAIT_NOPS + 1)
+        a.db(0xED, 0xB0)                                   # LDIR: the block to work RAM
+    def tail(a):
+        a.label('nops'); a.db(*([0x00] * ROMWAIT_NOPS)); a.db(0xC9)
+    labels = [(0x10 if w == 'ram' else 0x00) | s for s, w in ROMWAIT_CASES]
+    return _ports_rom([], False, [], region=0x8C, custom=(init, run, tail, labels))
+
+
+def _ports_rom(first, gate, every, rows=None, region=0x4C, custom=None):
     """The ports.sms layout: the ports in first read once at start, the gate
     opened (R15 = $80, then 200 x 100 in the math unit on a MasterDrive) if
     gate, then the ports in every read each frame; all drawn one row each from
     row 3. With rows, each frame runs those (writes, port) rows instead; a row
     that reads $0A puts bank 0 back before anything touches work RAM."""
     rows = rows or []
-    allp = list(first) + list(every) + [r[1] for r in rows]
+    allp = list(first) + list(every) + [r[1] for r in rows] + (list(custom[3]) if custom else [])
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0)             # DI ; IM 1 ; LD SP,$DFF0
@@ -544,8 +578,12 @@ def _ports_rom(first, gate, every, rows=None, region=0x4C):
         a.db(0xDB, 0x17, 0xE6, 0xF0, 0xFE, 0xA0, 0x20); a.rel('nomd')   # IN A,($17) ; AND $F0 ; CP $A0 ; JR NZ
         a.db(0x3E, 200, 0xD3, 0x0C, 0x3E, 100, 0xD3, 0x0D, 0xAF, 0xD3, 0x0E)   # 200 x 100 = $4E20
         a.label('nomd')
+    if custom:
+        custom[0](a)                                       # once, before the loop
     a.label('loop')
-    if rows:                                               # each row: its writes, then IN A,(port) -> $C100+i
+    if custom:
+        custom[1](a)                                       # each pass: store the row values at $C100+i
+    elif rows:                                               # each row: its writes, then IN A,(port) -> $C100+i
         for i, (outs, port) in enumerate(rows):
             for q, v in outs:
                 a.db(0x3E, v, 0xD3, q)                     # LD A,v ; OUT (q),A
@@ -587,6 +625,9 @@ def _ports_rom(first, gate, every, rows=None, region=0x4C):
         a.label('every')
     a.db(*every)
     a.db(*[r[1] for r in rows])
+    if custom:
+        a.db(*custom[3])
+        custom[2](a)
     a.resolve()
     rom = a.b
     rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
@@ -774,6 +815,8 @@ if __name__ == '__main__':
     print('wrote mdports.sms')
     open(os.path.join(out, 'mdrregs.sms'), 'wb').write(build_mdrregs())
     print('wrote mdrregs.sms')
+    open(os.path.join(out, 'romwait.sms'), 'wb').write(build_romwait())
+    print('wrote romwait.sms')
     for m in ('g1', 'g2', 'mc', 'txt'):
         open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
         print(f'wrote tms_{m}.sg')

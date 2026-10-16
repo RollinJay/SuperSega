@@ -65,7 +65,8 @@
   "(after the October 2026 package) Q9 resolved by the owner: $0A reads the selected work RAM bank in bits 3-0 (memory.work_ram.bank_readback); it read $FF.",
   "(after the October 2026 package) Q14 resolved by the owner: $08 bits 6-4 read the PCM FIFO's bytes queued divided by 8, saturating at 7 (audio.pcm.fill_readback); the emulator returned the fill modulo 8.",
   "(after the October 2026 package) Q2 resolved by the owner: the largest cartridge ROM is 4 MB, the stock bank registers' reach (media.cartridge_slot); it was 8 MB, which needed a ninth bank bit. The console also reads the media of the computer side (media.other_media); how is open question Q23.",
-  "(after the October 2026 package) Q3 resolved by the owner: cartridge save RAM is 32 KB, two banks of 16 KB as the 315-5235 maps them (memory.cartridge_ram, media.mappers.sega.cart_ram). The emulator mirrored 2 x 8 KB and the Pocket core used 16 KB of its 32 KB; both now map 2 x 16 KB. Open question Q24 added: what a save-card profile holds and what identifies a game on the card."
+  "(after the October 2026 package) Q3 resolved by the owner: cartridge save RAM is 32 KB, two banks of 16 KB as the 315-5235 maps them (memory.cartridge_ram, media.mappers.sega.cart_ram). The emulator mirrored 2 x 8 KB and the Pocket core used 16 KB of its 32 KB; both now map 2 x 16 KB. Open question Q24 added: what a save-card profile holds and what identifies a game on the card.",
+  "(after the October 2026 package) Q12 resolved by the owner: the cartridge wait state at 200 % is kept (cpu.turbo.cartridge_wait), on every read from the cartridge or card slot. The emulator applied it only with its cartridge-timing setting, which is now its default (its ROM-in-RAM setting is an emulator what-if), and the Pocket core adds it. Open question Q25 added: whether cartridge writes take it too."
  ],
  "v5_changes": [
   "SG-series capability recovery: features the TMS9918 had and the SMS/GG Mode 4 VDP dropped are restored.",
@@ -205,7 +206,7 @@
    "clock_generation": "FPGA PLL generates true 4.47/5.37/6.26/7.16 MHz at the NTSC clock and 4.434/5.320/6.207/7.094 MHz at the PAL clock: each step is the same percentage of the base clock in both standards (open question Q22, decided by the owner); VDP, PSG and FM stay at 1x",
    "frame_rate_governance": "the game's existing VBlank wait",
    "enable": "Feature Enable A bit 6 - off at reset. A write to $F3 takes effect only while it is set, so unmodified SMS/GG software can never change the clock; the step stays in force until $F3 is written again.",
-   "cartridge_wait": "A 250 ns cartridge ROM is fast enough up to 175 %; at 200 % each cartridge access takes one wait state (open question Q12 covers the Pocket core).",
+   "cartridge_wait": "A 250 ns cartridge ROM is fast enough up to 175 %; at 200 %, in PAL as in NTSC, every read from the cartridge or card slot ($0000-$BFFF; not the SF-7000's RAM and IPL) takes one wait state, a halted CPU's M1 reads included (open question Q12, decided by the owner: kept). Code run from cartridge ROM therefore gains little at 200 % over 175 %; code in work RAM runs at the full 200 %. Whether cartridge writes take it too is open question Q25.",
    "v5_error": "v5 placed this on port 0x3F bits 6-4, which are the TR output levels for controller ports A and B. Any title driving TR would have changed the clock.",
    "fm_writes": "The FM chip stays at 1x. At turbo steps above 100 % the bus synchroniser holds the CPU on a write to $F0/$F1 until 12 base cycles have passed since an address write, or 84 since a data write (audio.fm.write_timing), so software written for 100 % keeps its FM music. Open question Q21, decided by the owner."
   },
@@ -1030,8 +1031,8 @@
   {
    "id": "Q12",
    "topic": "Cartridge wait state at 200 % turbo",
-   "status": "open",
-   "detail": "cpu.turbo.cartridge_wait gives one wait state per cartridge access at 200 % (250 ns ROM). The emulator applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only software running at 200 %."
+   "status": "resolved",
+   "detail": "cpu.turbo.cartridge_wait gives one wait state per cartridge read at 200 % (250 ns ROM); the emulator applied it only with its cartridge-timing setting and the Pocket core not at all. Decided by the owner in October 2026: kept, and the Pocket core adds it. Both implementations now apply it."
   },
   {
    "id": "Q13",
@@ -1104,6 +1105,12 @@
    "topic": "The save card: game identity and profile size",
    "status": "open",
    "detail": "A save-card profile holds the first 8 KB of bank 0 of a game's cartridge RAM, which is 32 KB (Q3), and each card entry carries a 32-bit game ID that the machine does not define (the emulator derives it from a sampled hash of the ROM, so two ROMs of the same size that differ only between sampled bytes share their card saves). Should a profile hold all 32 KB, and what identifies a game: a CRC-32 of the whole ROM, the header's product code, version and region (SG-1000 and SC-3000 cartridges have no header), or something else? How do existing cards carry over?"
+  },
+  {
+   "id": "Q25",
+   "topic": "Cartridge writes at 200 %",
+   "status": "open",
+   "detail": "The cartridge wait state at 200 % (Q12, cpu.turbo.cartridge_wait) applies to reads, which a 250 ns ROM limits; both implementations apply it to reads only. Should writes to the cartridge slot (cartridge RAM at $8000-$BFFF, mapper registers) take it too?"
   }
  ]
 }

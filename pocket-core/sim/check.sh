@@ -16,6 +16,8 @@
 #      modes (in MasterDrive mode also against the expected values), for the
 #      MasterDrive register ROM (mdrregs.sms: the math unit's multiply and
 #      divide, $0A and $08 read back, also against the expected values), for the
+#      cartridge wait state at 200 % (romwait.sms, NTSC and PAL, NTSC also
+#      against the expected values), for the
 #      VDP-height ROM in Game Gear mode, and for the four TMS9918-mode ROMs on the
 #      SG-1000 (Master System colours exactly, true TMS colours within the core's
 #      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
@@ -89,6 +91,8 @@ SYS_CASES=(
     "smsmdports|mdports.sms|sms|11|10||"
     "ggmdports|mdports.sms|gg|11|10||"
     "mdrregs|mdrregs.sms|ss|11|10||"
+    "romwait|romwait.sms|ss|14|13||"
+    "romwaitpal|romwait.sms|ss|14|13|-pal|PAL=1"
     "tmsg1|tms_g1.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsg2|tms_g2.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsmc|tms_mc.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
@@ -173,6 +177,13 @@ printf '%-9s math unit, $0A and $08 (MasterDrive mode): ' mdrregs
 python3 tools/read_ports_ppm.py "$W/sys/mdrregs_10.ppm" | head -17 | tr '\n' ' ' > "$W/sys/mdrregs.txt"
 want='$0F: $20 $10: $4E $0F: $1C $10: $04 $0F: $0F $10: $0F $0F: $00 $10: $05 $0F: $FF $10: $00 $0F: $01 $10: $FE $0A: $0B $0A: $0F $08: $00 $0E: $00 $17: $A7 '
 if [ "$(cat "$W/sys/mdrregs.txt")" = "$want" ]; then echo '200 / 7 = 28 r 4, 200 / 0 = $FF/$00, $0A reads back'; else echo "WRONG:"; cat "$W/sys/mdrregs.txt"; echo; fail=1; fi
+# the cartridge wait state at 200 % (Q12): romwait.sms runs 2,000 NOPs from ROM
+# and from work RAM and reads the V counter after them: at 200 % the ROM run
+# ends five lines later (5 T-states a NOP against 4), at 175 % both end together
+printf '%-9s cartridge wait state at 200 %%: ' romwait
+python3 tools/read_ports_ppm.py "$W/sys/romwait_13.ppm" | head -4 | tr '\n' ' ' > "$W/sys/romwait.txt"
+want='$04: $37 $14: $32 $03: $35 $13: $35 '
+if [ "$(cat "$W/sys/romwait.txt")" = "$want" ]; then echo 'ROM line $37, RAM $32 at 200 %; both $35 at 175 %'; else echo "WRONG:"; cat "$W/sys/romwait.txt"; echo; fail=1; fi
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"
