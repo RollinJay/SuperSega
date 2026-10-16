@@ -4,7 +4,7 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -470,12 +470,43 @@ def build_mdports():
     return _ports_rom(MDPORTS_FIRST, True, MDPORTS_EVERY)
 
 
-def _ports_rom(first, gate, every):
+# mdrregs.sms: the MasterDrive registers decided in Q7, Q9 and Q14. Region 8, so
+# it starts in MasterDrive mode; it opens the I/O gate, then each row writes its
+# ports and reads one: (writes, port read). Expected values in the comments.
+MDRREGS_ROWS = [
+    ([(0x0C, 200), (0x0D, 100), (0x0E, 0)], 0x0F),   # 200 x 100 = $4E20: $20
+    ([], 0x10),                                       # $4E
+    ([(0x0C, 200), (0x0D, 7), (0x0E, 1)], 0x0F),     # 200 / 7: quotient 28 ($1C)
+    ([], 0x10),                                       # remainder 4
+    ([(0x0C, 255), (0x0D, 16), (0x0E, 1)], 0x0F),    # 255 / 16: $0F
+    ([], 0x10),                                       # $0F
+    ([(0x0C, 5), (0x0D, 9), (0x0E, 1)], 0x0F),       # 5 / 9: 0
+    ([], 0x10),                                       # 5
+    ([(0x0C, 200), (0x0D, 0), (0x0E, 1)], 0x0F),     # divide by zero: $FF
+    ([], 0x10),                                       # $00
+    ([(0x0C, 255), (0x0D, 255), (0x0E, 0)], 0x0F),   # 255 x 255 = $FE01: $01
+    ([], 0x10),                                       # $FE
+    ([(0x0A, 0x0B)], 0x0A),                           # work RAM bank 11: $0B (bank 0 restored at once)
+    ([(0x0A, 0xFF)], 0x0A),                           # bank 15: $0F
+    ([], 0x08),                                       # PCM FIFO empty: $00
+    ([], 0x0E),                                       # $00
+    ([], 0x17),                                       # machine ID: $A7
+]
+
+
+def build_mdrregs():
+    """The MasterDrive register check (MDRREGS_ROWS), in the ports.sms layout."""
+    return _ports_rom([], True, [], rows=MDRREGS_ROWS, region=0x8C)
+
+
+def _ports_rom(first, gate, every, rows=None, region=0x4C):
     """The ports.sms layout: the ports in first read once at start, the gate
     opened (R15 = $80, then 200 x 100 in the math unit on a MasterDrive) if
     gate, then the ports in every read each frame; all drawn one row each from
-    row 3."""
-    allp = list(first) + list(every)
+    row 3. With rows, each frame runs those (writes, port) rows instead; a row
+    that reads $0A puts bank 0 back before anything touches work RAM."""
+    rows = rows or []
+    allp = list(first) + list(every) + [r[1] for r in rows]
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xDFF0)             # DI ; IM 1 ; LD SP,$DFF0
@@ -507,9 +538,18 @@ def _ports_rom(first, gate, every):
         a.db(0x3E, 200, 0xD3, 0x0C, 0x3E, 100, 0xD3, 0x0D, 0xAF, 0xD3, 0x0E)   # 200 x 100 = $4E20
         a.label('nomd')
     a.label('loop')
-    # read every port into $C100...
-    a.db(0x21); a.ref16('ports' if not first else 'every'); a.db(0x11); a.dw(0xC100 + len(first)); a.db(0x06, len(every))
-    a.label('rd'); a.db(0x4E, 0xED, 0x78, 0x12, 0x23, 0x13, 0x10); a.rel('rd')   # LD C,(HL) ; IN A,(C) ; LD (DE),A ; INC HL ; INC DE ; DJNZ
+    if rows:                                               # each row: its writes, then IN A,(port) -> $C100+i
+        for i, (outs, port) in enumerate(rows):
+            for q, v in outs:
+                a.db(0x3E, v, 0xD3, q)                     # LD A,v ; OUT (q),A
+            a.db(0xDB, port)                               # IN A,(port)
+            if any(q == 0x0A for q, _ in outs):
+                a.db(0x47, 0xAF, 0xD3, 0x0A, 0x78)         # LD B,A ; XOR A ; OUT ($0A),A ; LD A,B
+            a.db(0x32); a.dw(0xC100 + i)                   # LD ($C100+i),A
+    else:
+        # read every port into $C100...
+        a.db(0x21); a.ref16('ports' if not first else 'every'); a.db(0x11); a.dw(0xC100 + len(first)); a.db(0x06, len(every))
+        a.label('rd'); a.db(0x4E, 0xED, 0x78, 0x12, 0x23, 0x13, 0x10); a.rel('rd')   # LD C,(HL) ; IN A,(C) ; LD (DE),A ; INC HL ; INC DE ; DJNZ
     # ...then draw them, one row each from row 3
     a.db(0x21); a.dw(0x3800 + 3 * 64 + 6 * 2); a.db(0x22); a.dw(0xC200)   # row address
     a.db(0x21); a.ref16('ports'); a.db(0x22); a.dw(0xC204)
@@ -539,12 +579,13 @@ def _ports_rom(first, gate, every):
     if first:
         a.label('every')
     a.db(*every)
+    a.db(*[r[1] for r in rows])
     a.resolve()
     rom = a.b
     rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
     cs = sum(rom[0:0x7FF0]) & 0xFFFF
     rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
-    rom[0x7FFF] = 0x4C
+    rom[0x7FFF] = region
     return bytes(rom)
 
 
@@ -724,6 +765,8 @@ if __name__ == '__main__':
     print('wrote ports.sms')
     open(os.path.join(out, 'mdports.sms'), 'wb').write(build_mdports())
     print('wrote mdports.sms')
+    open(os.path.join(out, 'mdrregs.sms'), 'wb').write(build_mdrregs())
+    print('wrote mdrregs.sms')
     for m in ('g1', 'g2', 'mc', 'txt'):
         open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
         print(f'wrote tms_{m}.sg')

@@ -6,13 +6,16 @@
 #   1. tools/mk_testrom.py reproduces roms/ byte for byte
 #   2. sim/z80: the Z80 wrapper's instruction and port-access timing matches the emulator's Z80
 #   3. sim/io: the SC-3000 keyboard's ghosting and the math unit's divide, which
-#      take several clocks in the core, match reference models, and the
-#      MasterDrive I/O gate and machine ID answer as Q1 and Q8 decide
+#      take several clocks in the core, match reference models, $0A and $08
+#      read back, and the MasterDrive I/O gate and machine ID answer as Q1 and
+#      Q8 decide
 #   4. sim/sys: the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and MasterDrive feature test
 #      ROMs, for the I/O test ROM in Master System and Game Gear modes, for the
 #      I/O gate ROM (mdports.sms) in MasterDrive, Master System and Game Gear
 #      modes (in MasterDrive mode also against the expected values), for the
+#      MasterDrive register ROM (mdrregs.sms: the math unit's multiply and
+#      divide, $0A and $08 read back, also against the expected values), for the
 #      VDP-height ROM in Game Gear mode, and for the four TMS9918-mode ROMs on the
 #      SG-1000 (Master System colours exactly, true TMS colours within the core's
 #      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
@@ -85,6 +88,7 @@ SYS_CASES=(
     "mdports|mdports.sms|ss|11|10||"
     "smsmdports|mdports.sms|sms|11|10||"
     "ggmdports|mdports.sms|gg|11|10||"
+    "mdrregs|mdrregs.sms|ss|11|10||"
     "tmsg1|tms_g1.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsg2|tms_g2.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
     "tmsmc|tms_mc.sg|sg|61|20 46 60|-tmsapprox|AEL=tmscol=0"
@@ -162,6 +166,13 @@ printf '%-9s I/O gate and machine ID (MasterDrive mode): ' mdports
 python3 tools/read_ports_ppm.py "$W/sys/mdports_10.ppm" | head -17 | tr '\n' ' ' > "$W/sys/mdports.txt"
 want='$01: $FF $06: $FF $09: $FF $0F: $FF $16: $FF $17: $FF $00: $C0 $01: $7F $06: $FF $09: $00 $0E: $00 $0F: $20 $10: $4E $16: $81 $17: $A7 $18: $FF $DC: $FF '
 if [ "$(cat "$W/sys/mdports.txt")" = "$want" ]; then echo 'closed $FF, open $17 = $A7'; else echo "WRONG:"; cat "$W/sys/mdports.txt"; echo; fail=1; fi
+# the MasterDrive registers (Q7, Q9, Q14): mdrregs.sms multiplies and divides
+# (quotient, remainder, divide by zero $FF/$00), reads the work RAM bank back at
+# $0A and the empty PCM FIFO at $08
+printf '%-9s math unit, $0A and $08 (MasterDrive mode): ' mdrregs
+python3 tools/read_ports_ppm.py "$W/sys/mdrregs_10.ppm" | head -17 | tr '\n' ' ' > "$W/sys/mdrregs.txt"
+want='$0F: $20 $10: $4E $0F: $1C $10: $04 $0F: $0F $10: $0F $0F: $00 $10: $05 $0F: $FF $10: $00 $0F: $01 $10: $FE $0A: $0B $0A: $0F $08: $00 $0E: $00 $17: $A7 '
+if [ "$(cat "$W/sys/mdrregs.txt")" = "$want" ]; then echo '200 / 7 = 28 r 4, 200 / 0 = $FF/$00, $0A reads back'; else echo "WRONG:"; cat "$W/sys/mdrregs.txt"; echo; fail=1; fi
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"

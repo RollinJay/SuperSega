@@ -633,6 +633,35 @@ probe('M55', 'Machine ID (Q8): with Feature Enable A bit 7 set, port $17 reads $
            note: `MasterDrive ${hex(ids[0])}, SMS ${hex(ids[1])}, GG ${hex(ids[2])}; before the gate ${hex(before)}, write -> $3F ${hex(mirror)}; after ${hex(absorbed)}` };
 });
 
+probe('M56', 'Math unit divide (Q7): A / B, unsigned, the quotient in $0F and the remainder in $10; a divide by zero gives $FF/$00; multiply is unchanged (Technical Reference \u00a79)', () => {
+  const m = sms('ss'); m.vdp.reg[15] = 0x80;
+  const run = (a, b, op) => { m.out(0x0C, a); m.out(0x0D, b); m.out(0x0E, op); return [m.inp(0x0F), m.inp(0x10)]; };
+  let bad = 0;
+  for (let a = 0; a < 256; a++) for (let b = 0; b < 256; b++) {
+    const [q, r] = run(a, b, 1);
+    if (b ? (q !== Math.floor(a / b) || r !== a % b) : (q !== 0xFF || r !== 0x00)) bad++;
+  }
+  const d = run(200, 7, 1), x = run(255, 255, 0);
+  return { ok: bad === 0 && d[0] === 28 && d[1] === 4 && x[0] === 0x01 && x[1] === 0xFE && m.inp(0x0E) === 0,
+           note: `${bad} of 65536 divides wrong; 200 / 7 = ${d[0]} r ${d[1]}; 255 x 255 = $${(x[1] * 256 + x[0]).toString(16)}` };
+});
+
+probe('M57', 'Work RAM bank readback (Q9): $0A reads the selected bank in bits 3-0, bits 7-4 read 0; in Master System mode it reads $FF (Technical Reference \u00a72)', () => {
+  const m = sms('ss'); m.vdp.reg[15] = 0x80;
+  const got = [0x00, 0x05, 0x0B, 0x0F, 0xF3, 0xFF].map(v => { m.out(0x0A, v); return m.inp(0x0A); });
+  const s = sms('sms'); s.vdp.reg[15] = 0x80;
+  return { ok: got.join(',') === '0,5,11,15,3,15' && s.inp(0x0A) === 0xFF,
+           note: `writes $00 $05 $0B $0F $F3 $FF read ${got.join(' ')}; Master System $${s.inp(0x0A).toString(16)}` };
+});
+
+probe('M58', 'PCM FIFO fill (Q14): $08 bits 6-4 read the bytes queued divided by 8, saturating at 7; the 65th byte is dropped (Technical Reference \u00a77)', () => {
+  const want = { 0: 0x00, 7: 0x00, 8: 0x10, 15: 0x10, 16: 0x20, 55: 0x60, 56: 0x70, 63: 0x70, 64: 0x70, 65: 0x70 };
+  const got = Object.keys(want).map(n => { const m = sms('ss'); m.vdp.reg[15] = 0x80;
+    for (let i = 0; i < +n; i++) m.out(0x07, 0x80); return [n, m.inp(0x08), m.pcm.fifo.length]; });
+  return { ok: got.every(([n, v, len]) => v === want[n] && len === Math.min(64, +n)),
+           note: got.map(([n, v]) => `${n}:$${v.toString(16)}`).join(' ') };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

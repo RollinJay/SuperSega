@@ -34,6 +34,16 @@ chk('work RAM %d bytes'%wram['size_bytes'],
 chk('work RAM %d banks'%wram['banks'], 'this.wramBank=v&%d;'%(wram['banks']-1) in js, 'bank register masked to the bank count')
 chk('work RAM bank port %s'%wram['bank_register_port'], 'case %s: this.wramBank='%hexlit(wram['bank_register_port']) in js)
 
+chk('work RAM bank reads back at %s'%wram['bank_register_port'],
+    'bank_readback' in wram and 'if(p===%s) return this.wramBank;'%hexlit(wram['bank_register_port']) in js)
+mu=prof['math_unit']
+chk('divide: quotient in $0F, remainder in $10, $FF/$00 on zero',
+    'quotient in $0F, the remainder in $10' in mu['divide'] and '$FF in $0F and $00' in mu['divide']
+    and '(b? (((a%b)<<8)|Math.floor(a/b)) : 0x00FF)' in js)
+pcm=prof['audio']['pcm']
+chk('PCM FIFO %d bytes, fill read as bytes / 8 saturating at 7'%pcm['fifo_bytes'],
+    'saturating at 7' in pcm['fill_readback'] and 'if(this.pcm.fifo.length<%d)'%pcm['fifo_bytes'] in js
+    and 'Math.min(7,this.pcm.fifo.length>>3)<<4' in js)
 mid=prof['software_detection']['machine_id']
 chk('machine ID %s at port %s'%(mid['value'], mid['port']),
     'const MACHINE_ID=%s;'%hexlit(mid['value']) in js and 'if(p===%s) return MACHINE_ID;'%hexlit(mid['port']) in js)

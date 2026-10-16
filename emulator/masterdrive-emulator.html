@@ -1783,8 +1783,9 @@ class Machine{
        port mirror does. Ports in $07-$17 with nothing readable return $FF. */
     if(this.mode==='ss'&&p>=0x07&&p<=0x17&&this.mdIO()){
       if(p===0x17) return MACHINE_ID;
-      if(p===0x08) return (this.pcm.fifo.length<<4)&0x70;
+      if(p===0x08) return Math.min(7,this.pcm.fifo.length>>3)<<4;   /* bytes queued / 8, saturating at 7 (Q14) */
       if(p===0x09) return this.slotSel;
+      if(p===0x0A) return this.wramBank;                             /* the selected bank, bits 3-0 (Q9) */
       if(p===0x0B) return this.cardBank;
       if(p===0x0E) return 0;
       if(p===0x0F) return this.mathRes&0xFF;
@@ -2000,8 +2001,10 @@ class Machine{
         case 0x0B: this.cardBank=v&0x1F; return;
         case 0x0C: this.math[0]=v; return;
         case 0x0D: this.math[1]=v; return;
-        case 0x0E: this.mathRes=(v&1)? (this.math[1]?Math.floor(((this.math[0]<<8)|this.math[1])/(this.math[1]||1)):0)
-                                     : (this.math[0]*this.math[1]); return;
+        /* bit 0 = 0: A x B; 1: A / B, the quotient in $0F and the remainder in
+           $10, $FF/$00 for a divide by zero (Q7) */
+        case 0x0E: { const a=this.math[0], b=this.math[1];
+          this.mathRes=(v&1)? (b? (((a%b)<<8)|Math.floor(a/b)) : 0x00FF) : a*b; return; }
         case 0x11: this.waveSel=(v>>5)&1; this.waveIdx=v&31; return;
         case 0x12: this.wave[this.waveSel].ram[this.waveIdx]=v&15; return;
         case 0x13: this.wave[this.waveSel].f=(this.wave[this.waveSel].f&0xF00)|v; return;
@@ -3041,7 +3044,7 @@ const FPGA_JOBS=[
  {id:'uniqueCell',side:'fpga', name:'Unique-cell mode',            owns:'10-bit tile index the ASIC cannot address'},
  {id:'extCram',   side:'fpga', name:'Extended CRAM 2-15',          owns:'256 entries with written-flag aliasing'},
  {id:'dma',       side:'fpga', name:'DMA engine',                  owns:'ROM/RAM to VRAM, VRAM copy, fill'},
- {id:'math',      side:'fpga', name:'Math unit',                   owns:'8x8 multiply, 16/8 divide'},
+ {id:'math',      side:'fpga', name:'Math unit',                   owns:'8x8 multiply, 8/8 divide with remainder'},
  {id:'pcm',       side:'fpga', name:'PCM FIFO and wavetable',      owns:'sample playback and two wavetable voices'},
  {id:'mapper',    side:'fpga', name:'Mapper and slot arbitration', owns:'Sega mapper, dual-slot routing, card banking'},
  {id:'keyboard',  side:'fpga', name:'SK-1100 keyboard via PPI',    owns:'row select and matrix read'},

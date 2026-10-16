@@ -9,8 +9,10 @@
 //             clocks later, with and without ghosting. The reference is the
 //             closure as one combinational loop, the core's earlier form.
 //   math unit MasterDrive mode: OUT $0C (A), $0D (B), $0E (operation), then
-//             $0F/$10 read 16 clocks later. Divide: {A, B} / B, 0 when B = 0;
-//             multiply: A x B.
+//             $0F/$10 read 16 clocks later. Divide: A / B, the quotient in $0F
+//             and the remainder in $10, $FF/$00 when B = 0 (Q7); multiply: A x B.
+//   registers MasterDrive mode: $0A reads the work RAM bank (Q9), $08 the
+//             PCM FIFO fill / 8, saturating at 7 (Q14).
 //   I/O gate  MasterDrive mode: $01-$17 are the $3E/$3F mirrors and read $FF
 //             until Feature Enable A bit 7 is set (Q1), then the registers,
 //             $17 reading the machine ID $A7 (Q8); Game Gear and Master System
@@ -33,15 +35,17 @@ module tb;
     reg  [7:0] p1 = 8'h00, p2 = 8'h00;
     reg        ghost = 1'b0;
     reg  [7:0] fea = 8'h00;
+    reg  [6:0] fill = 7'd0;
     wire [7:0] rdata, mem_ctl, io_ctl;
+    wire [3:0] wram_bank;
     wire       stereo_wr;
 
     mdr_io u_io (.clk(clk), .rst(rst), .mode(mode), .jp_region(1'b0), .fm_present(1'b0),
         .io_sample(io_sample), .io_write(io_write), .port(port), .wdata(wdata), .rdata(rdata),
         .vdp_rdata(8'h00), .vdp_rd(), .vdp_wr(), .vdp_fea(fea), .vdp_fec(8'h00), .th_latch(),
         .psg_wr(), .stereo_wr(stereo_wr), .fm_wr(), .fm_addr(), .fm_ctl(), .mem_ctl(mem_ctl), .io_ctl(io_ctl),
-        .wram_bank(), .slot_sel(), .card_bank(), .turbo_step(), .pcm_ctl(), .pcm_wr(),
-        .pcm_fill(7'd0), .pad1(p1), .pad2(p2), .reset_btn(1'b0), .kb_keys(keys),
+        .wram_bank(wram_bank), .slot_sel(), .card_bank(), .turbo_step(), .pcm_ctl(), .pcm_wr(),
+        .pcm_fill(fill), .pad1(p1), .pad2(p2), .reset_btn(1'b0), .kb_keys(keys),
         .kb_ghosting(ghost));
 
     task out(input [7:0] p, input [7:0] d);
@@ -91,13 +95,13 @@ module tb;
         end
     endfunction
 
-    integer n, k, bad_kb, bad_math, bad_gate, ghosted, a, b, op;
+    integer n, k, bad_kb, bad_math, bad_gate, bad_reg, ghosted, a, b, op;
     reg [2:0]  row;
     reg [7:0]  lo, hi;
     reg [11:0] want_kb;
     reg [15:0] got, want;
     initial begin
-        bad_kb = 0; bad_math = 0; bad_gate = 0; ghosted = 0;
+        bad_kb = 0; bad_math = 0; bad_gate = 0; bad_reg = 0; ghosted = 0;
         repeat (3) @(negedge clk);
         rst = 1'b0;
 
@@ -133,13 +137,29 @@ module tb;
             out(8'h0C, a); out(8'h0D, b); out(8'h0E, op);
             repeat (16) @(negedge clk);
             in(8'h0F, got[7:0]); in(8'h10, got[15:8]);
-            want = op ? ((b != 0) ? ({a[7:0], b[7:0]} / b[7:0]) : 16'd0) : a[7:0] * b[7:0];
+            want = op ? ((b != 0) ? {a[7:0] % b[7:0], a[7:0] / b[7:0]} : 16'h00FF) : a[7:0] * b[7:0];
             if (got !== want) begin
                 bad_math = bad_math + 1;
                 if (bad_math <= 5) $display("math: A %0d B %0d op %0d read %h, expected %h", a, b, op, got, want);
             end
         end
         $display("math unit: %0d cases, %0d wrong", n, bad_math);
+
+        // ---- $0A work RAM bank (Q9) and $08 PCM fill (Q14), gate open
+        mode = 3'd5; fea = 8'h80;
+        for (n = 0; n < 256; n = n + 1) begin
+            out(8'h0A, n);
+            in(8'h0A, lo);
+            if (lo !== {4'h0, n[3:0]} || wram_bank !== n[3:0]) bad_reg = bad_reg + 1;
+        end
+        for (n = 0; n <= 64; n = n + 1) begin
+            fill = n;
+            in(8'h08, lo);
+            if (lo !== {1'b0, (n >= 56) ? 3'd7 : n[5:3], 4'h0}) bad_reg = bad_reg + 1;
+        end
+        fill = 7'd0;
+        out(8'h0A, 8'h00);
+        $display("registers ($0A, $08): %0d wrong", bad_reg);
 
         // ---- the I/O gate (Q1) and the machine ID (Q8)
         mode = 3'd5; fea = 8'h00;                               // MasterDrive, gate closed
@@ -166,7 +186,7 @@ module tb;
         out(8'h0C, 8'h55); if (mem_ctl !== 8'h55) bad_gate = bad_gate + 1;
         $display("I/O gate and machine ID: %0d wrong", bad_gate);
 
-        if (bad_kb == 0 && bad_math == 0 && bad_gate == 0) $display("PASS");
+        if (bad_kb == 0 && bad_math == 0 && bad_gate == 0 && bad_reg == 0) $display("PASS");
         else $display("FAIL");
         $finish;
     end

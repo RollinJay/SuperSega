@@ -66,7 +66,7 @@ The FM chip also needs time between register writes (§7): 12 base cycles after 
 
 Bank 0 at reset is the stock 8 KB that Master System software expects. The first 64 KB can be used as one contiguous block, which the SF-7000 disk system needs.
 
-The work RAM bank register cannot be read back yet; interrupt handlers that switch banks need a way to restore the previous bank (open question Q9).
+`$0A` reads back the selected bank in bits 3–0 (bits 7–4 read 0), so an interrupt handler that switches banks can save and restore it (Q9, decided October 2026).
 
 ### Port `$3E` — memory enables
 
@@ -250,10 +250,10 @@ A multitap on the pad port (Sega Team Player MK-1654 or EA 4 Way Play protocol),
 |---|---|---|
 | SN76489 PSG (3 tones + noise) | `$7E`/`$7F` write | stereo panning on `$06` (Game Gear mode, and MasterDrive mode once Feature Enable A bit 7 is set, §11) |
 | YM2413 FM | `$F0` register, `$F1` data, `$F2` control | the FM unit is always fitted |
-| PCM FIFO (64 bytes) | `$07` data, `$08` control | MasterDrive |
+| PCM FIFO (64 bytes) | `$07` data, `$08` control (write) and fill (read) | MasterDrive |
 | Two wavetable voices | `$11`–`$15` | MasterDrive |
 
-The register layouts of PCM control (`$08` write) and the wavetable are not written down yet (open question Q16).
+Reading `$08` gives the PCM FIFO's fill: bits 6–4 are the bytes queued divided by 8, saturating at 7 (56–64 bytes read 7); the other bits read 0. A byte written to `$07` while 64 are queued is dropped (Q14, decided October 2026). The register layouts of PCM control (`$08` write) and the wavetable are not written down yet (open question Q16).
 
 **PSG details.** Tone counters run at the CPU clock ÷ 16 and flip their output on reaching zero; a period of 0 behaves as 1. The noise counter (rate `$10`, `$20`, `$40`, or tone 2's period) flips a flip-flop, and the 16-bit noise shift register advances on its rising edge — once per two counter periods. White noise taps bits 0 and 3; writing the noise register resets the shift register to `$8000`. Volume is attenuation in 2 dB steps; 15 is silent.
 
@@ -324,10 +324,10 @@ DMA on `$F4`–`$FA`: ROM or RAM to VRAM, VRAM to VRAM, and fill. Its register l
 | `$0C` | operand A |
 | `$0D` | operand B |
 | `$0E` | write: bit 0 = 0 multiply, 1 divide; read: 0 (operation complete) |
-| `$0F` | result low |
-| `$10` | result high |
+| `$0F` | result low: the product's low byte, or the quotient |
+| `$10` | result high: the product's high byte, or the remainder |
 
-Multiply is A × B, unsigned 16-bit. **Divide is under-specified** (open question Q7): the emulator computes `((A << 8) | B) / B`, almost certainly not the intent. The proposal on the table is A ÷ B with the quotient in `$0F`, the remainder in `$10`, and divide-by-zero returning `$FF`/`$00`.
+Multiply is A × B, unsigned 16-bit. Divide is A ÷ B, unsigned: the quotient in `$0F` and the remainder in `$10`. A divide by zero gives `$FF` in `$0F` and `$00` in `$10`, which 255 ÷ 1 also gives, so software that must tell them apart tests B (Q7, decided October 2026). The result is ready for the next instruction. Like the other MasterDrive registers, the math unit answers once Feature Enable A bit 7 is set (§11).
 
 ---
 
@@ -380,9 +380,9 @@ Bank 2 unallocated; bank 3 reserved.
 | `$00` | Game Gear Start / region (Game Gear and MasterDrive modes) |
 | `$01`–`$05` | Game Gear serial (EXT link) registers (Game Gear mode; MasterDrive mode once Feature Enable A bit 7 is set) |
 | `$06` | PSG stereo panning (write-only; Game Gear mode, and MasterDrive mode once Feature Enable A bit 7 is set) |
-| `$07`–`$08` | PCM FIFO data / control |
+| `$07`–`$08` | PCM FIFO data / control (write) and fill (read) |
 | `$09` | slot source select |
-| `$0A` | work RAM bank |
+| `$0A` | work RAM bank (reads back in bits 3–0) |
 | `$0B` | extended card bank |
 | `$0C`–`$10` | math unit |
 | `$11`–`$15` | wavetable audio |
@@ -557,14 +557,14 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q4 | ESAT format | resolved in v6: 2 bytes per sprite |
 | Q5 | Unique-cell mode and 32 KB VRAM | resolved in v6: coupled |
 | Q6 | Turbo default | resolved: off at reset; a title turns it on itself (Feature Enable A bit 6, then `$F3`). The enhancement layer's turbo is for unmodified software only |
-| Q7 | Math unit divide | open (§9) |
+| Q7 | Math unit divide | resolved (owner, October 2026): A ÷ B, the quotient in `$0F` and the remainder in `$10`, `$FF`/`$00` for a divide by zero (§9). Both implementations do this |
 | Q8 | Run-time detection of a MasterDrive by a single ROM | resolved (owner, October 2026): a boot-menu option runs an export cartridge in MasterDrive mode, and a read-only machine ID at `$17` reads `$A7` behind the I/O gate (§14). Both implementations do this |
-| Q9 | Work RAM bank readback at `$0A` | open |
+| Q9 | Work RAM bank readback at `$0A` | resolved (owner, October 2026): `$0A` reads the selected bank in bits 3–0 (§2). Both implementations do this |
 | Q10 | Reverting third-party GG-to-SMS patches | an emulator workflow, not a machine question |
 | Q11 | Should the true-TMS-colours boost default off like every other boost, and act only in the stock modes? | resolved (owner, October 2026): on at power-on, one of the two boosts that start on (Start = Pause is the other), and it also acts on MasterDrive software's TMS modes (§15). Both implementations do this |
 | Q12 | One cartridge wait state at 200 % turbo: the emulator applies it; the Pocket core does not yet | open |
 | Q13 | Feature Enable C bit 4 (ESAT 2-byte) contradicts ESAT being 2 bytes per sprite (Q4); the emulator still has a 1-byte layout when the bit is clear. Retire the bit or document the 1-byte layout | open |
-| Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | open |
+| Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | resolved (owner, October 2026): the proposal (§7). The emulator does this; the Pocket core has no PCM yet, and its `$08` reads an empty FIFO |
 | Q15 | Line interrupts in the TMS9918 modes. The machine profile lists them as a MasterDrive enhancement for SG-1000-style software (line interrupts are a Master System addition) but defines no bit that enables them. As stock the TMS modes raise none, and both implementations follow that in the stock modes; in MasterDrive mode both raise them in the TMS modes whenever R0 bit 4 is set. Should the line counter run in the TMS modes on MasterDrive, and what enables it? | open |
 | Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the window split (bank 0 R13 and R14) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | open |
 | Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for MasterDrive software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192? | open |
@@ -606,7 +606,7 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Link cable | not yet | not yet |
 | MasterDrive register banks, native/extended CRAM, 16 sprites per line, turbo and bus synchroniser | yes | yes |
 | Work RAM banking (`$0A`) | yes | yes |
-| Math unit (`$0C`–`$10`) | yes; divide as §9 describes, until Q7 is decided | the same |
+| Math unit (`$0C`–`$10`) | yes | yes |
 | Card slot: slot select (`$09`) and card bank (`$0B`) | yes | registers and memory decode only: the Pocket platform loads no card, so the slot is always empty |
 | VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |
 | ESAT, 16×16 and magnified sprites, window/text layers, line tables, unique-cell | yes | registers only, not drawn |
@@ -617,4 +617,4 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | PAL CPU clock (3.546893 MHz, §1) | yes: PAL frames come at 49.70 a second, and the PSG and FM chip run on the PAL clock | yes, the same (the Pocket's video clock stays fixed, so a PAL line reaches its scaler as 345 or 346 pixel clocks; not yet seen on a Pocket) |
 | Enhancement layer | all | all |
 
-**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a MasterDrive feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and MasterDrive modes and gets the same values on both, apart from the one difference the implementations are meant to have: no debug host is attached to the core (`$FC`/`$FD` bit 7, MasterDrive mode). An I/O gate test ROM reads MasterDrive's low ports before and after setting Feature Enable A bit 7: in MasterDrive mode they read `$FF` while the gate is closed, then the registers answer and `$17` reads `$A7`; in Master System and Game Gear modes the gate never opens. The emulator and the core agree in all three modes. An FM test ROM plays a PSG tone and an FM sine and steps `$F2` through its four states: on the core each chip is heard exactly in the states that select it, at the expected pitch and at the balance above (Q20). The emulator's `$F2` states are checked by a probe; its FM sound is approximate, so the two sound different. Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Nothing has run on a Pocket yet.
+**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a MasterDrive feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and MasterDrive modes and gets the same values on both, apart from the one difference the implementations are meant to have: no debug host is attached to the core (`$FC`/`$FD` bit 7, MasterDrive mode). An I/O gate test ROM reads MasterDrive's low ports before and after setting Feature Enable A bit 7: in MasterDrive mode they read `$FF` while the gate is closed, then the registers answer and `$17` reads `$A7`; in Master System and Game Gear modes the gate never opens. The emulator and the core agree in all three modes. A MasterDrive register test ROM multiplies and divides in the math unit (with a divide by zero) and reads `$0A`, `$08` and `$17` back: both give the values §2, §7, §9 and §14 define. An FM test ROM plays a PSG tone and an FM sine and steps `$F2` through its four states: on the core each chip is heard exactly in the states that select it, at the expected pitch and at the balance above (Q20). The emulator's `$F2` states are checked by a probe; its FM sound is approximate, so the two sound different. Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Nothing has run on a Pocket yet.

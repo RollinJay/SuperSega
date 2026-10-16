@@ -60,7 +60,10 @@
   "(after the October 2026 package) The machine is renamed MasterDrive (formerly Super Sega), the owner's choice: an all-in-one Sega 8-bit computer and console concept, with updates. Every name in the profile follows, the machine id and two keys included (video.mode4.height_selection.masterdrive, port_map.masterdrive_read_values).",
   "(after the October 2026 package) Q22 resolved by the owner: in PAL the turbo steps are the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz (cpu.turbo.clock_generation), as both implementations already ran them.",
   "(after the October 2026 package) Q1 resolved by the owner: in MasterDrive mode the I/O registers at $01-$17 answer only while Feature Enable A bit 7 is set (port_map.native_gate); until then those ports are the $3E/$3F mirrors and read $FF, as on a Master System, and $00 still answers. The gate is live and the registers keep their settings while it is closed. port_map.mode_scope and open_risk and Feature Enable A (bank 0 R15) follow.",
-  "(after the October 2026 package) Q8 resolved by the owner: a boot-menu option runs an export cartridge in MasterDrive mode, and a read-only machine ID register at $17 reads $A7 (high nibble $A = MasterDrive, low nibble the machine version), behind the I/O gate of Q1 (software_detection)."
+  "(after the October 2026 package) Q8 resolved by the owner: a boot-menu option runs an export cartridge in MasterDrive mode, and a read-only machine ID register at $17 reads $A7 (high nibble $A = MasterDrive, low nibble the machine version), behind the I/O gate of Q1 (software_detection).",
+  "(after the October 2026 package) Q7 resolved by the owner: the math unit divides A by B, the quotient in $0F and the remainder in $10, $FF/$00 for a divide by zero (math_unit.divide). Both implementations computed ((A << 8) | B) / B.",
+  "(after the October 2026 package) Q9 resolved by the owner: $0A reads the selected work RAM bank in bits 3-0 (memory.work_ram.bank_readback); it read $FF.",
+  "(after the October 2026 package) Q14 resolved by the owner: $08 bits 6-4 read the PCM FIFO's bytes queued divided by 8, saturating at 7 (audio.pcm.fill_readback); the emulator returned the fill modulo 8."
  ],
  "v5_changes": [
   "SG-series capability recovery: features the TMS9918 had and the SMS/GG Mode 4 VDP dropped are restored.",
@@ -544,6 +547,7 @@
     "0x07": "data",
     "0x08": "control"
    },
+   "fill_readback": "$08 read: bits 6-4 = bytes queued / 8, saturating at 7 (56-64 bytes read 7); the other bits read 0. A write to $07 while 64 bytes are queued is dropped. Decided by the owner (open question Q14).",
    "tier": 1
   },
   "wavetable": {
@@ -661,11 +665,11 @@
    "0x0C": "operand A",
    "0x0D": "operand B",
    "0x0E": "write: bit 0 = 0 multiply, 1 divide; read: 0",
-   "0x0F": "result low",
-   "0x10": "result high"
+   "0x0F": "result low: the product low byte, or the quotient",
+   "0x10": "result high: the product high byte, or the remainder"
   },
   "multiply": "A x B, unsigned 16-bit result",
-  "divide_open": "UNDER-SPECIFIED. The emulator computes ((A << 8) | B) / B, which is almost certainly not the intent. Proposal: A / B with quotient in $0F and remainder in $10, divide by zero returns $FF/$00. Needs a decision."
+  "divide": "A / B, unsigned: the quotient in $0F, the remainder in $10. A divide by zero gives $FF in $0F and $00 in $10, which 255 / 1 also gives, so software that must tell them apart tests B. Decided by the owner (open question Q7)."
  },
  "compatibility": {
   "reset_state": "All features disabled, turbo at 100%, legacy modes authentic. Behaviour-identical to stock hardware in every mode.",
@@ -714,6 +718,7 @@
    "bank_size_bytes": 8192,
    "window": "0xC000-0xDFFF, mirrored at 0xE000-0xFFFF",
    "bank_register_port": "0x0A",
+   "bank_readback": "$0A reads the selected bank in bits 3-0; bits 7-4 read 0. Decided by the owner (open question Q9), so an interrupt handler can save and restore the bank.",
    "rationale": "128 KB lets the first 64 KB be presented as a contiguous bank set for SF-7000 compatibility, and gives native software real headroom. v5 specified 8 KB banked to 64 KB.",
    "stock_compatibility": "Bank 0 at reset presents the stock 8 KB an SMS title expects."
   },
@@ -773,11 +778,12 @@
   "io_chip_disable": "$3E bit 2 disables the controller decode (the $DC/$DD mirror across $C0-$FF) on the Master System and on MasterDrive. It has no effect on the Game Gear, even in SMS mode. It does not affect $F2 (FM detection) or MasterDrive's fully decoded $F0-$FF window.",
   "masterdrive_read_values": {
    "0x01-0x17": "decoded by the FPGA in MasterDrive mode while Feature Enable A bit 7 is set (port_map.native_gate): $01-$05 the Game Gear serial registers, $06 $FF (write-only), $07-$17 as below; ports with no readable register return $FF, never the controller mirror. While the gate is closed they read $FF, as on a Master System.",
-   "0x08": "PCM FIFO fill, bits 6-4",
+   "0x08": "PCM FIFO fill (audio.pcm.fill_readback): bits 6-4 = bytes queued / 8, saturating at 7",
    "0x09": "slot source select, as written",
+   "0x0A": "work RAM bank in bits 3-0 (memory.work_ram.bank_readback)",
    "0x0B": "extended card bank, as written",
    "0x0E": "0 (operation complete)",
-   "0x0F-0x10": "math result, low then high",
+   "0x0F-0x10": "math result, low then high: the product, or the quotient then the remainder (math_unit.divide)",
    "0x16": "$81: pad detected, detection complete",
    "0x17": "$A7: the machine ID (software_detection.machine_id)",
    "0xF0-0xF1, 0xF3": "$FF",
@@ -983,8 +989,8 @@
   {
    "id": "Q7",
    "topic": "Math unit divide",
-   "status": "open",
-   "detail": "See math_unit.divide_open."
+   "status": "resolved",
+   "detail": "The emulator computed ((A << 8) | B) / B. Decided by the owner in October 2026: A / B, the quotient in $0F and the remainder in $10, $FF/$00 for a divide by zero (math_unit.divide)."
   },
   {
    "id": "Q8",
@@ -995,8 +1001,8 @@
   {
    "id": "Q9",
    "topic": "Work RAM bank readback at $0A",
-   "status": "open",
-   "detail": "Not readable today. Interrupt handlers that switch banks need to restore the previous one; readback or a documented RAM shadow is needed."
+   "status": "resolved",
+   "detail": "$0A was write-only, so an interrupt handler that switches banks could not restore the previous one. Decided by the owner in October 2026: $0A reads the selected bank in bits 3-0 (memory.work_ram.bank_readback)."
   },
   {
    "id": "Q10",
@@ -1025,8 +1031,8 @@
   {
    "id": "Q14",
    "topic": "PCM FIFO fill reading at $08",
-   "status": "open",
-   "detail": "$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bits 6-4 = bytes queued / 8, saturating at 7."
+   "status": "resolved",
+   "detail": "$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returned the fill modulo 8, so a full FIFO read as empty. Decided by the owner in October 2026: bits 6-4 = bytes queued / 8, saturating at 7 (audio.pcm.fill_readback)."
   },
   {
    "id": "Q15",

@@ -57,7 +57,7 @@ module mdr_io (
     output reg  [2:0]  turbo_step,       // $F3: 0..4 = 100..200 %
     output reg  [7:0]  pcm_ctl,
     output wire        pcm_wr,
-    input  wire [6:0]  pcm_fill,
+    input  wire [6:0]  pcm_fill,         // bytes queued in the PCM FIFO, 0-64
 
     // controllers: {start, c, b(2/TR), a(1/TL), right, left, down, up} active high
     input  wire [7:0]  pad1,
@@ -85,8 +85,8 @@ module mdr_io (
     reg [7:0] gg_sio [1:5];
     reg [7:0] math_a, math_b;
     reg [15:0] math_res;
-    reg        math_div;                 // the result is the divider's (div_q)
-    reg [15:0] div_q = 16'd0;
+    reg        math_div;                 // the result is the divider's (div_q, div_r)
+    reg [7:0]  div_q = 8'd0;
     reg [7:0] dma [0:6];
     reg [7:0] ppi_c, ppi_ctl;
     // Debug unit control port ($FB). The debug unit itself is not in this core
@@ -196,12 +196,13 @@ module mdr_io (
             else                    rdata = gg_sio[port[2:0]];
         end else if (md_lo) begin
             case (port)
-                8'h08: rdata = {1'b0, pcm_fill[2:0], 4'b0000};
+                8'h08: rdata = {1'b0, pcm_fill[6] ? 3'd7 : pcm_fill[5:3], 4'b0000};   // bytes / 8, saturating (Q14)
                 8'h09: rdata = slot_sel;
+                8'h0A: rdata = {4'b0000, wram_bank};                                    // Q9
                 8'h0B: rdata = {3'b000, card_bank};
                 8'h0E: rdata = 8'h00;
-                8'h0F: rdata = math_div ? div_q[7:0] : math_res[7:0];
-                8'h10: rdata = math_div ? div_q[15:8] : math_res[15:8];
+                8'h0F: rdata = math_div ? div_q : math_res[7:0];     // quotient / product low
+                8'h10: rdata = math_div ? div_r : math_res[15:8];    // remainder / product high
                 8'h16: rdata = 8'h81;
                 8'h17: rdata = MACHINE_ID;
                 default: rdata = 8'hFF;
@@ -255,25 +256,26 @@ module mdr_io (
     assign th_latch = wr && lowport && port[0] && !legacy &&
                       ((wdata[1] && wdata[5] && !io_ctl[5]) || (wdata[3] && wdata[7] && !io_ctl[7]));
 
-    // math unit (division as the reference emulator does it; profile Q7 open).
-    // The divide makes one quotient bit per clock (restoring division), so its
-    // result is ready 16 clocks after the $0E write, long before the CPU's next
-    // IN can read it (at least 82 clocks later), and the divider is not one long
-    // chain of logic.
+    // math unit: A x B, or A / B with the quotient in $0F and the remainder in
+    // $10, $FF/$00 for a divide by zero (Q7). The divide makes one quotient bit
+    // per clock (restoring division), so its result is ready 8 clocks after the
+    // $0E write, long before the CPU's next IN can read it (at least 82 clocks
+    // later), and the divider is not one long chain of logic. The remainder fits
+    // 8 bits because it is less than B.
     wire        div_start = wr && md_io && port == 8'h0E && wdata[0] && math_b != 8'd0;
     reg  [7:0]  div_r = 8'd0, div_d = 8'd0;
-    reg  [4:0]  div_n = 5'd0;
-    wire [8:0]  div_sh  = {div_r, div_q[15]};
+    reg  [3:0]  div_n = 4'd0;
+    wire [8:0]  div_sh  = {div_r, div_q[7]};
     wire        div_ge  = div_sh >= {1'b0, div_d};
     wire [8:0]  div_sub = div_sh - {1'b0, div_d};
     always @(posedge clk) begin
-        if (rst) div_n <= 5'd0;
+        if (rst) div_n <= 4'd0;
         else if (div_start) begin
-            div_q <= {math_a, math_b}; div_r <= 8'd0; div_d <= math_b; div_n <= 5'd16;
-        end else if (div_n != 5'd0) begin
+            div_q <= math_a; div_r <= 8'd0; div_d <= math_b; div_n <= 4'd8;
+        end else if (div_n != 4'd0) begin
             div_r <= div_ge ? div_sub[7:0] : div_sh[7:0];
-            div_q <= {div_q[14:0], div_ge};
-            div_n <= div_n - 5'd1;
+            div_q <= {div_q[6:0], div_ge};
+            div_n <= div_n - 4'd1;
         end
     end
 
@@ -297,8 +299,8 @@ module mdr_io (
                     8'h0B: card_bank <= wdata[4:0];
                     8'h0C: math_a <= wdata;
                     8'h0D: math_b <= wdata;
-                    8'h0E: begin   // divide: div_q; divide by zero: 0; multiply: A x B
-                        math_res <= wdata[0] ? 16'd0 : (math_a * math_b);
+                    8'h0E: begin   // divide: div_q, div_r; divide by zero: $FF/$00; multiply: A x B
+                        math_res <= wdata[0] ? 16'h00FF : (math_a * math_b);
                         math_div <= wdata[0] && math_b != 8'd0;
                     end
                     default: ;

@@ -496,13 +496,17 @@ p['open_questions'] = [
     {'id': 'Q6', 'topic': 'Turbo default for retagged ROMs', 'status': 'resolved',
      'detail': ('Off at reset. A title enables it itself (Feature Enable A bit 6, then $F3). The enhancement '
                 'layer\'s turbo boost is for unmodified software in the stock modes and does not apply to MasterDrive titles.')},
-    {'id': 'Q7', 'topic': 'Math unit divide', 'status': 'open', 'detail': 'See math_unit.divide_open.'},
+    {'id': 'Q7', 'topic': 'Math unit divide', 'status': 'resolved',
+     'detail': ('The emulator computed ((A << 8) | B) / B. Decided by the owner in October 2026: A / B, the quotient '
+                'in $0F and the remainder in $10, $FF/$00 for a divide by zero (math_unit.divide).')},
     {'id': 'Q8', 'topic': 'Run-time machine detection', 'status': 'resolved',
      'detail': ('Decided by the owner in October 2026: a boot-menu option runs an export cartridge in MasterDrive '
                 'mode, and a read-only machine ID register at $17 reads $A7, behind the I/O gate of Q1 '
                 '(software_detection).')},
-    {'id': 'Q9', 'topic': 'Work RAM bank readback at $0A', 'status': 'open',
-     'detail': 'Not readable today. Interrupt handlers that switch banks need to restore the previous one; readback or a documented RAM shadow is needed.'},
+    {'id': 'Q9', 'topic': 'Work RAM bank readback at $0A', 'status': 'resolved',
+     'detail': ('$0A was write-only, so an interrupt handler that switches banks could not restore the previous one. '
+                'Decided by the owner in October 2026: $0A reads the selected bank in bits 3-0 '
+                '(memory.work_ram.bank_readback).')},
     {'id': 'Q10', 'topic': 'Reverting third-party GG2SMS layers', 'status': 'emulator workflow',
      'detail': 'A hack-maker workflow, not a machine question; listed so it is not lost.'},
     {'id': 'Q11', 'topic': 'Default of the TMS colour boost', 'status': 'resolved',
@@ -513,9 +517,10 @@ p['open_questions'] = [
      'detail': ('ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still '
                 'selects a 2-byte mode and the emulator implements a 1-byte layout when it is clear. Retire the bit, '
                 'or document the 1-byte layout.')},
-    {'id': 'Q14', 'topic': 'PCM FIFO fill reading at $08', 'status': 'open',
-     'detail': ('$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returns the '
-                'fill modulo 8, so a full FIFO reads as empty. Proposal: bits 6-4 = bytes queued / 8, saturating at 7.')},
+    {'id': 'Q14', 'topic': 'PCM FIFO fill reading at $08', 'status': 'resolved',
+     'detail': ('$08 bits 6-4 report the fill of a 64-byte FIFO, which three bits cannot encode: the emulator returned '
+                'the fill modulo 8, so a full FIFO read as empty. Decided by the owner in October 2026: bits 6-4 = '
+                'bytes queued / 8, saturating at 7 (audio.pcm.fill_readback).')},
     {'id': 'Q12', 'topic': 'Cartridge wait state at 200 % turbo', 'status': 'open',
      'detail': ('cpu.turbo.cartridge_wait gives one wait state per cartridge access at 200 % (250 ns ROM). The '
                 'emulator applies it; the Pocket core does not yet (its PSRAM answers in time). Affects only '
@@ -780,6 +785,31 @@ change(LATER + 'Q1 resolved by the owner: in MasterDrive mode the I/O registers 
 change(LATER + 'Q8 resolved by the owner: a boot-menu option runs an export cartridge in MasterDrive mode, and a read-only '
        'machine ID register at $17 reads $A7 (high nibble $A = MasterDrive, low nibble the machine version), behind '
        'the I/O gate of Q1 (software_detection).')
+
+# ------------------------------------------------------------------ Q7, Q9 and Q14 (decided by the owner, October 2026)
+mu = p['math_unit']
+mu.pop('divide_open', None)
+mu['registers']['0x0F'] = 'result low: the product low byte, or the quotient'
+mu['registers']['0x10'] = 'result high: the product high byte, or the remainder'
+mu['divide'] = ('A / B, unsigned: the quotient in $0F, the remainder in $10. A divide by zero gives $FF in $0F and $00 '
+                'in $10, which 255 / 1 also gives, so software that must tell them apart tests B. Decided by the owner '
+                '(open question Q7).')
+put_after(p['memory']['work_ram'], 'bank_register_port', 'bank_readback', (
+    '$0A reads the selected bank in bits 3-0; bits 7-4 read 0. Decided by the owner (open question Q9), so an '
+    'interrupt handler can save and restore the bank.'))
+put_after(p['audio']['pcm'], 'ports', 'fill_readback', (
+    '$08 read: bits 6-4 = bytes queued / 8, saturating at 7 (56-64 bytes read 7); the other bits read 0. A write to '
+    '$07 while 64 bytes are queued is dropped. Decided by the owner (open question Q14).'))
+rv = p['port_map']['masterdrive_read_values']
+rv['0x08'] = 'PCM FIFO fill (audio.pcm.fill_readback): bits 6-4 = bytes queued / 8, saturating at 7'
+put_after(rv, '0x09', '0x0A', 'work RAM bank in bits 3-0 (memory.work_ram.bank_readback)')
+rv['0x0F-0x10'] = 'math result, low then high: the product, or the quotient then the remainder (math_unit.divide)'
+change(LATER + 'Q7 resolved by the owner: the math unit divides A by B, the quotient in $0F and the remainder in $10, '
+       '$FF/$00 for a divide by zero (math_unit.divide). Both implementations computed ((A << 8) | B) / B.')
+change(LATER + 'Q9 resolved by the owner: $0A reads the selected work RAM bank in bits 3-0 '
+       '(memory.work_ram.bank_readback); it read $FF.')
+change(LATER + 'Q14 resolved by the owner: $08 bits 6-4 read the PCM FIFO\'s bytes queued divided by 8, saturating at 7 '
+       '(audio.pcm.fill_readback); the emulator returned the fill modulo 8.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body
