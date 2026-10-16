@@ -419,8 +419,10 @@ probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-la
   const w1 = hold(a);
   a.ael.vramboost = true; const w2 = hold(a);
   s.ael.vramboost = true; const w3 = hold(s);
-  return { ok: ma === 2 && ms === 1 && ms2 === 2 && w1 > 0 && w2 === 0 && w3 > 0,
-           note: `SMS x${ma}, SS x${ms} (x${ms2} after $F3), waits: SMS ${w1}, SMS+boost ${w2}, SS+boost ${w3}` };
+  // with the boost on, an FM data write 2 base cycles after its address write still waits out the 12
+  a.out(0xF0, 0x10); a.cpu.tc += 4; const fb = a.cpu.tc; a.out(0xF1, 0x00); const wf = a.cpu.tc - fb;
+  return { ok: ma === 2 && ms === 1 && ms2 === 2 && w1 > 0 && w2 === 0 && w3 > 0 && wf === 2 * (12 - 2),
+           note: `SMS x${ma}, SS x${ms} (x${ms2} after $F3), waits: SMS ${w1}, SMS+boost ${w2}, SS+boost ${w3}, FM+boost ${wf}` };
 });
 
 // ---------------------------------------------------------------- TMS9918 modes
@@ -554,18 +556,27 @@ probe('M51', 'Every port access is timed where it ends: OUT (C),A straight after
            note: `FM data write held ${viaC} T after OUT (C),A, ${viaN} after OUT ($F1),A, ${viaI} after OUTI; VDP read by INI held ${viaR}` };
 });
 
-probe('M52', 'The bus synchroniser counts the time since the last VDP access in base cycles whatever the turbo step: a step change from 125 % to 200 % between two VDP accesses holds the second for the rest of the slot, however long the machine has run; the time also carries over a frame boundary (Technical Reference §1)', () => {
-  const m = sms('ss'); m.vdp.reg[15] = 0x40;                       // Feature Enable A bit 6: $F3 may set the step
-  m.out(0xF3, 1); m.cpu.tc = 10000000;                             // 125 %, after a long run
-  m.out(0xBF, 0x00); m.out(0xF3, 4); m.cpu.tc += 4;                // VDP access, step to 200 %, 2 base cycles later:
-  let b = m.cpu.tc; m.out(0xBF, 0x80); const step = m.cpu.tc - b;  // held for the rest of the 16-cycle slot (display off)
+probe('M52', 'The bus synchroniser counts the time since the last VDP access, and since the last FM write, in base cycles whatever the turbo step: a step change between two accesses rescales the time already passed, accesses made at 100 % count, and however long the machine has run the hold is only the rest of the slot; the time also carries over a frame boundary (Technical Reference §1)', () => {
+  const ss = () => { const m = sms('ss'); m.vdp.reg[15] = 0x40; return m; };   // Feature Enable A bit 6: $F3 may set the step
+  const after = (m, port, v) => { const b = m.cpu.tc; m.out(port, v); return m.cpu.tc - b; };
+  // VDP: access at 125 % after a long run, 10 T (8 base cycles), step to 200 %, 4 T (2 base cycles), access
+  const a = ss(); a.out(0xF3, 1); a.cpu.tc = 10000000;
+  a.out(0xBF, 0x00); a.cpu.tc += 10; a.out(0xF3, 4); a.cpu.tc += 4;
+  const step = after(a, 0xBF, 0x80);                               // the rest of the 16-cycle slot (display off): 6 base = 12 T
+  // VDP: access at 100 %, 4 T (4 base cycles), step to 200 %, 4 T (2 base cycles), access
+  const c = ss(); c.out(0xBF, 0x00); c.cpu.tc += 4; c.out(0xF3, 4); c.cpu.tc += 4;
+  const base = after(c, 0xBF, 0x80);                               // 10 base = 20 T
+  // FM: address write at 125 %, 5 T (4 base cycles), step to 200 %, 4 T (2 base cycles), data write
+  const f = ss(); f.out(0xF3, 1); f.out(0xF0, 0x10); f.cpu.tc += 5; f.out(0xF3, 4); f.cpu.tc += 4;
+  const fm = after(f, 0xF1, 0x4A);                                 // the rest of the 12: 6 base = 12 T
+  // across a frame boundary at 200 % (stock software, the turbo boost)
   const g = sms('sms'); g.ael.turbo = 2;
   const core = g.runFrameCore; g.runFrameCore = () => g.vdp.fb;
-  g.out(0xBF, 0x00); g.runFrame(); g.cpu.tc += 4;                  // VDP access, frame ends, 2 base cycles later:
-  b = g.cpu.tc; g.out(0xBF, 0x80); const frame = g.cpu.tc - b;
+  g.out(0xBF, 0x00); g.runFrame(); g.cpu.tc += 4;
+  const frame = after(g, 0xBF, 0x80);                              // 14 base = 28 T
   g.runFrameCore = core;
-  return { ok: step === 32 - 4 && frame === 32 - 4,
-           note: `after the step change held ${step} T; across the frame boundary ${frame} T` };
+  return { ok: step === 12 && base === 20 && fm === 12 && frame === 28,
+           note: `held ${step} T after a step change at 125 %, ${base} after one at 100 %, FM ${fm}; across the frame boundary ${frame}` };
 });
 
 probe('M53', 'IN F,(C) ($ED $70) reads port (C), sets S, Z and P/V from the value and keeps no value, in 12 T-states (The Undocumented Z80 Documented; MAME z80)', () => {
