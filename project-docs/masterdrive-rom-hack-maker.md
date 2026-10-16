@@ -265,7 +265,7 @@ Free-space figures are probable, from static analysis (definitions in Appendix A
 | 4 | Horizontal shooter template | **Decided:** Aerial Assault, Master System version | Sections 7.2 and 7.3 |
 | 5 | Ax Battler base ROM | Proposed: stock ROM at launch, improved engine added as a new base when frozen | Resolves whether Ax Battler is a launch or a later title |
 | 6 | Combining mods | Let mods ship project files so the maker can merge them | Without it, a player can run only one mod per game at a time |
-| 7 | MasterDrive mapper limits | Maximum ROM size and save-RAM size | Expansion recipes for the MasterDrive target depend on both. Machine profile v7: up to 4 MB is reachable with the stock 8-bit bank registers, so only sizes beyond 4 MB (open question Q2) and the save-RAM size (Q3) remain open (Technical Reference v3, §8 and §17) |
+| 7 | MasterDrive mapper limits | **Decided** (October 2026): the largest cartridge ROM is 4 MB, the stock 8-bit bank registers' reach (Q2), and cartridge save RAM is 32 KB, two banks of 16 KB (Q3) | Expansion recipes for the MasterDrive target depend on both (Technical Reference v3, §2 and §8) |
 
 ---
 

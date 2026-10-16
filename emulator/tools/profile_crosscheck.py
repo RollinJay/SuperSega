@@ -64,6 +64,31 @@ wrap=re.search(r'Y\+1 is (\d+) or more', tall['sprites'])
 chk('TMS modes at 224/240 lines: $D0 not an end, wrap at %s'%(wrap and wrap.group(1)),
     wrap and 'no longer ends the list' in tall['sprites'] and
     "if(sy===0xD0 && !tall) break;" in js and 'if(sy>=(tall?%s:225)) sy-=256;'%wrap.group(1) in js)
+dl=prof['dma']['register_layout']
+chk('DMA: fill byte from $F4, mode in $F6 bits 3-2, source in bits 1-0, CRAM on $F8 bit 6',
+    'fill byte' in dl['0xF4'] and 'bits 3-2 the mode' in dl['0xF6'] and 'bit 6 set: the destination is CRAM' in dl['0xF8']
+    and 'if(mode===2) b=d[0];' in js and 'mode=(d[2]>>2)&3, sel=d[2]&3' in js and 'toC=(d[4]&0x40)' in js
+    and 'V.pw[0]|=1<<((a>>5)&15)' in js)
+rates=[int(r.replace(',','')) for r in re.findall(r'= ([\d,]+)', prof['audio']['pcm']['ports']['0x08'])]
+chk('PCM rates %s'%rates, len(rates)==4 and '[%s][m.pcm.ctl&3]'%','.join(map(str,rates)) in js
+    and 'reset returns it to silence' in prof['audio']['pcm']['output'] and 'this.pcmLast=0;' in js)
+wl=prof['audio']['wavetable']['register_layout']
+chk('wavetable: $11 voice bit 5, $14 key on bit 7, $15 pan bits 5-4',
+    'bit 5 selects the voice' in wl['0x11'] and 'bit 7 key on' in wl['0x14'] and 'bits 5-4' in wl['0x15']
+    and 'this.waveSel=(v>>5)&1; this.waveIdx=v&31;' in js and 'w.en=(v>>7)&1' in js and 'w.vol=v&15; w.pan=(v>>4)&3;' in js)
+b0=prof['vdp_registers']['bank_0']; b1=prof['vdp_registers']['bank_1']
+chk('base registers bits 5-0 << 8 (bank 0 R11, R12; bank 1 R0, R1)',
+    all('bits 5-0 = VRAM address >> 8' in t for t in (b0['11'], b0['12'], b1['0'], b1['1'])) and
+    all(f in js for f in ('(this.reg[11]&0x3F)<<8', '(this.reg[12]&0x3F)<<8', '(this.reg[16+0]&0x3F)<<8', '(this.reg[16+1]&0x3F)<<8')))
+chk('window split: R13 bits 4-0 x 8, R14 bits 4-0 rows, bit 7 above',
+    'bits 4-0' in b0['13'] and 'bit 7 set: the window covers the lines above' in b0['14'] and
+    'winX=(this.reg[13]&0x1F)*8, winY=(this.reg[14]&0x1F)*8, winAbove=(this.reg[14]&0x80)' in js)
+chk('slot select: $09 bit 0 $4000-$7FFF, bit 1 $8000-$BFFF; card bank 5 bits',
+    '$09 bit 0 set' in prof['media']['dual_slot']['source_select'] and 'bits 4-0' in prof['media']['dual_slot']['card_bank']
+    and 'return (this.slotSel>>(frame-1))&1;' in js and 'this.cardBank=v&0x1F;' in js)
+vs=prof['stock_behaviour']['vdp']['v_scroll']
+chk('R0 bit 7 locks screen x 192 and right from the vertical scroll',
+    'R0 bit 7 exempts screen x 192' in vs and 'const lockX=(this.reg[0]&0x80)&&x>=192;' in js)
 mid=prof['software_detection']['machine_id']
 chk('machine ID %s at port %s'%(mid['value'], mid['port']),
     'const MACHINE_ID=%s;'%hexlit(mid['value']) in js and 'if(p===%s) return MACHINE_ID;'%hexlit(mid['port']) in js)

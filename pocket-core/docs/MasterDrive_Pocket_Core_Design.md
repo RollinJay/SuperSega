@@ -234,7 +234,7 @@ Not yet done: anything on hardware.
 
 1. **Hardware bring-up**: first boot on a Pocket (the user's hands-on testing, guided by `TESTING.md`). The Quartus build and timing are done (§12).
 2. MasterDrive render features: ESAT, 16×16 and magnified sprites, window and text layers, line tables, unique-cell.
-3. DMA engine, PCM and wavetable (once their register layouts are written down, Q16).
+3. DMA engine, PCM and wavetable, to the register layouts the Technical Reference now gives (§7, §9; Q16). Their timing, clocks and levels are still open (Q26, Q27).
 4. SF-7000 and floppy images, debug unit, mouse and trackball, link cable.
 5. A proper audio decimation filter.
 
@@ -243,7 +243,7 @@ Not yet done: anything on hardware.
 | Decision | Why it matters |
 |---|---|
 | Core author name | The core is `MasterDrive.MasterDrive` on the SD card: the part before the dot is the APF's author field, here the project's name. The owner may want their own name there; changing it moves the core's folder, so a test install has to be copied again |
-| Register layouts written only in the emulator (Q16) | A machine question that blocks the DMA engine, PCM and wavetable (§15). The owner has decided it (`../DECISIONS.md`): the emulator's layouts are adopted; they are not yet written into the machine documents |
+| DMA timing (Q26), PCM and wavetable clocks and levels (Q27) | Machine questions the DMA engine, PCM and wavetable (§15) need answered before the core can implement them as the machine, rather than as the emulator happens to do them |
 
 Decided (October 2026):
 

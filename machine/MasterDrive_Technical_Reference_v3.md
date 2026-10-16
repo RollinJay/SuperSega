@@ -168,6 +168,17 @@ The mode bits defined above select the mode: Graphics I with none of M1–M3 set
 
 Sources: TMS9918A Data Manual (Texas Instruments); Gearsystem (`RenderBackgroundTMS9918`, `RenderSpritesTMS9918`), which gives the same pictures as the emulator on the Pocket core's four TMS test ROMs.
 
+### Line tables and the window layer
+
+These are MasterDrive additions to Mode 4, for MasterDrive software. Their registers are in §10; *base* registers give a VRAM address in their bits 5–0, shifted left by 8 (so a base is a multiple of `$100`).
+
+- **Line scroll table** (Feature Enable A bit 1). One byte per line, at bank 0 R11's base: on line *y* the background's horizontal scroll is the byte at base + *y*, in place of R8, the horizontal scroll register (§16). The top two rows that R0 bit 6 exempts stay unscrolled.
+- **Line vertical-offset table** (Feature Enable B bit 0). One byte per line, at bank 1 R1's base: on line *y* the byte at base + *y* is added to the vertical scroll (R9), modulo 256. Screen x 192 and right, which R0 bit 7 exempts (§16), stay unscrolled.
+- **Window layer** (Feature Enable A bit 2). A second, fixed tile layer over part of the background. It covers screen *x* from 8 × bank 0 R13 (bits 4–0) to the right edge, on the lines bank 0 R14 selects: bits 4–0 give the split row (8 lines each), and bit 7 set puts the window above the split, clear from the split down. Its tilemap, at bank 1 R0's base, holds 32 × 32 entries of 2 bytes in the Mode 4 name-table format. The window does not scroll: the cell at screen row *r*, column *c* shows entry (*r*, *c*). In its area it replaces the background, priority bits included, and sprites are drawn over it as over the background.
+- **Text window** (Feature Enable C bit 2). The window area shows 40 columns of 6-pixel characters instead of tiles: the area is filled with the background colour of bank 1 R9 (bits 7–4; bits 3–0 are the characters' colour, both from palette 0), then the characters are drawn from its left edge. Their patterns are at bank 1 R8's base (8 bytes each); their name table is at bank 1 R0's base, 40 bytes a row, with row 0 at the window's top edge.
+
+The tile window counts its rows from the top of the screen and the text window from its own top edge, the window can lie only right of the X split, and it reads bank 1 R0 even while XRB is clear (§10); all three are open (Q29).
+
 ---
 
 ## 4. Colour
@@ -191,7 +202,7 @@ Sixteen *palette-written* flags let an unwritten palette fall back to palette (i
 
 A sprite whose Y coordinate is *Y* starts on line *Y* + 1. When *Y* + 1 is between 241 and 256 it starts at line *Y* + 1 − 256 instead — above the top of the screen — so a sprite at Y = `$F8` shows its lower rows on the first lines.
 
-The *Extended Sprite Attribute Table* (ESAT) adds per-sprite flip, priority, size, magnification, early clock (32 pixels left) and palette. Feature Enable A bit 3 turns it on (§10), and it holds 2 bytes for each of the 64 sprites, sprite *n* at the ESAT base (bank 0 R12) + 2*n*:
+The *Extended Sprite Attribute Table* (ESAT) adds per-sprite flip, priority, size, magnification, early clock (32 pixels left) and palette. Feature Enable A bit 3 turns it on (§10), and it holds 2 bytes for each of the 64 sprites, sprite *n* at the ESAT base (bank 0 R12 bits 5–0, shifted left by 8) + 2*n*:
 
 | Byte | Bits |
 |---|---|
@@ -200,7 +211,7 @@ The *Extended Sprite Attribute Table* (ESAT) adds per-sprite flip, priority, siz
 
 The ESAT has been 2 bytes per sprite since v5 (Q4). Feature Enable C bit 4, which once selected that layout, is retired, and no bit selects a 1-byte layout (Q13).
 
-Per-sprite collision writes result bitmaps to a base set in bank1 R6.
+Per-sprite collision (Feature Enable B bit 3) is meant to write hit bitmaps at a base set in bank 1 R6, and bank 1 R5 is named the sprite palette base, but neither implementation does anything with them, so what they hold is open (Q28).
 
 ---
 
@@ -275,7 +286,19 @@ A multitap on the pad port (Sega Team Player MK-1654 or EA 4 Way Play protocol),
 | PCM FIFO (64 bytes) | `$07` data, `$08` control (write) and fill (read) | MasterDrive |
 | Two wavetable voices | `$11`–`$15` | MasterDrive |
 
-Reading `$08` gives the PCM FIFO's fill: bits 6–4 are the bytes queued divided by 8, saturating at 7 (56–64 bytes read 7); the other bits read 0. A byte written to `$07` while 64 are queued is dropped (Q14, decided October 2026). The register layouts of PCM control (`$08` write) and the wavetable are not written down yet (open question Q16).
+**PCM.** Each byte written to `$07` is one unsigned 8-bit sample (128 is silence), queued in a 64-byte FIFO. A write to `$08` sets the sample rate in bits 1–0: 0 = 8,000, 1 = 11,025, 2 = 16,000, 3 = 22,050 samples a second (bits 7–2 reserved). The output is mono, on both sides; while the FIFO is empty it holds the last sample, and reset returns it to silence. Reading `$08` gives the FIFO's fill: bits 6–4 are the bytes queued divided by 8, saturating at 7 (56–64 bytes read 7); the other bits read 0. A byte written to `$07` while 64 are queued is dropped (Q14, decided October 2026).
+
+**Wavetable.** Two voices, each playing a waveform of 32 four-bit samples (8 is the centre). The ports are write-only (they read `$FF`):
+
+| Port | Bits |
+|---|---|
+| `$11` | bit 5 the voice (0 or 1) that `$11`–`$15` address · bits 4–0 the waveform position `$12` writes |
+| `$12` | bits 3–0 the sample at that position (the position does not advance) |
+| `$13` | frequency, low 8 bits |
+| `$14` | bits 3–0 frequency, high 4 bits · bit 7 key on (1 plays, 0 silences) |
+| `$15` | bits 3–0 volume, 0 silent to 15 full, linear · bits 5–4 the sides it is heard on (bit 5 left, bit 4 right; both at reset) |
+
+A voice with frequency 0 is silent. How the frequency maps to a pitch and how the PCM rates are made from the machine clock, and how loud both are beside the PSG and FM chip, are open (Q27). The bits not listed are reserved.
 
 **PSG details.** Tone counters run at the CPU clock ÷ 16 and flip their output on reaching zero; a period of 0 behaves as 1. The noise counter (rate `$10`, `$20`, `$40`, or tone 2's period) flips a flip-flop, and the 16-bit noise shift register advances on its rising edge — once per two counter periods. White noise taps bits 0 and 3; writing the noise register resets the shift register to `$8000`. Volume is attenuation in 2 dB steps; 15 is silent.
 
@@ -313,6 +336,8 @@ Only a Sega-mapper cartridge has hardware at `$FFFC`–`$FFFF`; on the other fam
 
 **v2 error:** the Codemasters and Korean registers were said to respond to any address in their slot. Gearsystem and MAME decode the exact address, every known title writes there, and with any-address decoding a write into Codemasters cartridge RAM would also have switched banks.
 
+**Card slot.** MasterDrive mode can read the card slot alongside the cartridge. `$09` bit 0 set maps the card at `$4000`–`$7FFF`, bit 1 at `$8000`–`$BFFF` (cartridge RAM mapped by `$FFFC` bit 3 comes first); each reads the card bank `$0B` selects (bits 4–0: 32 banks of 16 KB, 512 KB). Clear, they read the cartridge through its mapper. `$09` acts only with a Sega-mapper cartridge: with the Codemasters, Korean and Korean MSX mappers, `$4000`–`$BFFF` reads the cartridge whatever `$09` holds. `$0000`–`$3FFF` is always the cartridge. Bits 7–2 of `$09` are kept and read back but do nothing, and `$09` acts only with a card inserted. How it combines with the slot enables in `$3E` (§2) is open (Q30).
+
 The Sega mapper's 8-bit bank registers reach 4 MB, and 4 MB is the largest cartridge ROM the machine takes (Q2, decided October 2026; the slot was once specified for 8 MB, which would have needed a ninth bank bit). Cartridge save RAM is 32 KB, two 16 KB banks as the 315-5235 maps them (Q3, decided October 2026).
 
 ### SF-7000 disk system
@@ -343,7 +368,19 @@ Mods reach real hardware as BPS patches, applied by computer mode while it write
 
 ## 9. DMA Engine and Math Unit
 
-DMA on `$F4`–`$FA`: ROM or RAM to VRAM, VRAM to VRAM, and fill. Its register layout is not written down yet (open question Q16).
+DMA on `$F4`–`$FA`, in MasterDrive mode (these ports are fully decoded, like `$F0`–`$F3`, so Feature Enable A bit 7, the I/O gate that opens the registers at `$01`–`$17` (§11), does not cover them): memory to VRAM or CRAM, VRAM to VRAM, and fill.
+
+| Port | Bits |
+|---|---|
+| `$F4` | source address, low byte; in fill mode, the fill byte |
+| `$F5` | source address, high byte |
+| `$F6` | bits 1–0 the source of a memory transfer: 0 the CPU address space (as the CPU reads it), 1 the card (card bank `$0B`, address bits 13–0), 2 work RAM (the selected 8 KB bank, address bits 12–0) · bits 3–2 the mode: 0 memory to VRAM or CRAM, 1 VRAM to VRAM, 2 fill |
+| `$F7` | destination address, low byte |
+| `$F8` | bits 5–0 destination address, high bits (a transfer starts in VRAM `$0000`–`$3FFF`) · bit 6 set: the destination is CRAM (address bits 8–0, its 512 bytes) |
+| `$F9` | length, low byte |
+| `$FA` | bits 5–0 length, high bits · bit 7 written as 1 starts the transfer. A length of 0 (`$F9` and `$FA` bits 5–0 all clear) means 16,384 bytes |
+
+The bits not listed, source 3 and mode 3 are reserved. A transfer moves *length* bytes, source and destination each counting up by one. A VRAM destination counts on past `$3FFF` into the upper 16 KB (address bits 14–0), and VRAM to VRAM reads source address bits 14–0, whether or not VRAM expansion is on. The registers keep what was written (the addresses do not advance) and read back at `$F4`–`$FA`. A transfer to CRAM stores the bytes as CRAM holds them (the Game Gear 12-bit format, two bytes per entry, whatever the CRAM write mode, §4) and marks each palette it writes as written. How long a transfer takes, whether the CPU waits and whether it may write VRAM during the display are open, as is how far the destination should reach (Q26): the emulator completes a transfer at once and charges the CPU one T-state per byte, plus, for a transfer from the CPU address space, the cartridge wait state (§1) on each byte it reads from `$0000`–`$BFFF` at 200 %.
 
 | Math port | Function |
 |---|---|
@@ -359,17 +396,17 @@ Multiply is A × B, unsigned 16-bit. Divide is A ÷ B, unsigned: the quotient in
 
 ## 10. Register Map
 
-The VDP register-write command byte is `10bbnnnn`. On stock hardware bits 5–4 are ignored. MasterDrive uses them to select one of four register banks — but only when bank 0 register 15 bit 5 (**XRB**, extended register banks) is set. XRB is clear at reset and in all legacy software, so bits 5–4 are discarded exactly as on real silicon. While XRB is clear the bank 1–3 registers also have no effect: they keep their values, but the features they switch on (everything in Feature Enable B and C) are off.
+The VDP register-write command byte is `10bbnnnn`. On stock hardware bits 5–4 are ignored. MasterDrive uses them to select one of four register banks — but only when bank 0 register 15 bit 5 (**XRB**, extended register banks) is set. XRB is clear at reset and in all legacy software, so bits 5–4 are discarded exactly as on real silicon. While XRB is clear the bank 1–3 registers also have no effect: they keep their values, but the features they switch on (everything in Feature Enable B and C) are off. One exception: the window layer (Feature Enable A bit 2) reads its tilemap base from bank 1 R0 whether or not XRB is set (Q29).
 
 ### Bank 0
 
 | Reg | Function |
 |---|---|
 | 0–10 | stock VDP registers, including the mode bits M1–M4 |
-| 11 | line-scroll (horizontal) table base |
-| 12 | Extended Sprite Attribute Table base |
-| 13 | window X split |
-| 14 | window Y split; bit 7 selects side |
+| 11 | line-scroll (horizontal) table base (bits 5–0, §3) |
+| 12 | Extended Sprite Attribute Table base (bits 5–0, §5) |
+| 13 | window X split: bits 4–0 the first window column (§3) |
+| 14 | window Y split: bits 4–0 the split row; bit 7 set, the window is above it (§3) |
 | 15 | **Feature Enable A** |
 
 **Feature Enable A** — bit 0 native 12-bit CRAM · bit 1 line-scroll horizontal · bit 2 window layer · bit 3 ESAT · bit 4 16 sprites per line · bit 5 XRB · bit 6 turbo · bit 7 MasterDrive I/O registers `$01`–`$17` (§11)
@@ -380,13 +417,13 @@ Registers 11–15 take effect only in MasterDrive mode; in the other modes they 
 
 | Reg | Function |
 |---|---|
-| 0 | window tilemap base |
-| 1 | line vertical-offset table base |
+| 0 | window tilemap base (bits 5–0, §3) |
+| 1 | line vertical-offset table base (bits 5–0, §3) |
 | 2 | **Feature Enable B** |
 | 3 | VRAM bank for CPU access |
-| 4 | render bank assignment |
-| 5 | sprite palette base |
-| 6 | collision result base |
+| 4 | render bank assignment (not defined yet, Q28) |
+| 5 | sprite palette base (not defined yet, Q28) |
+| 6 | collision result base (not defined yet, Q28) |
 | 7 | **Feature Enable C** |
 | 8 | text window pattern base |
 | 9 | text window colours |
@@ -407,7 +444,7 @@ Bank 2 unallocated; bank 3 reserved.
 | `$01`–`$05` | Game Gear serial (EXT link) registers (Game Gear mode; MasterDrive mode once Feature Enable A bit 7 is set) |
 | `$06` | PSG stereo panning (write-only; Game Gear mode, and MasterDrive mode once Feature Enable A bit 7 is set) |
 | `$07`–`$08` | PCM FIFO data / control (write) and fill (read) |
-| `$09` | slot source select |
+| `$09` | slot source select: bit 0 card at `$4000`–`$7FFF`, bit 1 at `$8000`–`$BFFF` (§8) |
 | `$0A` | work RAM bank (reads back in bits 3–0) |
 | `$0B` | extended card bank |
 | `$0C`–`$10` | math unit |
@@ -545,7 +582,7 @@ Behaviour of the original parts that every implementation must reproduce. These 
 
 ### VDP
 
-- **Scrolling.** Screen x = map x + R8: the picture moves right as R8 grows. R8 is latched once per line, before the line is drawn; R0 bit 6 exempts the top two rows. R9 (vertical) is latched once per frame.
+- **Scrolling.** Screen x = map x + R8: the picture moves right as R8 grows. R8 is latched once per line, before the line is drawn; R0 bit 6 exempts the top two rows. R9 (vertical) is latched once per frame; R0 bit 7 exempts screen x 192 to the right edge, by screen position whatever the horizontal scroll (Gearsystem).
 - **Line timing.** 228 CPU cycles per line; 262 lines (NTSC) or 313 (PAL).
 - **V counter** values (it is 8 bits, so it jumps once per frame):
 
@@ -592,7 +629,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q13 | Feature Enable C bit 4 (ESAT 2-byte) contradicts ESAT being 2 bytes per sprite (Q4); the emulator still had a 1-byte layout when the bit was clear. Retire the bit or document the 1-byte layout | resolved (owner, October 2026): the bit is retired (reserved) and the ESAT is always 2 bytes per sprite (§5, §10); the emulator dropped its 1-byte layout |
 | Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | resolved (owner, October 2026): the proposal (§7). The emulator does this; the Pocket core has no PCM yet, and its `$08` reads an empty FIFO |
 | Q15 | Line interrupts in the TMS9918 modes. The machine profile lists them as a MasterDrive enhancement for SG-1000-style software (line interrupts are a Master System addition) but defines no bit that enables them. As stock the TMS modes raise none, and both implementations follow that in the stock modes; in MasterDrive mode both raise them in the TMS modes whenever R0 bit 4 is set. Should the line counter run in the TMS modes on MasterDrive, and what enables it? | resolved (owner, October 2026): in MasterDrive mode R0 bit 4 enables them, as in Mode 4 (§3, §16). Both implementations already did this |
-| Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the window split (bank 0 R13 and R14) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | open |
+| Q16 | The register layouts of the DMA engine (`$F4`–`$FA`), PCM control (`$08` write), the wavetable (`$11`–`$15`), slot select (`$09`) the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the window split (bank 0 R13 and R14) are defined today only by the emulator's code (the Pocket core already follows it for `$09`). They need writing into this document and the profile, and checking, before the Pocket core implements them | resolved (owner, October 2026): the emulator's layouts are adopted (§3, §5, §7, §8, §9, §10), with four clear faults fixed: a fill wrote the mode register instead of a chosen byte, a transfer to CRAM left its palettes marked unwritten, with the background scrolled, part of the screen left of the window showed the backdrop, and reset left the PCM output at its last sample. What the emulator does not settle is Q26–Q30 |
 | Q17 | Feature Enable B bits 7–6 select 224 or 240 lines for MasterDrive software, but this document defines the heights only for Mode 4 (§3). Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192? | resolved (owner, October 2026): yes; the tables carry on below line 192, Graphics II takes a fourth bank, and `$D0` no longer ends the sprite list (§3). Both implementations do this |
 | Q18 | Two details of the sprite flags in the TMS modes (§3). What status bits 4–0 read: the TMS9918A puts the number of the fifth sprite there, Gearsystem does that whenever a TMS mode is selected (not on the Game Gear) and reads `$1F` in Mode 4, the Pocket core reads `$1F` and the emulator 0 in every mode. And whether a transparent (colour 0) sprite takes part in collisions: the TMS9918A Data Manual says it does; Gearsystem and both implementations leave it out | open |
 | Q19 | Several TMS mode bits set at once (§3). The implementations take M2 (Graphics II) first, then M1 (Text), then M3 (Multicolor); Gearsystem takes M1, then M3, then M2; on the TMS9918A such combinations give undocumented hybrid modes. Which picture should the machine show? | open |
@@ -602,6 +639,11 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q23 | Reading cassettes and disks (§8). The console reads SC-3000 cassettes and SF-7000 disks (Q2). In which modes, through which ports, and does the boot menu load an image or does software read the signal? Does it write them too? | open |
 | Q24 | The save card (§8). A profile holds the first 8 KB of bank 0 of a game's cartridge RAM, which is 32 KB (Q3), and each card entry carries a 32-bit game ID that the machine does not define: the emulator derives it from a sampled hash of the ROM, so two ROMs of the same size that differ only between sampled bytes share their card saves. Should a profile hold all 32 KB, and what identifies a game: a CRC-32 of the whole ROM, the header's product code, version and region (SG-1000 and SC-3000 cartridges have no header), or something else? How do existing cards carry over? | open |
 | Q25 | Cartridge writes at 200 % (§1). The cartridge wait state applies to reads, which a 250 ns ROM limits, and both implementations apply it to reads only. Should writes to the cartridge slot (cartridge RAM at `$8000`–`$BFFF`, the mapper registers) take it too? | open |
+| Q26 | DMA timing and reach (§9). The emulator completes a transfer as soon as `$FA` bit 7 is written and charges the CPU one T-state per byte (with the cartridge wait state on bytes read from the cartridge at 200 %), whatever the display is doing, and the bus synchroniser does not take part. How long should a transfer take, does the CPU wait for it, and may it write VRAM during the active display? The destination register reaches only `$0000`–`$3FFF`, but a transfer counts on into the upper 16 KB, even without VRAM expansion: should it wrap at `$3FFF`, follow bank 1 R3, or have a fifteenth address bit? | open |
+| Q27 | PCM and wavetable clocks and levels (§7). The PCM rates (8,000, 11,025, 16,000 and 22,050 samples a second) and the wavetable's pitch (the emulator plays a voice's waveform *f* × 3.2 times a second) are not made from the machine clock: none of the four rates is a whole fraction of 3.579545 MHz. Their level beside the PSG and FM chip is the emulator's choice: PCM at full scale peaks at 0.2 of the output's full scale, a wavetable voice at full volume at 0.12, a PSG channel at full volume at 0.16. Which clocks and levels should the machine have, and does `$F2` mute them? | open |
+| Q28 | Render bank (bank 1 R4), sprite palette base (bank 1 R5), collision result base (bank 1 R6) and per-sprite collision (Feature Enable B bit 3, which is meant to write hit bitmaps at the R6 base, §5). The documents name them, but neither implementation does anything with them, so their layouts and behaviour are not defined. What do they hold? | open |
+| Q29 | Window rows and side (§3). The tile window reads its tilemap by screen row, so a window from row 20 down starts at tilemap row 20, while the text window counts its rows from the window's top edge. R14 bit 7 picks the side of the Y split, but R13 has no side bit, so the window can lie only right of the X split. And the window reads its tilemap base, bank 1 R0, even while XRB is clear, when the bank 1 registers are otherwise without effect (§10). Which row rule should both use, should the window be able to lie left of the X split, and should its tilemap base need XRB? | open |
+| Q30 | Slot select and the `$3E` slot enables (§2, §8). `$09` maps the card into `$4000`–`$BFFF` by itself. On the stock Master System `$3E` bit 5 enables the card slot and bit 6 the cartridge slot; the emulator ignores bit 5, and ignores bit 6 whenever a card is inserted, and the Pocket core decodes `$09` and `$0B` but loads no card. How should `$09` and `$3E` bits 5–6 combine, and what does `$0000`–`$3FFF` read when `$3E` disables the cartridge? | open |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in MasterDrive mode, the only mode in which those registers act (§10): an old title that set R15 bit 7 there would also open the I/O registers (§11); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
@@ -639,7 +681,7 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Cartridge wait state at 200 % | yes | yes |
 | Math unit (`$0C`–`$10`) | yes | yes |
 | Card slot: slot select (`$09`) and card bank (`$0B`) | yes | registers and memory decode only: the Pocket platform loads no card, so the slot is always empty |
-| VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |
+| VRAM expansion | CPU access (bank 1 R3) and unique-cell tiles; the render bank (bank 1 R4) is not defined (Q28) | CPU access only |
 | ESAT, 16×16 and magnified sprites, window/text layers, line tables, unique-cell | yes | registers only, not drawn |
 | TMS9918 modes (SG-1000, SC-3000), and at 224 and 240 lines for MasterDrive software | yes | yes |
 | YM2413 FM | yes (approximate synthesis: no rhythm instruments; the user instrument, `$00`–`$07`, is not read; no envelopes, so a note holds its level until key-off; volume steps are linear, not the chip's 3 dB; the built-in instruments only resemble the chip's) | yes (IKAOPLL, a YM2413 core reverse-engineered from die shots of the chip) |

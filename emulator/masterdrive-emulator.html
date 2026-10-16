@@ -1343,36 +1343,44 @@ class VDP{
     const winX=(this.reg[13]&0x1F)*8, winY=(this.reg[14]&0x1F)*8, winAbove=(this.reg[14]&0x80);
     const winBase=(this.reg[16+0]&0x3F)<<8;
 
-    for(let col=0;col<32;col++){
-      const colLock=(this.reg[0]&0x80)&&col>=24;
-      let inWin=false;
-      if(winOn){ const yin= winAbove ? (y<winY):(y>=winY); const xin=(col*8)>=winX; inWin=yin&&xin; }
-      const ys=(colLock?0:((vsc+vAdd)&255));
-      const ry=inWin? y : (y+ys);
-      const rowIdx=ext? ((ry>>3)&31) : ((ry>>3)%28);
-      const fine=ry&7;
-      let ntAddr;
-      if(inWin) ntAddr=winBase+((y>>3)&31)*64+col*2;
-      else ntAddr=ntBase+rowIdx*64+col*2;
-      const lo=this.vram[ntAddr&0x7FFF], hi=this.vram[(ntAddr+1)&0x7FFF];
-      const uniq=this.onC(0x08)&&this.onB(0x10);
-      const tile=lo|((hi&1)<<8)|(uniq?(((hi>>7)&1)<<9):0);
-      const hf=hi&2, vf=hi&4;
-      let pal=(hi>>3)&1;
-      if(this.onB(0x02)) pal=((hi>>3)&1)|((((hi>>5)&(this.onC(0x08)?3:7)))<<1);
-      const pr=hi&0x10;
-      const ty=vf?(7-fine):fine;
-      const ta=(tile*32+ty*4)&0x7FFF;
-      const b0=this.vram[ta],b1=this.vram[ta+1],b2=this.vram[ta+2],b3=this.vram[ta+3];
-      for(let px=0;px<8;px++){
-        const bit=hf?px:(7-px);
-        const c=((b0>>bit)&1)|(((b1>>bit)&1)<<1)|(((b2>>bit)&1)<<2)|(((b3>>bit)&1)<<3);
-        let sx=col*8+px;
-        if(!inWin && !rowLock) sx=(sx+(hsc&255))&255; else if(!inWin && rowLock) sx=col*8+px;
-        if(sx<0||sx>=W) continue;
-        fb[base+sx]=this.colour(pal,c);
-        opaque[sx]=c?1:0; prio[sx]=(pr&&c)?1:0;
+    /* The background is drawn per screen pixel: x shows the map at x - H scroll
+       (R0 bit 6: no H scroll in the top two rows) on the line the V scroll
+       gives, except that with R0 bit 7 x = 192 and right take the unscrolled
+       line (by screen position, as Gearsystem does; it was by map column, so a
+       scrolled background locked the wrong pixels). On the window's lines the
+       window covers x from winX to the right edge, and does not scroll
+       (Technical Reference §3). */
+    const winRow=winOn&&(winAbove?(y<winY):(y>=winY));
+    const uniq=this.onC(0x08)&&this.onB(0x10), extPal=this.onB(0x02), ucPal=this.onC(0x08);
+    let key=-1, b0=0, b1=0, b2=0, b3=0, hf=0, pal=0, pr=0;
+    for(let x=0;x<W;x++){
+      const inWin=winRow&&x>=winX;
+      let ntAddr, mx, ry;
+      if(inWin){ ry=y; mx=x; ntAddr=winBase+((y>>3)&31)*64+(x>>3)*2; }
+      else{
+        const lockX=(this.reg[0]&0x80)&&x>=192;
+        ry=y+(lockX?0:((vsc+vAdd)&255));
+        mx=rowLock? x : ((x-hsc)&255);
+        const rowIdx=ext? ((ry>>3)&31) : ((ry>>3)%28);
+        ntAddr=ntBase+rowIdx*64+(mx>>3)*2;
       }
+      const fine=ry&7;
+      if(ntAddr*8+fine!==key){
+        key=ntAddr*8+fine;
+        const lo=this.vram[ntAddr&0x7FFF], hi=this.vram[(ntAddr+1)&0x7FFF];
+        const tile=lo|((hi&1)<<8)|(uniq?(((hi>>7)&1)<<9):0);
+        hf=hi&2;
+        pal=(hi>>3)&1;
+        if(extPal) pal=((hi>>3)&1)|((((hi>>5)&(ucPal?3:7)))<<1);
+        pr=hi&0x10;
+        const ty=(hi&4)?(7-fine):fine;
+        const ta=(tile*32+ty*4)&0x7FFF;
+        b0=this.vram[ta]; b1=this.vram[ta+1]; b2=this.vram[ta+2]; b3=this.vram[ta+3];
+      }
+      const px=mx&7, bit=hf?px:(7-px);
+      const c=((b0>>bit)&1)|(((b1>>bit)&1)<<1)|(((b2>>bit)&1)<<2)|(((b3>>bit)&1)<<3);
+      fb[base+x]=this.colour(pal,c);
+      opaque[x]=c?1:0; prio[x]=(pr&&c)?1:0;
     }
     // ---- text window (SC-3000 40-column density on the window plane) ----
     if(winOn && this.onC(0x04)){
@@ -1436,7 +1444,7 @@ class VDP{
       const pr=(attr&4);
       for(let px=0;px<(wide?16:8);px++){
         const cx=sx+px*zm;
-        if(cx<0||cx>=W) continue;
+        if(cx+zm<=0||cx>=W) continue;          /* a magnified pixel cut by the left edge shows its visible part */
         let sxp=px;
         if(attr&2) sxp=(wide?15:7)-px;       // H flip
         const tCol=wide?(sxp>>3):0, inX=sxp&7;
@@ -1639,7 +1647,8 @@ class Machine{
     this.btn={up:0,down:0,left:0,right:0,a:0,b:0,c:0,start:0};
     this.dma=new Uint8Array(8);
     this.math=new Uint8Array(6); this.mathRes=0;
-    this.pcm={fifo:[],rate:0,ctl:0}; this.wave=[{ram:new Uint8Array(32),f:0,en:0,vol:0,pan:3},
+    this.pcm={fifo:[],rate:0,ctl:0}; this.pcmLast=0;   /* the PCM output starts silent (it kept its last sample over a reset) */
+    this.wave=[{ram:new Uint8Array(32),f:0,en:0,vol:0,pan:3},
                                                {ram:new Uint8Array(32),f:0,en:0,vol:0,pan:3}];
     this.waveSel=0; this.waveIdx=0;
     this.vdp.reset(); this.psg.reset(); this.fm.reset(); this.cpu.reset();
@@ -2079,12 +2088,15 @@ class Machine{
     const V=this.vdp;
     for(let i=0;i<len;i++){
       let b;
-      if(mode===2) b=d[2];
+      if(mode===2) b=d[0];                 /* fill: the byte in $F4 (it took $F6, the mode register: Q16) */
       else if(mode===1) b=V.vram[(src+i)&0x7FFF];
       else if(sel===2) b=this.wram[this.wramBank*0x2000+((src+i)&0x1FFF)];   /* work RAM, current bank */
       else if(sel===1) b=this.romByte(this.card,this.cardBank,(src+i)&0x3FFF);
       else b=this.rd((src+i)&0xFFFF);
-      if(toC) V.cram[(dst+i)&0x1FF]=b; else V.vram[(dst+i)&0x7FFF]=b;
+      /* CRAM: the bytes as CRAM holds them; each palette written is marked written,
+         or an extended palette loaded by DMA would show palette 0 or 1 (Q16) */
+      if(toC){ const a=(dst+i)&0x1FF; V.cram[a]=b; V.pw[0]|=1<<((a>>5)&15); }
+      else V.vram[(dst+i)&0x7FFF]=b;
     }
     this.cpu.tc+=len;
     log('DMA '+['rom','vram-copy','fill'][mode]+' '+len+' bytes -> '+(toC?'CRAM':'VRAM'));

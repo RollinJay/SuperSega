@@ -170,7 +170,9 @@ p['stock_behaviour'] = {
     'vdp': {
         'h_scroll': ('Screen x = map x + R8 (the background moves right as R8 increases). '
                      'Latched once per line before the line is drawn; R0 bit 6 exempts rows 0-1.'),
-        'v_scroll': 'R9 is latched once per frame; a write takes effect from the next frame.',
+        'v_scroll': ('R9 is latched once per frame; a write takes effect from the next frame. R0 bit 7 exempts screen '
+                     'x 192 to the right edge: the lock is by screen position, whatever the horizontal scroll '
+                     '(Gearsystem, Video.cpp RenderBG).'),
         'sprite_y': ('A sprite starts on line Y+1. When Y+1 is 241-256 it starts at Y+1-256 '
                      'instead, so Y = $F0-$FF shows its lower rows at the top of the screen '
                      '(Gearsystem and MAME; a plain 8-bit compare would differ only for 32-line '
@@ -536,13 +538,16 @@ p['open_questions'] = [
                 'TMS modes raise none (stock_behaviour.vdp.line_counter). Decided by the owner in October 2026: in '
                 'MasterDrive mode the line counter runs in the TMS modes and R0 bit 4 enables the interrupt, as in '
                 'Mode 4; the stock modes stay as stock. Both implementations already did this.')},
-    {'id': 'Q16', 'topic': 'Register layouts defined only by the emulator', 'status': 'open',
+    {'id': 'Q16', 'topic': 'Register layouts defined only by the emulator', 'status': 'resolved',
      'detail': ('The bit layouts of the DMA engine ($F4-$FA), PCM control ($08 write), the wavetable ($11-$15), '
                 'slot select ($09), the VDP base registers (bank 0 R11 and R12, bank 1 R0, R1, R5 and R6) and the '
                 'window split (bank 0 R13 and R14) are '
                 'defined today only by the emulator\'s implementation (the Pocket core already follows it for $09). '
                 'They need writing into the profile and the Technical Reference, and checking, before the Pocket '
-                'core implements them, as v7 did for the math unit.')},
+                'core implements them, as v7 did for the math unit. Decided by the owner in October 2026: the '
+                'emulator\'s layouts are adopted (dma.register_layout, audio.pcm, audio.wavetable, '
+                'media.dual_slot, vdp_registers, video.scroll, video.window_layer), with four clear faults fixed. '
+                'What the emulator does not settle is open: Q26 to Q30.')},
     {'id': 'Q18', 'topic': 'TMS-mode status bits 4-0 and transparent sprites', 'status': 'open',
      'detail': ('Two details of the sprite flags in the TMS modes are not settled for this VDP. (1) What status bits '
                 '4-0 read: the TMS9918A puts the number of the fifth sprite there; Gearsystem does that whenever a TMS '
@@ -929,6 +934,159 @@ change(LATER + 'Q17 resolved by the owner: Feature Enable B\'s 224 and 240 lines
        'their tables below line 192 (video.legacy_modes.taller_heights). Both implementations already drew the taller '
        'picture; they now also let a sprite at Y = $D0 be drawn there and wrap a sprite at Mode 4\'s line 241, not '
        'line 225.')
+
+# ------------------------------------------------------------------ Q16 (decided by the owner, October 2026)
+d = p['dma']
+d['registers'] = '0xF4-0xFA, MasterDrive mode (fully decoded like 0xF0-0xF3, so not behind the I/O gate)'
+d['modes'] = ['memory_to_vram_or_cram', 'vram_to_vram', 'fill']    # $F6 bits 3-2; ROM, card or work RAM is the source of a memory transfer
+d['register_layout'] = {
+    '0xF4': 'source address, low byte; in fill mode, the fill byte',
+    '0xF5': 'source address, high byte',
+    '0xF6': ('bits 1-0 the source of a memory transfer: 0 the CPU address space ($0000-$FFFF as the CPU reads it), '
+             '1 the card (card bank $0B, source address bits 13-0), 2 work RAM (the selected 8 KB bank, address '
+             'bits 12-0), 3 reserved; bits 3-2 the mode: 0 memory to VRAM or CRAM, 1 VRAM to VRAM, 2 fill, 3 '
+             'reserved; bits 7-4 reserved'),
+    '0xF7': 'destination address, low byte',
+    '0xF8': ('bits 5-0 destination address, high bits (a transfer starts in VRAM $0000-$3FFF); bit 6 set: the '
+             'destination is CRAM (address bits 8-0, its 512 bytes); bit 7 reserved'),
+    '0xF9': 'length, low byte',
+    '0xFA': 'bits 5-0 length, high bits (a length of 0 means 16,384 bytes); bit 7 written as 1 starts the transfer; bit 6 reserved',
+}
+d['behaviour'] = (
+    'A transfer moves length bytes, source and destination each counting up by one. A VRAM destination counts on '
+    'past $3FFF into the upper 16 KB (address bits 14-0), and VRAM to VRAM reads source address bits 14-0, whether or '
+    'not VRAM expansion is on. The registers keep what was written (the addresses do not advance) and read back at $F4-$FA. A '
+    'transfer to CRAM stores the bytes as CRAM holds them (the Game Gear 12-bit format, two bytes per entry, whatever '
+    'the CRAM write mode) and marks each palette it writes as written (color_system.power_on_state).')
+d['timing'] = ('OPEN (Q26): the emulator completes a transfer at once and charges the CPU one T-state per byte, '
+               'plus, for a transfer from the CPU address space, the cartridge wait state (cpu.turbo.cartridge_wait) '
+               'on each byte it reads from $0000-$BFFF at 200 %, whatever the display is doing.')
+pc = p['audio']['pcm']
+pc['ports'] = {
+    '0x07': 'data (write): one unsigned 8-bit sample, 128 = silence, queued in the FIFO',
+    '0x08': ('control (write): bits 1-0 the sample rate, 0 = 8,000, 1 = 11,025, 2 = 16,000, 3 = 22,050 samples a '
+             'second; bits 7-2 reserved. Read: the fill (fill_readback)'),
+}
+put_after(pc, 'fill_readback', 'output', (
+    'mono, on both sides; while the FIFO is empty the output holds the last sample, and reset returns it to silence. '
+    'How the rates are made from the machine clock, and the level beside the PSG, are open question Q27.'))
+wt = p['audio']['wavetable']
+wt['waveform'] = '32 samples of 4 bits per voice (8 is the centre), written through $11 and $12'
+wt['register_layout'] = {
+    '0x11': 'bit 5 selects the voice (0 or 1) that $11-$15 address; bits 4-0 the waveform position $12 writes; bits 7-6 reserved',
+    '0x12': 'bits 3-0 the sample at that position (the position does not advance); bits 7-4 ignored',
+    '0x13': 'frequency, low 8 bits',
+    '0x14': 'bits 3-0 frequency, high 4 bits; bit 7 key on (1 plays, 0 silences); bits 6-4 reserved',
+    '0x15': ('bits 3-0 volume, 0 silent to 15 full, linear; bits 5-4 the sides it is heard on (bit 5 left, bit 4 '
+             'right; both at reset); bits 7-6 reserved'),
+}
+wt['readback'] = 'write-only: $11-$15 read $FF'
+wt['pitch'] = ('A voice with frequency f (12 bits, 0 silent) plays its 32-sample waveform; how f maps to a pitch, and '
+               'the level beside the PSG, are open question Q27.')
+ds = p['media']['dual_slot']
+ds['source_select'] = (
+    '$09 bit 0 set: $4000-$7FFF reads the card, bank $0B; bit 1 set: $8000-$BFFF the same (cartridge RAM mapped by '
+    '$FFFC bit 3 comes first); clear: the cartridge, banked by its mapper. $09 acts only with a Sega-mapper '
+    'cartridge: with the Codemasters, Korean and Korean MSX mappers $4000-$BFFF reads the cartridge whatever $09 '
+    'holds. $0000-$3FFF is always the cartridge. '
+    'Bits 7-2 are kept and read back but do nothing. It acts only with a card inserted, in MasterDrive mode. How $09 '
+    'relates to the slot enables in $3E is open question Q30.')
+ds['card_bank'] = '$0B bits 4-0: one of 32 banks of 16 KB (512 KB) of the card; reads back'
+b0 = p['vdp_registers']['bank_0']
+b0['11'] = 'Line-Scroll (H) Table Base: bits 5-0 = VRAM address >> 8 (video.scroll.line_h_table)'
+b0['12'] = 'Extended Sprite Attribute Table Base: bits 5-0 = VRAM address >> 8 (128 bytes, video.sprites.esat)'
+b0['13'] = ('Window X Split: bits 4-0 = the first window column; the window covers screen x from 8 x the value to the '
+            'right edge (video.window_layer); bits 7-5 reserved')
+b0['14'] = ('Window Y Split: bits 4-0 = the split row (8 lines each); bit 7 set: the window covers the lines above the '
+            'split, clear: the lines from the split down; bits 6-5 reserved')
+b1 = p['vdp_registers']['bank_1']
+b1['0'] = 'Window Tilemap Base: bits 5-0 = VRAM address >> 8 (video.window_layer)'
+b1['1'] = 'Line V-Offset Table Base: bits 5-0 = VRAM address >> 8 (video.scroll.line_v_table)'
+b1['4'] = 'Render Bank Assignment: OPEN, no implementation defines it (open question Q28)'
+b1['5'] = 'Sprite Palette Base: OPEN, no implementation defines it (open question Q28)'
+b1['6'] = 'Collision Result Base: OPEN, no implementation defines it (open question Q28)'
+sc = p['video']['scroll']
+sc['line_h_table'] = {
+    'enable': 'Feature Enable A bit 1',
+    'base': 'bank 0 R11',
+    'format': ('one byte per line: on line y the background\'s horizontal scroll is the byte at base + y, in place of '
+               'R8, the horizontal scroll register. The top two rows that R0 bit 6 exempts stay unscrolled.'),
+    'tier': 1,
+}
+sc['line_v_table'] = {
+    'enable': 'Feature Enable B bit 0',
+    'base': 'bank 1 R1',
+    'format': ('one byte per line: on line y the byte at base + y is added to the vertical scroll (R9), modulo 256; '
+               'screen x 192 and right, which R0 bit 7 exempts (stock_behaviour.vdp.v_scroll), stay unscrolled.'),
+    'source_system': 'Atari 8-bit ANTIC',
+    'tier': 1,
+}
+wl = p['video']['window_layer']
+wl['enable'] = 'Feature Enable A bit 2, MasterDrive mode'
+wl['area'] = ('screen x from bank 0 R13 to the right edge, on the lines bank 0 R14 selects (above its split, or from '
+              'the split down)')
+wl['tilemap'] = ('32 x 32 entries of 2 bytes in the Mode 4 name-table format, at bank 1 R0. The window does not '
+                 'scroll: the cell at screen row r, column c shows entry (r, c). It replaces the background in its '
+                 'area, priority bits included, and sprites are drawn over it as over the background.')
+wl['text_mode']['layout'] = ('its 40-column name table is at bank 1 R0 too, 40 bytes a row, row 0 at the window\'s '
+                             'top edge; the window area is filled with the background colour, then the characters '
+                             'are drawn from its left edge')
+wl['open'] = ('open question Q29: the tile and text windows count their rows differently, the window can only lie '
+              'right of the X split, and the window reads its tilemap base (bank 1 R0) even while XRB is clear')
+p['glossary']['XRB'] = p['glossary']['XRB'] + (' One exception: the window layer (Feature Enable A bit 2) reads its '
+                                               'tilemap base from bank 1 R0 whether or not XRB is set (open question Q29).')
+p['vdp_registers']['xrb_semantics'] = p['glossary']['XRB']
+p['video']['sprites']['collision']['extended'] = ('OPEN (Q28): per-sprite hit bitmaps at the bank 1 R6 base are named, '
+                                                  'but not defined, and neither implementation writes them')
+p['open_questions'] += [
+    {'id': 'Q26', 'topic': 'DMA timing and reach', 'status': 'open',
+     'detail': ('The emulator completes a DMA transfer as soon as $FA bit 7 is written and charges the CPU one T-state '
+                'per byte (with the cartridge wait state on bytes read from the cartridge at 200 %), whatever the '
+                'display is doing, and the bus synchroniser does not take part (dma.timing). How long should a transfer '
+                'take, does the CPU wait for it, and may it write VRAM during the active display? Also, the destination '
+                'register reaches only $0000-$3FFF, but a transfer counts on into the upper 16 KB, even without VRAM '
+                'expansion: should it wrap at $3FFF, follow bank 1 R3, or have a fifteenth address bit?')},
+    {'id': 'Q27', 'topic': 'PCM and wavetable clocks and levels', 'status': 'open',
+     'detail': ('The PCM rates (8,000, 11,025, 16,000 and 22,050 samples a second) and the wavetable\'s pitch (the '
+                'emulator plays a voice\'s waveform f x 3.2 times a second) are not made from the machine clock; '
+                'none of the four rates is a whole fraction of the 3.579545 MHz clock. And their level beside the PSG '
+                'and the FM chip is the emulator\'s choice: PCM at full scale peaks at 0.2 of the output\'s full '
+                'scale, a wavetable voice at full volume at 0.12, a PSG channel at full volume at 0.16. Which clocks '
+                'and levels should the machine have, and does $F2 mute them?')},
+    {'id': 'Q28', 'topic': 'Render bank, sprite palette base, collision result base and per-sprite collision',
+     'status': 'open',
+     'detail': ('Bank 1 R4 (render bank assignment), R5 (sprite palette base) and R6 (collision result base), and Feature '
+                'Enable B bit 3 (per-sprite collision, which is meant to write hit bitmaps at the R6 base, '
+                'video.sprites.collision) are named in the documents, but neither implementation does anything with '
+                'them, so their layouts and behaviour are not defined. What do they hold?')},
+    {'id': 'Q29', 'topic': 'Window rows and side', 'status': 'open',
+     'detail': ('The tile window reads its tilemap by screen row, so a window from row 20 down starts at tilemap row 20, '
+                'while the text window counts its rows from the window\'s top edge. And R14 bit 7 picks the side of '
+                'the Y split, but R13 has no side bit, so the window can only lie right of the X split. And the window '
+                'reads its tilemap base, bank 1 R0, even while XRB is clear, when the bank 1 registers are otherwise '
+                'without effect. Which row rule should both use, should the window be able to lie left of the X split, '
+                'and should its tilemap base need XRB?')},
+    {'id': 'Q30', 'topic': 'Slot select and the $3E slot enables', 'status': 'open',
+     'detail': ('$09 maps the card into $4000-$BFFF by itself (media.dual_slot). On the stock Master System, $3E bit 5 '
+                'enables the card slot and bit 6 the cartridge slot. The emulator ignores bit 5, and ignores bit 6 '
+                'whenever a card is inserted; the Pocket core decodes $09 and $0B but loads no card. How should $09 and '
+                '$3E bits 5-6 combine, and what does $0000-$3FFF read when $3E disables the cartridge?')},
+]
+change(LATER + 'Q16 resolved by the owner: the emulator\'s register layouts are written into the profile: the DMA engine '
+       '(dma.register_layout, behaviour), PCM control and output (audio.pcm), the wavetable (audio.wavetable), slot select '
+       'and the card bank (media.dual_slot), the base registers (vdp_registers bank 0 R11 and R12, bank 1 R0 and R1), '
+       'the line tables (video.scroll) and the window (vdp_registers bank 0 R13 and R14, video.window_layer). Four '
+       'faults were fixed rather than adopted: a fill wrote the mode register $F6 instead of a byte software chooses '
+       '(now $F4), a transfer to CRAM left the palettes it wrote marked unwritten, with the background scrolled the '
+       'window left a strip of backdrop where background columns should have shown, and reset left the PCM output at '
+       'its last sample instead of silence. Open questions Q26 (DMA timing and '
+       'reach), Q27 (PCM and wavetable clocks and levels), Q28 (bank 1 R4 to R6, per-sprite collision), Q29 (window '
+       'rows and side, and its tilemap base without XRB) and Q30 (slot select and $3E) added.')
+
+change(LATER + 'stock_behaviour.vdp.v_scroll gives R0 bit 7\'s rule: it exempts screen x 192 to the right edge from the '
+       'vertical scroll, by screen position whatever the horizontal scroll (Gearsystem). The emulator locked map '
+       'columns 24-31, which differ from the screen\'s once the background scrolls horizontally; the Pocket core already '
+       'locked by screen position.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

@@ -306,7 +306,7 @@ probe('M30', 'Game Gear: only $C0/$DC and $C1/$DD answer above $C0 (Gearsystem)'
   return { ok: (a & 1) === 0 && (b & 1) === 0 && c === 0xFF && d === 0xFF, note: [a, b, c, d].map(v => v.toString(16)).join(' ') };
 });
 
-probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 or a Master System in a TMS mode raises none, Mode 4 does; MasterDrive mode still raises it in a TMS mode (open question Q15) (machine profile stock_behaviour.vdp.line_counter)', () => {
+probe('M40', 'Line interrupt only in Mode 4 in the stock modes: an SG-1000 or a Master System in a TMS mode raises none, Mode 4 does; MasterDrive mode raises it in a TMS mode too, as the owner decided (Q15) (machine profile stock_behaviour.vdp.line_counter)', () => {
   const run = (mode, r0) => { const m = sms(mode); m.vdp.reg[0] = r0; m.vdp.reg[1] = 0x40; m.vdp.reg[10] = 0;  // IE1 set, counter 0
     m.vdp.irqLine = 0; for (let i = 0; i < 4; i++) m.vdp.scanline(); return m.vdp.irqLine ? 1 : 0; };
   const sgTms = run('sg', 0x10), smsTms = run('sms', 0x10), smsM4 = run('sms', 0x14), ssTms = run('ss', 0x10);
@@ -739,6 +739,64 @@ probe('M63', 'TMS modes at 224 and 240 lines: a sprite starts on line Y+1, or Y+
   V.renderLine(232); const tall = (V.fb[232 * 256 + 10] >>> 0) === (V.tms(15) >>> 0);
   V.reg[16 + 2] = 0x00; V.vram[0x3B00] = 0xFA; V.renderLine(2); const low = (V.fb[2 * 256 + 10] >>> 0) === (V.tms(15) >>> 0);
   return { ok: tall && low, note: `240 lines: Y=$E7 on line 232 ${tall}; 192 lines: Y=$FA on line 2 ${low}` };
+});
+
+probe('M64', 'Window layer with the background scrolled: the scrolled background fills every screen column left of the window, and the window covers screen x from 8 x R13 (Technical Reference §3, Q16)', () => {
+  const m = sms('ss'); const V = vdpSetup(m);
+  V.reg[15] = 0x24; V.reg[16 + 0] = 0x20;                           // XRB + window; window tilemap at $2000
+  V.reg[13] = 16; V.reg[14] = 0x00;                                 // window from x = 128, every line
+  for (let r = 0; r < 8; r++) V.vram[64 + r * 4 + 1] = 0xFF;        // tile 2: colour 2
+  V.cram[4] = 0x0F; V.cram[5] = 0x00;                               // entry 2: red
+  for (let i = 0; i < 32 * 28; i++) V.vram[0x3800 + i * 2] = 1;     // background: tile 1 (white)
+  for (let i = 0; i < 32 * 32; i++) V.vram[0x2000 + i * 2] = 2;     // window: tile 2 (red)
+  V.hsLatch = 8; V.renderLine(10);
+  const px = x => V.fb[10 * 256 + x] >>> 0, white = V.colour(0, 1) >>> 0, red = V.colour(0, 2) >>> 0;
+  const ok = px(3) === white && px(127) === white && px(128) === red && px(255) === red;
+  return { ok, note: `x 3 ${px(3) === white ? 'background' : 'gap'}, x 127 ${px(127) === white}, x 128 window ${px(128) === red}, x 255 ${px(255) === red}` };
+});
+
+probe('M65', 'DMA fill writes the byte in $F4 (the mode register $F6 holds only the mode and source): $F4 = $5A, $F6 = $08 (fill), destination $1000, length 4 (Technical Reference §9, Q16)', () => {
+  const m = sms('ss'); const V = m.vdp; V.vram.fill(0);
+  for (const [p, v] of [[0xF4, 0x5A], [0xF5, 0], [0xF6, 0x08], [0xF7, 0x00], [0xF8, 0x10], [0xF9, 4], [0xFA, 0x80]]) m.out(p, v);
+  const got = Array.from(V.vram.slice(0x1000, 0x1005));
+  const ok = got.join() === '90,90,90,90,0' && m.inp(0xF4) === 0x5A && m.inp(0xF8) === 0x10;
+  return { ok, note: 'VRAM $1000-$1004: ' + got.map(v => '$' + v.toString(16).toUpperCase()).join(' ') };
+});
+
+probe('M66', 'DMA to CRAM marks the palettes it writes as written, so an extended palette loaded by DMA is shown, not aliased to palette 0 or 1 (Technical Reference §9, Q16)', () => {
+  const m = sms('ss'); const V = m.vdp;
+  V.reg[15] = 0x20; V.reg[16 + 2] = 0x02;                           // XRB; extended CRAM
+  m.wram.set([0x0F, 0x00, 0xF0, 0x00], 0x100);                      // entries: red, green
+  for (const [p, v] of [[0xF4, 0x00], [0xF5, 0x01], [0xF6, 0x02], [0xF7, 0xA0], [0xF8, 0x40], [0xF9, 4], [0xFA, 0x80]]) m.out(p, v);
+  const shown = (V.colour(5, 1) >>> 0) === (V.rgb(5 * 16 + 1) >>> 0) && (V.rgb(5 * 16 + 1) >>> 0) !== (V.rgb(17) >>> 0);
+  return { ok: shown && !!(V.pw[0] & (1 << 5)), note: `CRAM $A2-$A3 ${V.cram[0xA2]},${V.cram[0xA3]}; palette 5 marked ${!!(V.pw[0] & (1 << 5))}, shown ${shown}` };
+});
+
+probe('M67', 'Reset returns the PCM output to silence (it held its last sample, a constant offset on both sides, until new samples came) (Technical Reference §7, Q16)', () => {
+  const m = sms('ss'); m.pcmLast = 0.15; m.reset();
+  return { ok: m.pcmLast === 0, note: 'level after reset ' + m.pcmLast };
+});
+
+probe('M68', 'R0 bit 7 exempts screen x 192 to the right edge from the vertical scroll, whatever the horizontal scroll: the lock is by screen position, not by map column (Gearsystem, Video.cpp RenderBG; Technical Reference §16)', () => {
+  const m = sms('sms'); const V = vdpSetup(m);
+  V.reg[0] = 0x84;                                                  // Mode 4, R0 bit 7
+  for (let r = 0; r < 8; r++) V.vram[64 + r * 4 + 1] = 0xFF;        // tile 2: colour 2
+  V.cram[4] = 0x0F; V.cram[5] = 0x00;                               // entry 2: red
+  for (let c = 0; c < 32; c++) { V.vram[0x3800 + c * 2] = 1; V.vram[0x3800 + 2 * 64 + c * 2] = 2; }
+  V.hsLatch = 4; V.vsLatch = 16; V.renderLine(0);                    // scrolled: map row 2 (red); locked: row 0 (white)
+  const px = x => V.fb[x] >>> 0, white = V.colour(0, 1) >>> 0, red = V.colour(0, 2) >>> 0;
+  const ok = px(191) === red && px(192) === white && px(195) === white && px(255) === white;
+  return { ok, note: `x 191 ${px(191) === red ? 'scrolled' : 'locked'}, x 192 ${px(192) === white ? 'locked' : 'scrolled'}, x 195 ${px(195) === white ? 'locked' : 'scrolled'}` };
+});
+
+probe('M69', 'A magnified sprite cut by the left edge shows the visible half of its first pixel: with R1 bit 0 and R0 bit 3 a sprite at X = 7 starts at x = -1, so x = 0 shows its first pixel (Gearsystem draws sprites per screen pixel; Technical Reference §5)', () => {
+  const m = sms('sms'); const V = vdpSetup(m);
+  V.reg[0] = 0x0C; V.reg[1] = 0x41;                                 // sprites 8 left; display on, magnified
+  V.vram[0x3F00] = 9; V.vram[0x3F01] = 0xD0; V.vram[0x3F80] = 7; V.vram[0x3F81] = 1;
+  V.renderLine(10);
+  const spr = V.colour(1, 1) >>> 0;
+  const ok = (V.fb[10 * 256] >>> 0) === spr && (V.fb[10 * 256 + 14] >>> 0) === spr && (V.fb[10 * 256 + 15] >>> 0) !== spr;
+  return { ok, note: `x 0 ${(V.fb[10 * 256] >>> 0) === spr ? 'sprite' : 'background'}, x 14 ${(V.fb[10 * 256 + 14] >>> 0) === spr}, x 15 ${(V.fb[10 * 256 + 15] >>> 0) !== spr ? 'background' : 'sprite'}` };
 });
 
 let pass = 0;

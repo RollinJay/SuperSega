@@ -2,7 +2,7 @@
 
 Covers Golden Axe Warrior (SMS) and Ax Battler: A Legend of Golden Axe (Game Gear), retargeted from stock hardware to the MasterDrive profile.
 
-Feature references follow the MasterDrive machine profile v7 (`../machine/masterdrive_machine_v7.json`) and Technical Reference v3 (`../machine/MasterDrive_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q22).
+Feature references follow the MasterDrive machine profile v7 (`../machine/masterdrive_machine_v7.json`) and Technical Reference v3 (`../machine/MasterDrive_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q30).
 
 Related: the ROM hack maker framework specification (`masterdrive-rom-hack-maker.md`), which covers how mods for these and the other roster titles are made, tested and distributed.
 
@@ -63,8 +63,8 @@ Already 256×192. No viewport work. Every item below is additive, which makes th
 
 1. **Palette re-authoring, 64 colours to 12-bit.** Largest visual change available. Affects every screen.
 2. **ESAT with H-flip.** A top-down game with four-facing sprite sets stores mirrored walk cycles as separate tiles. Replacing the mirrored halves with H-flip attributes typically recovers 30–50% of sprite tile space. That recovered space directly funds enemy variety.
-3. **DMA copy and fill for room transitions.** The game is screen-flip in the Zelda 1 idiom, meaning a full-screen tile swap on every room boundary. This is the single largest per-frame VRAM workload in the game and the most direct DMA target.
-4. **Window layer for the status bar.** Removes whatever row-lock or line-interrupt arrangement currently holds the HUD, and returns those scanlines to normal scroll.
+3. **DMA copy and fill for room transitions.** The game is screen-flip in the Zelda 1 idiom, meaning a full-screen tile swap on every room boundary. This is the single largest per-frame VRAM workload in the game and the most direct DMA target. The DMA registers are defined (Technical Reference §9), but how long a transfer takes and whether it may run during the display are not (Q26), so schedule transitions in vertical blanking until that is settled.
+4. **Window layer for the status bar.** Removes whatever row-lock or line-interrupt arrangement currently holds the HUD, and returns those scanlines to normal scroll. A window spans from its X split to the right edge, above or below its Y split (Technical Reference §3). Whether its tilemap rows count from the top of the screen, as now, or from the window's top edge is open (Q29); a status bar at the top of the screen reads the same either way.
 5. **Stereo PSG panning.** The game's sound driver is Sega's shared Master System/Game Gear driver and already contains the Game Gear stereo command — the same routine Ax Battler's driver uses (its write is in bank 6, at $1875D). On a stock Master System that write would reach memory control, which suggests the game's music never issues it. On MasterDrive, where $06 is the stereo register once the I/O gate is open (Feature Enable A bit 7, set at boot), panning can likely be added in the music data without driver changes. Confirm the command path in the emulator first.
 6. **FM soundtrack at $F0/$F1.** Layered FM over retained PSG is the expected arrangement, but this is not a data-only upgrade: the game's sound driver has no FM code (no writes to $F0 or $F1 anywhere in the ROM), so it needs an FM driver — written for the project, or used under a licence that allows redistribution — as well as new music. That cost is why it ranks below panning.
 7. **Line-scroll table.** Only if any existing effect uses line interrupts for parallax; otherwise skip.
@@ -102,7 +102,7 @@ Rationale: GAW requires no viewport work and no reverting of a third-party patch
 
 ## 6. Machine questions and v7's answers
 
-The plan listed these as open against the v5 document. Machine profile v7 answers them as follows (the profile's open questions are numbered Q1–Q25):
+The plan listed these as open against the v5 document. Machine profile v7 answers them as follows (the profile's open questions are numbered Q1–Q30):
 
 - **Maximum ROM size and mapper register layout for expanded images.** 4 MB, the stock Sega mapper registers' reach, is the largest cartridge the machine takes (Q2, decided October 2026).
 - **ESAT entry format, and whether H-flip is per-sprite or per-tile.** 2 bytes per sprite, with H-flip and V-flip per sprite (Q4, resolved in v6). Feature Enable C bit 4, which once selected the 2-byte layout, is retired, so a conversion need not set it (Q13, decided October 2026).
