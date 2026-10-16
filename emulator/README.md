@@ -20,13 +20,14 @@ node probes_v7.js ../masterdrive-emulator.html          # 57 behavioural probes,
 node selftest.js ../masterdrive-emulator.html           # the page's own Debug-tab self-test, headless (29 checks)
 python3 profile_crosscheck.py ../masterdrive-emulator.html ../../machine/masterdrive_machine_v7.json
 python3 wiring_audit.py ../masterdrive-emulator.html    # every control wired to code, every subsystem present
+node romid_test.js ../masterdrive-emulator.html ../../pocket-core/roms   # ROM keys and the carry-over of stored data
 node controls_test.js ../masterdrive-emulator.html ../../pocket-core/roms/vdp224.sms   # key and gamepad bindings in a browser
 node sc_typing.js ../masterdrive-emulator.html romdir out/   # SC-3000 BASIC typing, SF-7000 IPL (ROMs not included)
 PAL=1 node js_dump.js ../masterdrive-emulator.html game.sms sms out/g 200 500   # frames as PPM
 node cmp_gs.js ../masterdrive-emulator.html game.sms sms gsPrefix 200 500       # against Gearsystem frames
 ```
 
-The probes, the self-test, the profile cross-check, the wiring audit and the controls test exit with status 1 when a check fails; GitHub runs them on every push. `controls_test.js` drives the page in headless Chromium with a simulated gamepad and needs Playwright (`npm install playwright`, then `npx playwright install chromium`). Paths from here on are relative to `tools/`, like the commands. `cmp_gs.js` reads `gsPrefix_N.ppm` and `gsPrefix_N.ram` as written by the Gearsystem runner `gsrun`, which is built from a local Gearsystem checkout as `../../pocket-core/sim/ref/README.md` describes. Prefix `PAL=1` for 50 Hz titles, as for `js_dump.js`.
+The probes, the self-test, the profile cross-check, the wiring audit, the ROM-key test and the controls test exit with status 1 when a check fails; GitHub runs them on every push. `controls_test.js` drives the page in headless Chromium with a simulated gamepad and needs Playwright (`npm install playwright`, then `npx playwright install chromium`). Paths from here on are relative to `tools/`, like the commands. `cmp_gs.js` reads `gsPrefix_N.ppm` and `gsPrefix_N.ram` as written by the Gearsystem runner `gsrun`, which is built from a local Gearsystem checkout as `../../pocket-core/sim/ref/README.md` describes. Prefix `PAL=1` for 50 Hz titles, as for `js_dump.js`.
 
 `emuload.js` runs the page's script headless; the other tools build on it. `jstrace.js` writes an instruction trace that `../../pocket-core/tools/cmp_trace.py` compares with Gearsystem's (`../../pocket-core/sim/ref/gstrace.cpp`). `shots.js` and `smoke.js` are quick render and smoke tests.
 

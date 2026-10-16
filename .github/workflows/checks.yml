@@ -34,6 +34,8 @@ jobs:
         run: python3 profile_crosscheck.py ../masterdrive-emulator.html ../../machine/masterdrive_machine_v7.json
       - name: Wiring audit
         run: python3 wiring_audit.py ../masterdrive-emulator.html
+      - name: ROM identity and stored-data migration
+        run: node romid_test.js ../masterdrive-emulator.html ../../pocket-core/roms
       - name: Install Playwright and Chromium
         run: |
           npm install --no-save playwright@1.56.1

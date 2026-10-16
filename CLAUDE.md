@@ -23,6 +23,7 @@ node probes_v7.js ../masterdrive-emulator.html
 node selftest.js ../masterdrive-emulator.html
 python3 profile_crosscheck.py ../masterdrive-emulator.html ../../machine/masterdrive_machine_v7.json
 python3 wiring_audit.py ../masterdrive-emulator.html
+node romid_test.js ../masterdrive-emulator.html ../../pocket-core/roms
 node controls_test.js ../masterdrive-emulator.html ../../pocket-core/roms/vdp224.sms   # needs Playwright
 cd ../../machine && python3 tools/make_profile_v7.py masterdrive_machine_v7.json /tmp/p.json && cmp /tmp/p.json masterdrive_machine_v7.json
 cd .. && pocket-core/sim/check.sh        # Pocket core: about four minutes

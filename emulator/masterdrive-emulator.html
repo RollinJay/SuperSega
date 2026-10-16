@@ -575,7 +575,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
         <div class="note" id="gamecfg">No ROM loaded.</div>
         <div class="row" style="margin-top:6px"><button id="cfgsave">Remember for this game</button><button id="cfgforget">Forget</button></div>
       </div>
-      <div class="note">Per-game settings store the enhancement toggles and turbo step against the ROM's checksum,
+      <div class="note">Per-game settings store the enhancement toggles and turbo step against a CRC-32 of the whole ROM,
       which is the override database the enhancement layer is designed around: defaults for unknown ROMs, a verified
       configuration for anything you have tested.</div>
     </div>
@@ -2475,7 +2475,7 @@ function initAudio(m){
 /* ================= storage (degrades to memory if blocked) ================= */
 const store={_m:{},
   get(k){ try{ const v=localStorage.getItem('ss_'+k); return v===null?(this._m[k]??null):v; }catch(e){ return this._m[k]??null; } },
-  set(k,v){ this._m[k]=v; try{ localStorage.setItem('ss_'+k,v); }catch(e){} },
+  set(k,v){ this._m[k]=v; try{ localStorage.setItem('ss_'+k,v); return true; }catch(e){ return false; } },   /* false: kept in memory only */
   del(k){ delete this._m[k]; try{ localStorage.removeItem('ss_'+k); }catch(e){} }};
 
 /* ================= ROM patching: IPS and BPS ================= */
@@ -2517,15 +2517,49 @@ function applyBPS(rom,patch){
   return {data:out,recs:tgtSize,fmt:'BPS',srcSize};
 }
 function segaIdent(m){ m.header=parseSegaHeader(m.cart); return m.header; }
-function romHash(d){ let h=0x811c9dc5; for(let i=0;i<d.length;i+=17){ h^=d[i]; h=(h*0x01000193)>>>0; }
+/* The ROM's identity, the key of its stored settings, battery image, snapshot and
+   save routing: a CRC-32 of the whole ROM and its length. The key used before
+   (romHashSampled) hashed every 17th byte, so ROMs that differ only between those
+   bytes (a hack and its original, the test ROMs vdp192 and vdp224) shared one key.
+   It is kept, byte for byte, to find what was stored under it, and for the save
+   card's game ID, which the machine does not define yet (Q24). */
+function romHashSampled(d){ let h=0x811c9dc5; for(let i=0;i<d.length;i+=17){ h^=d[i]; h=(h*0x01000193)>>>0; }
   return (h>>>0).toString(16).padStart(8,'0')+'-'+d.length; }
+const CRC_T=(()=>{ const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; }
+  return t; })();
+function crc32(d){ let c=0xFFFFFFFF; for(let i=0;i<d.length;i++) c=CRC_T[(c^d[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function romHash(d){ return 'c'+crc32(d).toString(16).padStart(8,'0')+'-'+d.length; }
+function setRomIds(m){ m.romId=romHash(m.cart); m.romIdSampled=romHashSampled(m.cart); }
+/* What a ROM stored under its old key is copied (never moved) to its new key the
+   first time it loads, so ROMs that shared an old key each keep a copy. A marker
+   records that the copy was made, so a later Forget is not undone. */
+const ROM_KEYS=['cfg_','cartsram_','cartsnap_','cartdirty_','route_'];
+function romMigrate(m){
+  if(!m.romId||!m.romIdSampled||store.get('romid_'+m.romId)!==null) return 0;
+  let n=0, ok=true;
+  for(const k of ROM_KEYS){
+    if(store.get(k+m.romId)!==null) continue;
+    const v=store.get(k+m.romIdSampled); if(v===null) continue;
+    if(store.set(k+m.romId,v)) n++; else ok=false;
+  }
+  if(ok) store.set('romid_'+m.romId,m.romIdSampled);
+  return n;
+}
+/* A ROM was loaded into m (the page's cartridge input): its ids, the carried-over
+   data, its settings and its battery save. */
+function romLoaded(m){
+  m.romBase=m.cart.slice(); setRomIds(m);
+  const moved=romMigrate(m), had=cfgLoad(m), bat=batLoad(m);
+  return {moved,had,bat};
+}
 
 /* ================= save states ================= */
 function b64(u8){ let s=''; for(let i=0;i<u8.length;i++) s+=String.fromCharCode(u8[i]); return btoa(s); }
 function unb64(s){ const b=atob(s), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i); return u; }
 function saveState(m){
   const C=m.cpu,V=m.vdp,P=m.psg;
-  return {v:1, mode:m.mode, id:m.romId||'', pal:m.pal,
+  return {v:1, mode:m.mode, id:m.romId||'', idSampled:m.romIdSampled||'', pal:m.pal,
     cpu:{R:Array.from(C.R),S:Array.from(C.S),PC:C.PC,SP:C.SP,I:C.I,Rr:C.Rr,
       IFF1:C.IFF1,IFF2:C.IFF2,IM:C.IM,halt:C.halt,tc:C.tc},
     vdp:{vram:b64(V.vram),cram:b64(V.cram),pw:V.pw[0],reg:Array.from(V.reg),
@@ -3468,8 +3502,10 @@ function makeSF7000(){
 }
 
 /* ================= battery SRAM ================= */
-function gameId(m){ if(!m.romId) return 0;
-  let h=0x811c9dc5; for(let i=0;i<m.romId.length;i++){ h^=m.romId.charCodeAt(i); h=(h*0x01000193)>>>0; }
+/* The save card's game ID, from the ROM's old key: the machine does not define it
+   (Q24), so it stays what every existing card holds. */
+function gameId(m){ const id=m.romIdSampled; if(!id) return 0;
+  let h=0x811c9dc5; for(let i=0;i<id.length;i++){ h^=id.charCodeAt(i); h=(h*0x01000193)>>>0; }
   return h>>>0; }
 function cardGet(m){
   if(m.card && cardValid(m.card)) return m.card;      // in-memory card wins:
@@ -4586,7 +4622,7 @@ function labSceneSimilarity(a,b){
 function labMakeLive(rom,mode){
   const m=new Machine(); m.reset(); m.mode=mode; m.romMode='shadow';
   const buf=rom.buffer?rom.buffer.slice(rom.byteOffset,rom.byteOffset+rom.length):rom;
-  m.loadCart(buf); m.romId=romHash(m.cart);
+  m.loadCart(buf); setRomIds(m);
   return m;
 }
 /* Composite the two live VDPs into a render target and draw it. */
@@ -4866,9 +4902,10 @@ document.getElementById('cart').onchange=e=>{ const f=e.target.files[0]; if(!f)r
   if(auto && auto!==m.mode){ m.mode=auto; document.getElementById('mode').value=auto;
     log('auto-detected '+MODEN[auto]+' from .'+ext); }
   f.arrayBuffer().then(b=>{ m.loadCart(b); m.romName=f.name;
-    m.romBase=m.cart.slice(); m.romId=romHash(m.cart);
-    const had=cfgLoad(m); if(had) log('per-game settings restored for '+m.romId);
-    if(batLoad(m)) log('battery save restored');
+    const r=romLoaded(m);
+    if(r.moved) log(r.moved+' stored item'+(r.moved>1?'s':'')+' carried over from the old ROM id '+m.romIdSampled);
+    if(r.had) log('per-game settings restored for '+m.romId);
+    if(r.bat) log('battery save restored');
     draw(); refresh();
     document.getElementById('modetag').textContent=MODEN[m.mode]+' · '+f.name; }); };
 document.getElementById('card').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
@@ -5161,7 +5198,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
       const sig=new Uint8Array(buf,0,4);
       const isB=String.fromCharCode(sig[0],sig[1],sig[2],sig[3])==='BPS1';
       const r=isB?applyBPS(base,buf):applyIPS(base,buf);
-      m.cart=r.data; m.romId=romHash(m.cart);
+      m.cart=r.data; setRomIds(m); romMigrate(m);
       m.reset(); draw(); refresh();
       log(r.fmt+' patch applied ('+r.recs+' '+(isB?'bytes':'records')+') -> '+m.cart.length+' bytes');
     }catch(err){ log('patch failed: '+err.message); }
