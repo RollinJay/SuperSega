@@ -179,14 +179,14 @@ Quartus Prime Lite 18.1 build of the whole core (machine, Pocket platform layer 
 
 | | Used | Of |
 |---|---|---|
-| Logic (ALMs) | 6,083 (33 %) | 18,480 |
-| Registers | 7,222 | |
+| Logic (ALMs) | 6,090 (33 %) | 18,480 |
+| Registers | 7,255 | |
 | Block RAM (M10K) | 205 (67 %) | 308 |
-| DSP blocks | 5 | 66 |
+| DSP blocks | 7 | 66 |
 
-The FM unit (IKAOPLL and the sound mix) accounts for about 770 ALMs, 1,250 registers, 5 M10K blocks and 3 DSP blocks: the difference from the build before it.
+The FM unit (IKAOPLL and the sound mix) accounts for about 770 ALMs, 1,250 registers, 5 M10K blocks and 3 DSP blocks, the difference from the build before it; the mix's headroom scaling takes 2 more DSP blocks.
 
-Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 3.1 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
+Timing is met at all four of Quartus's corners (slow and fast silicon, 0 °C and 85 °C). The 53.7 MHz machine clock has at least 4.4 ns to spare in its 18.6 ns period, and every hold check passes. Getting there needed the changes listed under "Meeting timing" in §11; the first build missed by 68 ns.
 
 `syn/` holds a Yosys estimate of the machine alone (`syn/synth.log`: 203 M10K blocks and about 8,500 LUTs with the FM unit), useful only as a quick check where Quartus is not installed. An earlier version of the VDP read its line buffers combinationally, which turned them into 15,000 flip-flops; restructuring them as block RAM brought the flip-flop count down eightfold.
 
