@@ -1023,10 +1023,11 @@ class Z80{
       case 0x6F:{const v=this.rb(this.HL),a=R[7];
         this.wb(this.HL,((v<<4)|(a&15))&255);R[7]=(a&0xF0)|(v>>4);
         R[6]=(R[6]&FC)|SZP[R[7]];return 18;}
-      /* The I/O forms count their T-states before the port access, as the
-         unprefixed IN A,(n) and OUT (n),A do, so the bus synchroniser sees
-         every port access at the same point of its instruction. */
-      case 0x40:case 0x48:case 0x50:case 0x58:case 0x60:case 0x68:case 0x78:{
+      /* The I/O forms count their T-states up to the end of the port access
+         before making it, as the unprefixed IN A,(n) and OUT (n),A do, so the
+         bus synchroniser sees every port access where it ends. IN F,(C) ($70)
+         reads the port and sets the flags but keeps no value. */
+      case 0x40:case 0x48:case 0x50:case 0x58:case 0x60:case 0x68:case 0x70:case 0x78:{
         this.tc+=12;
         const r=(op>>3)&7,v=this.bus.inp(this.BC);
         if(r!==6)R[r===7?7:r]=v; R[6]=(R[6]&FC)|SZP[v];return 0;}
@@ -1051,13 +1052,13 @@ class Z80{
         const r=(a-v)&255,h=((a&15)-(v&15))&16?FH:0;
         R[6]=(R[6]&FC)|FN|SZ[r]|h|(this.BC?FP:0);
         if((op&0xF0)===0xB0&&this.BC&&r!==0){this.PC=(this.PC-2)&0xFFFF;return 21;} return 16;}
-      case 0xA2:case 0xB2:case 0xAA:case 0xBA:{
-        this.tc+=16;
+      case 0xA2:case 0xB2:case 0xAA:case 0xBA:{     /* INI and the rest: the port read ends at T13, then the memory write */
+        this.tc+=13;
         const inc=(op&8)?-1:1,v=this.bus.inp(this.BC);
         this.wb(this.HL,v);this.HL=(this.HL+inc)&0xFFFF;R[0]=(R[0]-1)&255;
         R[6]=SZ[R[0]]|FN;
-        if((op&0xF0)===0xB0&&R[0]){this.PC=(this.PC-2)&0xFFFF;return 5;} return 0;}
-      case 0xA3:case 0xB3:case 0xAB:case 0xBB:{
+        if((op&0xF0)===0xB0&&R[0]){this.PC=(this.PC-2)&0xFFFF;return 8;} return 3;}
+      case 0xA3:case 0xB3:case 0xAB:case 0xBB:{     /* OUTI and the rest: the port write is the last 4 T */
         this.tc+=16;
         const inc=(op&8)?-1:1,v=this.rb(this.HL);
         R[0]=(R[0]-1)&255;this.bus.out(this.BC,v);this.HL=(this.HL+inc)&0xFFFF;
@@ -1631,7 +1632,7 @@ class Machine{
     this.psg.pstereo=!!this.ael.stereo&&this.mode!=='ss';
     this.aelStats={extraSpr:0,ovfHidden:0};
     this.afTick=0;
-    this.fmPresent=(this.mode==='sms'||this.mode==='ss'); this.fmReg=0; this.lastFm=null; this.lastFmData=false;
+    this.fmPresent=(this.mode==='sms'||this.mode==='ss'); this.fmReg=0; this.lastFm=null; this.lastFmData=false; this.lastVdpAccess=null;
     this.psgTarget=null; this.noRender=false; this.dual=this.dual||false;
     this.layerBusy=false; this.layerQ=[]; this.frameNo=0;
     this.chUse={psg:[0,0,0,0],fm:new Array(9).fill(0)};
@@ -1640,8 +1641,10 @@ class Machine{
     this.dram=this.dram||new Uint8Array(0x8000);   // SC-3000 cart RAM at $8000, up to 32 KB
     if(this.scRam===undefined) this.scRam=16;      // 16 = DRAM $8000-$BFFF + 2K work RAM
                                                    // 32 = DRAM $8000-$FFFF, work RAM disabled
-    this.romMode='shadow';      // 'shadow' = copied to fast RAM, 'cart' = cartridge timing
-    this.romNs=250;             // period mask ROM access time
+    /* The ROM access setting belongs to the page, not the machine: it survives
+       reset, a mode change and a new cartridge (the selects keep showing it). */
+    if(this.romMode===undefined) this.romMode='shadow';   // 'shadow' = copied to fast RAM, 'cart' = cartridge timing
+    if(this.romNs===undefined) this.romNs=250;             // period mask ROM access time
     this.waitPenalty=0;
     this.player={last:new Int16Array(128), score:new Float32Array(64), best:-1};
     this.gallery=new Map(); this.newSavePending=null;
@@ -1976,7 +1979,7 @@ class Machine{
              range, so no SMS or GG title can reach it by writing a mirror. */
           if(this.vdp.fa&&(this.vdp.fa()&0x40)){
             const step=v&7;
-            if(step<5){ this.turbo=[1,1.25,1.5,1.75,2][step];
+            if(step<5){ const was=this.cpuMult(); this.turbo=[1,1.25,1.5,1.75,2][step]; this.rebaseSync(was);
               if(this.fpga) this.fpga.did('clockGen'); } }
           return;
 
@@ -2074,7 +2077,8 @@ class Machine{
   fmSync(p){
     /* lastFm is the CPU's T-state count at the last FM write; it carries over
        from one frame to the next (a write late in a frame still holds the
-       first write of the next) and is cleared by reset and state loads. */
+       first write of the next), a step change rescales it (rebaseSync), and
+       reset and state loads clear it. */
     const mult=this.cpuMult();
     let waitCpu=0;
     if(mult>1 && this.lastFm!=null){
@@ -2088,29 +2092,40 @@ class Machine{
     this.lastFm=this.cpu.tc; this.lastFmData=(p===0xF1);
     return waitCpu;
   }
+  /* The bus synchroniser keeps its references (the last VDP access, the last
+     FM write) in CPU T-states. They carry over frame boundaries, as the core's
+     counters do, and a change of turbo step rescales them so the time since
+     each still counts in base cycles. */
+  rebaseSync(before){                           /* call after a change, with the step it had before */
+    const after=this.cpuMult();
+    if(after===before) return;
+    const tc=this.cpu.tc, k=after/before;
+    if(this.lastFm!=null) this.lastFm=tc-(tc-this.lastFm)*k;
+    if(this.lastVdpAccess!=null) this.lastVdpAccess=tc-(tc-this.lastVdpAccess)*k;
+  }
   busSync(){
-    const mult=this.cpuMult();
+    const mult=this.cpuMult(), now=this.cpu.tc, last=this.lastVdpAccess;
+    this.lastVdpAccess=now;                     /* every access is a reference, at any step */
     if(mult<=1) return 0;                       /* at base clock the CPU cannot outrun it */
     /* Enhancement-layer VRAM speed-up (stock software only): no access wait */
     if(this.ael&&this.ael.vramboost&&this.mode!=='ss') return 0;
-    /* The CPU's T-state count is the clock; the old code read a counter that
-       nothing advanced, so every wait came out NaN and the CPU was never held. */
-    const vdpNow=this.cpu.tc/mult;              /* convert to the VDP's own time base */
-    const slot=this.vdpSlot();
-    const gap=vdpNow-(this.lastVdpAccess||0);
-    if(gap>=slot){ this.lastVdpAccess=vdpNow; return 0; }
-    const waitVdp=slot-gap;
-    const waitCpu=Math.ceil(waitVdp*mult);
+    /* The VDP takes an access every slot base cycles: slot*mult CPU T-states. */
+    const slot=this.vdpSlot()*mult;
+    if(last==null) return 0;
+    const gap=now-last;
+    if(gap<0 || gap>=slot) return 0;
+    const waitCpu=Math.ceil(slot-gap);
     /* The CPU is physically held, so its own cycle count advances while it waits.
        Omitting this lets the deficit compound: the VDP clock moves a full slot per
        access while the CPU only moves its issue interval, so the wait grows without
        bound instead of settling at the steady-state figure. */
     this.cpu.tc+=waitCpu;
-    this.lastVdpAccess=(this.lastVdpAccess||0)+slot;
+    this.lastVdpAccess=last+slot;               /* the access happens at its slot */
     this.syncWait=(this.syncWait||0)+waitCpu;
     if(this.fpga) this.fpga.did('busSync');
     return waitCpu;
   }
+
 
   /* Wait states the cartridge imposes at the current turbo step.
      The Z80 opcode fetch gives roughly two T-states of access window, less about
@@ -2335,7 +2350,7 @@ class Machine{
     return fb;
   }
   runFrame(){
-    this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0; this.lastVdpAccess=0;
+    this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0;
     if(this.fpga){ this.fpga.did('clockGen'); this.fpga.did('composite');
       this.fpga.did('asicBg'); this.fpga.did('asicInt'); this.fpga.did('shadowVdp'); }
     const r = this.dual? this.runFrameDual() : this.runFrameCore();
@@ -2501,7 +2516,7 @@ function loadState(m,st){
   const C=m.cpu,V=m.vdp,P=m.psg;
   m.mode=st.mode;
   m.fmPresent=(m.mode==='sms'||m.mode==='ss'); m.fmReg=st.fmReg??0;   /* $F2: which chips are heard; older states have none (power-on) */
-  m.lastFm=null; m.lastFmData=false;                                   /* the FM write timing starts afresh */
+  m.lastFm=null; m.lastFmData=false; m.lastVdpAccess=null;             /* the bus synchroniser's timing starts afresh */
   m.pal=!!st.pal;                                                      /* older states have none: NTSC */
   C.R.set(st.cpu.R); C.S.set(st.cpu.S);
   Object.assign(C,{PC:st.cpu.PC,SP:st.cpu.SP,I:st.cpu.I,Rr:st.cpu.Rr,
@@ -3451,10 +3466,13 @@ function batLoad(m,profile){
 function cfgSave(m){ if(!m.romId) return false;
   store.set('cfg_'+m.romId, JSON.stringify({ael:m.ael,mode:m.mode,pal:m.pal})); return true; }
 function cfgLoad(m){ if(!m.romId) return null;
-  const v=store.get('cfg_'+m.romId); if(!v) return null;
-  try{ const c=JSON.parse(v); Object.assign(m.ael,c.ael||{});
-    if(typeof c.pal==='boolean' && c.pal!==m.pal){ setTv(c.pal); m.reset(); }   /* settings saved before the PAL setting have none */
-    return c; }catch(e){ return null; } }
+  const v=store.get('cfg_'+m.romId); let c=null;
+  if(v){ try{ c=JSON.parse(v); Object.assign(m.ael,c.ael||{}); }catch(e){ c=null; } }
+  /* The game's own NTSC/PAL setting, else the page's (settings saved before
+     the PAL setting have none), so one game's PAL never carries to the next. */
+  const pal=(c&&typeof c.pal==='boolean')?c.pal:store.get('tv')==='pal';
+  if(pal!==m.pal){ setTv(pal); m.reset(); }
+  return c; }
 
 /* ================= input binding ================= */
 const DEFBIND={up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',
@@ -4750,9 +4768,9 @@ function draw(){
    PAL), not the display's: a 50 Hz game on a 60 Hz screen, or any game on a
    120 Hz screen, keeps its speed. framesDue says how many frames are due at
    display time t (ms): a frame runs once three quarters of one is due, so a
-   59.92 Hz machine on a 60 Hz screen runs one frame per refresh and drops one
-   every few seconds instead of stuttering on timer jitter; more than four
-   frames behind (a background tab), it catches up no further. */
+   59.92 Hz machine on a 60.00 Hz screen runs one frame per refresh and skips
+   one about every 13 seconds instead of stuttering on timer jitter; more than
+   four frames behind (a background tab), it catches up no further. */
 function framesDue(st,t,hz){
   if(st.t===null) st.t=t;
   st.acc+=Math.min(t-st.t,250); st.t=t;
@@ -4798,7 +4816,7 @@ document.getElementById('snd').onclick=()=>{ initAudio(m); };
 document.getElementById('mode').onchange=e=>{ m.mode=e.target.value; m.reset();
   document.getElementById('modetag').textContent=MODEN[m.mode];
   draw(); refresh(); };
-document.getElementById('turbo').onchange=e=>{ m.ael.turbo=parseFloat(e.target.value);
+document.getElementById('turbo').onchange=e=>{ const was=m.cpuMult(); m.ael.turbo=parseFloat(e.target.value); m.rebaseSync(was);
   document.getElementById('bt').textContent=Math.round(m.cpuMult()*100)+'%'; };
 document.getElementById('scale').onchange=e=>{ cv.style.maxWidth=(256*parseInt(e.target.value))+'px'; };
 cv.style.maxWidth='768px';

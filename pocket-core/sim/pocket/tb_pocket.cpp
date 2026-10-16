@@ -21,9 +21,12 @@
 // After the last frame it prints a timing line for the video bus: the HS
 // period in clk_vid cycles (with a histogram of the periods seen more than
 // twice), the VS period and frame rate, HS pulses per frame, the DE run per
-// line, DE lines per frame, the shortest VS-to-HS gap, HS/VS pulses longer
-// than one cycle, and how many frames the scaler was told to skip. Then the
-// machine's enable check reports its violations (mdr_top, Verilator only).
+// line, DE lines per frame, the shortest VS-to-HS gap, the clk_vid cycles in
+// which HS or VS stayed high for more than one cycle, and the clk_vid cycles
+// with video_skip set. Then a line with the frames run and dumped, the last
+// scaler slot, the slot-word errors and save_present (sim/check.sh requires
+// 0 errors), with -readsave a line naming the file, and last the machine's
+// enable check (mdr_top, Verilator only; sim/check.sh requires 0 violations).
 #include "Vtb_pocket_top.h"
 #include "verilated.h"
 #include <cstdio>

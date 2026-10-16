@@ -408,7 +408,7 @@ probe('M36', 'Stock machine: $FB-$FF read as the controller mirror (SMS: even po
            note: `SMS $FC=${fc.toString(16)} ($DC ${dc.toString(16)}), GG $FC=${gfc.toString(16)}, SS $FC=${sfc.toString(16)}` };
 });
 
-probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-layer step sets the CPU clock in the stock modes but not in MasterDrive mode, where $F3 decides; VRAM speed-up removes the bus synchroniser wait for stock software only', () => {
+probe('M37', 'AEL turbo for stock software (machine profile): the enhancement-layer step sets the CPU clock in the stock modes but not in MasterDrive mode, where $F3 decides; VRAM speed-up removes the VDP access wait of the bus synchroniser for stock software only (FM writes are still held)', () => {
   const a = sms('sms'); a.ael.turbo = 2;
   const s = sms('ss'); s.ael.turbo = 2;
   const ma = a.cpuMult ? a.cpuMult() : 1, ms = s.cpuMult ? s.cpuMult() : 1;
@@ -512,37 +512,72 @@ probe('M48', 'The pad in the stock modes: A is button 1, B is button 2, and Star
            note: `Start = Pause ${on ? 'on' : 'off'} at power-on, NMIs ${n}; A -> $DC ${hex(a)}, B -> ${hex(b)}` };
 });
 
-probe('M49', 'PAL runs on the PAL clock: base 3.546893 MHz, frames at 49.70 Hz (313 lines of 228 cycles); NTSC 3.579545 MHz, 59.92 Hz; the slower clock also reaches cartridge timing, so a 230 ns ROM needs a wait state at 200 % on NTSC but not on PAL (Technical Reference §1)', () => {
-  const m = sms('sms'); m.romMode = 'cart'; m.romNs = 230; m.ael.turbo = 2;
-  m.pal = false; const nHz = m.baseHz(), nF = m.frameHz(), nWs = m.romWaitStates();
-  m.pal = true;  const pHz = m.baseHz(), pF = m.frameHz(), pWs = m.romWaitStates();
-  return { ok: nHz === 3579545 && pHz === 3546893 && Math.abs(nF - 59.92) < 0.01 && Math.abs(pF - 49.70) < 0.01 &&
-               nWs === 1 && pWs === 0,
-           note: `NTSC ${nF.toFixed(2)} Hz, PAL ${pF.toFixed(2)} Hz; 230 ns ROM at 200 %: ${nWs} / ${pWs} wait` };
+probe('M49', 'PAL runs on the PAL clock: base 3.546893 MHz, frames at 49.70 Hz (313 lines of 228 cycles); NTSC 3.579545 MHz, 59.92 Hz (Technical Reference §1)', () => {
+  const m = sms('sms');
+  m.pal = false; const nHz = m.baseHz(), nF = m.frameHz();
+  m.pal = true;  const pHz = m.baseHz(), pF = m.frameHz();
+  return { ok: nHz === 3579545 && pHz === 3546893 && Math.abs(nF - 59.92) < 0.01 && Math.abs(pF - 49.70) < 0.01,
+           note: `NTSC ${nF.toFixed(2)} Hz, PAL ${pF.toFixed(2)} Hz` };
 });
 
-probe('M50', 'The FM write timing of the bus synchroniser carries over a frame boundary: an FM write late in one frame still holds the first FM write of the next at turbo; reset starts it afresh (Technical Reference §1)', () => {
+probe('M50', 'The FM write timing of the bus synchroniser carries over a frame boundary: an FM write late in one frame still holds the first FM write of the next at turbo; reset and loading a state start it afresh (Technical Reference §1)', () => {
   const m = sms('sms'); m.ael.turbo = 2;
   const core = m.runFrameCore; m.runFrameCore = () => m.vdp.fb;  // the frame boundary only, no instructions
   m.out(0xF0, 0x10); m.runFrame(); m.cpu.tc += 4;                   // address write, frame ends, 2 base cycles later:
   const b = m.cpu.tc; m.out(0xF1, 0x4A); const held = m.cpu.tc - b;  // the data write waits out the 12
   m.runFrameCore = core;
-  m.reset(); const r = m.cpu.tc; m.out(0xF1, 0x4A); const afterReset = m.cpu.tc - r;
-  return { ok: held === 2 * (12 - 2) && afterReset === 0,
-           note: `across the frame boundary held ${held} T; first write after reset ${afterReset} T` };
+  // reset, then a write 4 T after the CPU's count passes the last one again: no hold
+  const last = m.cpu.tc; m.reset(); m.cpu.tc = last + 4;
+  const r = m.cpu.tc; m.out(0xF0, 0x20); const afterReset = m.cpu.tc - r;
+  // a state taken just after a write, loaded after another write: the loaded machine holds nothing
+  const saveState = X.evalInPage('saveState'), loadState = X.evalInPage('loadState');
+  m.out(0xF1, 0x00); const st = JSON.parse(JSON.stringify(saveState(m)));
+  m.cpu.tc += 30; m.out(0xF0, 0x30); st.cpu.tc = m.cpu.tc + 2; loadState(m, st);
+  const l = m.cpu.tc; m.out(0xF1, 0x00); const afterLoad = m.cpu.tc - l;
+  return { ok: held === 2 * (12 - 2) && afterReset === 0 && afterLoad === 0,
+           note: `across the frame boundary held ${held} T; after reset ${afterReset} T; after a state load ${afterLoad} T` };
 });
 
-probe('M51', 'Every port access is timed at the same point of its instruction: OUT (C),A straight after OUT ($F0),A is 12 T-states later, as OUT ($F1),A would be 11, so at 200 % the FM data write is held for the rest of the 12 base cycles, not for all of them (Technical Reference §1)', () => {
-  const held = code => {                                           // run code from $C000 at 200 %; T-states of hold
-    const m = sms('sms'); m.ael.turbo = 2;
+probe('M51', 'Every port access is timed where it ends: OUT (C),A straight after OUT ($F0),A ends 12 T-states later, OUT ($F1),A 11 and OUTI 16, so at 200 % the FM data write is held for the rest of the 12 base cycles; INI reads its port at T13, before its memory write, so a VDP read by INI straight after IN A,($BE) is held for the rest of the VDP slot (Technical Reference §1; cycle order from MAME z80)', () => {
+  const held = (code, mode) => {                                   // run code from $C000 at 200 %; T-states of hold
+    const m = sms(mode || 'sms'); m.ael.turbo = 2;
     code.forEach((v, i) => m.wr(0xC000 + i, v)); m.cpu.PC = 0xC000;
     for (let i = 0; i < code.length && m.cpu.PC < 0xC000 + code.length; i++) m.cpu.step();
     return m.syncWait || 0;
   };
   const viaC = held([0x0E, 0xF1, 0xD3, 0xF0, 0xED, 0x79]);         // LD C,$F1 ; OUT ($F0),A ; OUT (C),A
   const viaN = held([0xD3, 0xF0, 0xD3, 0xF1]);                     // OUT ($F0),A ; OUT ($F1),A
-  return { ok: viaC === 2 * 12 - 12 && viaN === 2 * 12 - 11,
-           note: `data write held ${viaC} T after OUT (C),A, ${viaN} T after OUT ($F1),A` };
+  const viaI = held([0x21, 0x00, 0xC1, 0x01, 0xF1, 0x01, 0xD3, 0xF0, 0xED, 0xA3]);   // LD HL,$C100 ; LD BC,$01F1 ; OUT ($F0),A ; OUTI
+  const viaR = held([0x21, 0x00, 0xC1, 0x01, 0xBE, 0x01, 0xDB, 0xBE, 0xED, 0xA2]);   // ... LD BC,$01BE ; IN A,($BE) ; INI
+  // the display is off, so the VDP takes an access every 16 base cycles: 32 T at 200 %
+  return { ok: viaC === 24 - 12 && viaN === 24 - 11 && viaI === 24 - 16 && viaR === 32 - 13,
+           note: `FM data write held ${viaC} T after OUT (C),A, ${viaN} after OUT ($F1),A, ${viaI} after OUTI; VDP read by INI held ${viaR}` };
+});
+
+probe('M52', 'The bus synchroniser counts the time since the last VDP access in base cycles whatever the turbo step: a step change from 125 % to 200 % between two VDP accesses holds the second for the rest of the slot, however long the machine has run; the time also carries over a frame boundary (Technical Reference §1)', () => {
+  const m = sms('ss'); m.vdp.reg[15] = 0x40;                       // Feature Enable A bit 6: $F3 may set the step
+  m.out(0xF3, 1); m.cpu.tc = 10000000;                             // 125 %, after a long run
+  m.out(0xBF, 0x00); m.out(0xF3, 4); m.cpu.tc += 4;                // VDP access, step to 200 %, 2 base cycles later:
+  let b = m.cpu.tc; m.out(0xBF, 0x80); const step = m.cpu.tc - b;  // held for the rest of the 16-cycle slot (display off)
+  const g = sms('sms'); g.ael.turbo = 2;
+  const core = g.runFrameCore; g.runFrameCore = () => g.vdp.fb;
+  g.out(0xBF, 0x00); g.runFrame(); g.cpu.tc += 4;                  // VDP access, frame ends, 2 base cycles later:
+  b = g.cpu.tc; g.out(0xBF, 0x80); const frame = g.cpu.tc - b;
+  g.runFrameCore = core;
+  return { ok: step === 32 - 4 && frame === 32 - 4,
+           note: `after the step change held ${step} T; across the frame boundary ${frame} T` };
+});
+
+probe('M53', 'IN F,(C) ($ED $70) reads port (C), sets S, Z and P/V from the value and keeps no value, in 12 T-states (The Undocumented Z80 Documented; MAME z80)', () => {
+  const run = v => {
+    const { c, io } = flatCpu([0x0E, 0xDC, 0xED, 0x70]);           // LD C,$DC ; IN F,(C)
+    const reads = []; io.in = p => { reads.push(p & 0xFF); return v; };
+    c.R[6] = 0x00; c.step(); const a = c.R[7]; const t = c.step();
+    return { t, f: c.R[6] & 0xC4, reads: reads.join(','), keep: c.R[7] === a };
+  };
+  const ef = run(0xEF), zero = run(0x00);                          // $EF: S, odd parity; $00: Z, even parity
+  return { ok: ef.t === 12 && ef.f === 0x80 && zero.f === 0x44 && ef.reads === '220' && ef.keep,
+           note: `${ef.t} T, port ${ef.reads || 'not read'}, F&$C4 $${ef.f.toString(16)} / $${zero.f.toString(16)}` };
 });
 
 let pass = 0;
