@@ -371,7 +371,7 @@ module mdr_vdp (
                         if (line_ctr == 8'd0) begin
                             line_ctr <= r10;
                             // As stock only Mode 4 (R0 bit 2) raises it: the TMS9918
-                            // has none. MasterDrive mode in the TMS modes: open, Q15.
+                            // has none. MasterDrive mode raises it in the TMS modes too (Q15).
                             if (r0[2] || ss_mode) line_irq <= 1'b1;
                         end else line_ctr <= line_ctr - 8'd1;
                     end else line_ctr <= r10;
@@ -514,18 +514,21 @@ module mdr_vdp (
     // TMS9918 sprites: 32 entries of 4 bytes (Y, X, pattern, attribute) at R5 x $80,
     // patterns at R6 x $800, 8x8 or 16x16 (R1 bit 1, four 8-byte blocks: top left,
     // bottom left, top right, bottom right), magnified by R1 bit 0. A sprite starts
-    // on line Y+1, or Y+1-256 when Y+1 is 225 or more (the emulator's rule). The
-    // attribute byte holds the early-clock bit (7: 32 pixels left) and the colour.
+    // on line Y+1, or Y+1-256 when Y+1 is 225 or more (the emulator's rule; 241 or
+    // more at 224 and 240 lines, as in Mode 4, where Y = $D0 does not end the list:
+    // Q17). The attribute byte holds the early-clock bit (7: 32 pixels left) and the colour.
     wire [13:0] tsat      = {r5[6:0], 7'b0};
     wire [13:0] tspg      = {r6[2:0], 11'b0};
     wire [4:0]  tms_limit = no_spr_limit ? 5'd16 : fec[1] ? spr_limit : 5'd4;
     wire [6:0]  scan_n    = tms ? 7'd32 : 7'd64;
+    // at 224 and 240 lines (Q17) a TMS sprite wraps only when Y + 1 is 241 or more, as in Mode 4
+    wire [7:0]  t_wrap    = ext_height ? 8'd241 : 8'd225;
     wire [7:0]  ty1       = vb_dout + 8'd1;
-    wire signed [10:0] ty_s = (ty1 >= 8'd225) ? ($signed({3'b000, ty1}) - 11'sd256) : $signed({3'b000, ty1});
+    wire signed [10:0] ty_s = (ty1 >= t_wrap) ? ($signed({3'b000, ty1}) - 11'sd256) : $signed({3'b000, ty1});
     wire        on_line_t = (sl_s >= ty_s) && (sl_s < ty_s + sh_s);
     reg  [7:0]  s_attr;
     wire [7:0]  tsy1      = s_y + 8'd1;
-    wire signed [10:0] tsy_s = (tsy1 >= 8'd225) ? ($signed({3'b000, tsy1}) - 11'sd256) : $signed({3'b000, tsy1});
+    wire signed [10:0] tsy_s = (tsy1 >= t_wrap) ? ($signed({3'b000, tsy1}) - 11'sd256) : $signed({3'b000, tsy1});
     wire signed [10:0] tdy   = $signed({2'b00, sline}) - tsy_s;
     wire [3:0]  trow      = spr_zoom ? tdy[4:1] : tdy[3:0];
     wire [3:0]  tpx       = spr_zoom ? s_tx[4:1] : s_tx[3:0];
@@ -644,7 +647,7 @@ module mdr_vdp (
                     sidx <= sidx + 7'd1;
                 end
                 if (sv_d2 && !scan_end) begin
-                    if ((tms || !ext_height) && vb_dout == 8'hD0) scan_end <= 1'b1;
+                    if (!ext_height && vb_dout == 8'hD0) scan_end <= 1'b1;   // $D0 ends the list only at 192 lines, Mode 4 and TMS alike (Q17)
                     else if (tms ? on_line_t : on_line) begin
                         if (scount >= (tms ? tms_limit : spr_limit)) begin
                             if (sline < height) ovr_found <= 1'b1;

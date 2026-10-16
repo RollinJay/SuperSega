@@ -55,6 +55,15 @@ ns=re.search(r'(\d+) ns cartridge ROM', cw)
 chk('cartridge timing the default, a %s ns ROM'%(ns and ns.group(1)),
     ns and "if(this.romMode===undefined) this.romMode='cart';" in js and
     'if(this.romNs===undefined) this.romNs=%s;'%ns.group(1) in js)
+esat=prof['video']['sprites']['esat']
+chk('ESAT %d bytes per sprite, no 1-byte layout'%esat['bytes_per_sprite'],
+    'reserved' in prof['vdp_registers']['bank_1']['7']['bits']['4'] and
+    'const attr=esatOn?this.vram[(esat+i*%d)&0x7FFF]:0;'%esat['bytes_per_sprite'] in js and 'onC(0x10)' not in js)
+tall=prof['video']['legacy_modes']['taller_heights']
+wrap=re.search(r'Y\+1 is (\d+) or more', tall['sprites'])
+chk('TMS modes at 224/240 lines: $D0 not an end, wrap at %s'%(wrap and wrap.group(1)),
+    wrap and 'no longer ends the list' in tall['sprites'] and
+    "if(sy===0xD0 && !tall) break;" in js and 'if(sy>=(tall?%s:225)) sy-=256;'%wrap.group(1) in js)
 mid=prof['software_detection']['machine_id']
 chk('machine ID %s at port %s'%(mid['value'], mid['port']),
     'const MACHINE_ID=%s;'%hexlit(mid['value']) in js and 'if(p===%s) return MACHINE_ID;'%hexlit(mid['port']) in js)

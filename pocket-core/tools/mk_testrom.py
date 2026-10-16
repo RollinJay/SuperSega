@@ -4,7 +4,8 @@
 usage: mk_testrom.py outdir
 
 Writes vdp192.sms, vdp224.sms, vdp240.sms, save.sms with save_in.sav, spr12.sms,
-tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, romwait.sms, and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
+tone.sms, fm.sms, fm_tight.sms, mdrfeat.sms, ports.sms, mdports.sms, mdrregs.sms, romwait.sms, tms_g2_224.sms, tms_g2_240.sms,
+tms_txt_240.sms (the TMS9918 modes at 224 and 240 lines, build_tms_tall), and the SG-1000 ROMs tms_g1.sg, tms_g2.sg,
 tms_mc.sg and tms_txt.sg for the four TMS9918 picture modes (build_tms). The VDP ROMs are described here; each of the
 other builder functions below describes its ROM. Each VDP ROM sets Mode 4 with M2 set,
 selects the height with M1 (224) or M3 (240) or neither (192), fills the whole
@@ -790,6 +791,103 @@ def build_tms(mode):
     assert a.pc <= 0x8000
     return bytes(a.b)
 
+def build_tms_tall(height, mode='g2'):
+    """The TMS9918 modes at 224 or 240 lines (Q17), for MasterDrive software: a
+    region-8 ROM, so it starts in MasterDrive mode, that sets Feature Enable B's
+    height (R15 = $20, then bank 1 R2) before the stock registers. Graphics II
+    ('g2'): patterns $0000-$1FFF and colours $2000-$3FFF in four full banks,
+    names $1C00 with rows 24-29 drawn from the fourth bank (names 0-127), sprite
+    attributes $3F80, sprite patterns from $3800 (numbers 128 and up). Sprites:
+    one at Y = $D0 (a terminator only at 192 lines), two overlapping below line
+    192 (collision), five on one line below it (overflow), one at Y = $E3
+    (starts on line 228 by Mode 4's wrap rule) and one at Y = $FA (wraps to the
+    top). Line interrupts on (R0 bit 4, R10 = 15): the handler ORs every status
+    read into RAM and counts line interrupts; each frame it shows the saved
+    status flags as the backdrop colour and writes the count into name cell 0.
+    Text ('txt'): 40 x 30 cells, the name table running past R2's 1 KB. The
+    same ROM in SG-1000 mode stays at 192 lines."""
+    a = Asm()
+    NT, SAT, SPG = 0x1C00, 0x3F80, 0x3800
+    feb = {192: 0x00, 224: 0x40, 240: 0x80}[height]
+    r1 = {'g2': 0x82, 'txt': 0x90}[mode]
+    if mode == 'g2':
+        regs = [0x12, r1, NT >> 10, 0xFF, 0x03, SAT >> 7, SPG >> 11, 0x01, 0, 0, 15]
+    else:
+        NT = 0x3800
+        regs = [0x10, r1, NT >> 10, 0x80, 0x00, 0x76, 0x03, 0xF1, 0, 0, 15]
+    rows = height // 8
+    a.org(0); a.db(0xF3, 0xED, 0x56, 0x31); a.dw(0xC3F0); a.db(0xC3); a.ref16('main')
+    a.org(0x38); a.db(0xC3); a.ref16('irq')
+    a.org(0x66); a.db(0xED, 0x45)
+    a.org(0x80); a.label('irq')
+    a.db(0xF5, 0xC5, 0xE5)
+    a.db(0xDB, 0xBF)                       # IN A,($BF)
+    a.db(0x47, 0x21); a.dw(0xC002); a.db(0xB6, 0x77, 0x78)   # LD B,A ; LD HL,$C002 ; OR (HL) ; LD (HL),A ; LD A,B
+    a.db(0x07); a.db(0x38); a.rel('frame') # RLCA ; JR C,frame (bit 7)
+    a.db(0x21); a.dw(0xC001); a.db(0x34)   # line IRQ: INC ($C001)
+    a.db(0x18); a.rel('out')
+    a.label('frame')
+    a.db(0x3A); a.dw(0xC002); a.db(0x07)    # LD A,($C002) (flags since the last frame) ; RLCA
+    a.db(0x07, 0x07, 0xE6, 0x03, 0x87, 0x87, 0xC6, 0x01, 0xF6, 0xF0)
+    a.db(0xD3, 0xBF, 0x3E, 0x87, 0xD3, 0xBF)
+    # write the line-IRQ count into name cell 0 and clear it
+    a.db(0x3E, NT & 0xFF, 0xD3, 0xBF, 0x3E, 0x40 | (NT >> 8), 0xD3, 0xBF)
+    a.db(0x3A); a.dw(0xC001); a.db(0xD3, 0xBE)
+    a.db(0xAF, 0x32); a.dw(0xC001); a.db(0x32); a.dw(0xC002)
+    a.label('out')
+    a.db(0xE1, 0xC1, 0xF1, 0xFB, 0xED, 0x4D)
+    a.org(0x100); a.label('main')
+    a.db(0xAF, 0x32); a.dw(0xC001)
+    # R15 = $20 (XRB), bank 1 R2 = FEB height, before the stock registers
+    a.db(0x3E, 0x20, 0xD3, 0xBF, 0x3E, 0x8F, 0xD3, 0xBF)
+    a.db(0x3E, feb, 0xD3, 0xBF, 0x3E, 0x92, 0xD3, 0xBF)
+    a.db(0x21); a.ref16('regs'); a.db(0x06, 2 * len(regs), 0x0E, 0xBF, 0xED, 0xB3)
+    a.db(0xAF, 0xD3, 0xBF, 0x3E, 0x40, 0xD3, 0xBF)
+    a.db(0x01); a.dw(0x4000)
+    a.label('clr'); a.db(0xAF, 0xD3, 0xBE, 0x0B, 0x78, 0xB1, 0x20); a.rel('clr')
+    blocks = []
+    def block(name, addr, data):
+        blocks.append((name, addr, bytes(data)))
+        a.db(0x21); a.ref16(name); a.db(0x11); a.dw(addr); a.db(0x01); a.dw(len(data)); a.db(0xCD); a.ref16('copy')
+    if mode == 'g2':
+        block('pat', 0x0000, [_shape(n + t * 3, r) for t in range(3) for n in range(256) for r in range(8)]
+              + [_shape(n * 5 + 1, r) ^ 0x0F for n in range(128) for r in range(8)])
+        block('col', 0x2000, [((((n >> 2) + r + t) % 16) << 4) | ((n + t * 5 + r * 3) % 16)
+                              for t in range(3) for n in range(256) for r in range(8)]
+              + [((((n >> 1) + r) % 15 + 1) << 4) | ((n * 3 + r) % 16) for n in range(128) for r in range(8)])
+        block('names', NT, [(row * 32 + col) & 0xFF if row < 24 else ((row - 24) * 32 + col) & 0x7F
+                            for row in range(rows) for col in range(32)])
+        block('spat', SPG + 128 * 8, [0xFF] * 32 + _ring16())
+        sprites = [(0xD0, 30, 128, 0x0F),       # Y=$D0: line 209 (a terminator only at 192)
+                   (199, 100, 132, 0x08), (203, 104, 128, 0x02),   # overlap below 192
+                   (219, 20, 128, 0x04), (219, 60, 128, 0x06), (219, 100, 128, 0x0A), (219, 140, 128, 0x0C), (219, 180, 128, 0x0D),
+                   (0xE3, 220, 128, 0x0B),      # start 228 (Mode 4 rule) or wraps (225 rule)
+                   (0xFA, 240 - 16, 128, 0x09),
+                   (99, 50, 132, 0x07)]
+        block('sat', SAT, [v for s in sprites for v in s] + [0xE0] * (4 * (32 - len(sprites))))
+    else:
+        block('pat', 0x0000, [_shape(n, r) & 0xFC for n in range(256) for r in range(8)])
+        block('names', NT, [(row * 3 + col) & 0xFF for row in range(rows) for col in range(40)])
+    a.db(0xDB, 0xBF)
+    a.db(0x3E, r1 | 0x60, 0xD3, 0xBF, 0x3E, 0x81, 0xD3, 0xBF)
+    a.db(0xFB); a.label('loop'); a.db(0x18); a.rel('loop')
+    a.label('copy')
+    a.db(0x7B, 0xD3, 0xBF, 0x7A, 0xF6, 0x40, 0xD3, 0xBF)
+    a.label('cl'); a.db(0x7E, 0xD3, 0xBE, 0x23, 0x0B, 0x78, 0xB1, 0x20); a.rel('cl'); a.db(0xC9)
+    a.label('regs')
+    for i, v in enumerate(regs): a.db(v, 0x80 | i)
+    for name, addr, data in blocks:
+        a.label(name); a.db(*data)
+    a.resolve()
+    rom = a.b
+    assert a.pc <= 0x7FF0, hex(a.pc)
+    rom[0x7FF0:0x7FFA] = b'TMR SEGA' + b'\x00\x00'
+    cs = sum(rom[0:0x7FF0]) & 0xFFFF
+    rom[0x7FFA] = cs & 0xFF; rom[0x7FFB] = cs >> 8
+    rom[0x7FFF] = 0x8C
+    return bytes(rom)
+
+
 if __name__ == '__main__':
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
@@ -820,3 +918,6 @@ if __name__ == '__main__':
     for m in ('g1', 'g2', 'mc', 'txt'):
         open(os.path.join(out, f'tms_{m}.sg'), 'wb').write(build_tms(m))
         print(f'wrote tms_{m}.sg')
+    for h, m in ((224, 'g2'), (240, 'g2'), (240, 'txt')):
+        open(os.path.join(out, f'tms_{m}_{h}.sms'), 'wb').write(build_tms_tall(h, m))
+        print(f'wrote tms_{m}_{h}.sms')

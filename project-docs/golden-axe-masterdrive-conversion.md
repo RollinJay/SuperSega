@@ -102,10 +102,10 @@ Rationale: GAW requires no viewport work and no reverting of a third-party patch
 
 ## 6. Machine questions and v7's answers
 
-The plan listed these as open against the v5 document. Machine profile v7 answers them as follows; two answers leave a part open, as noted (the profile's open questions are numbered Q1–Q22):
+The plan listed these as open against the v5 document. Machine profile v7 answers them as follows (the profile's open questions are numbered Q1–Q25):
 
 - **Maximum ROM size and mapper register layout for expanded images.** 4 MB, the stock Sega mapper registers' reach, is the largest cartridge the machine takes (Q2, decided October 2026).
-- **ESAT entry format, and whether H-flip is per-sprite or per-tile.** 2 bytes per sprite, with H-flip and V-flip per sprite (Q4, resolved in v6). One loose end: Feature Enable C bit 4 still selects a "2-byte" mode, and the emulator uses a 1-byte layout while that bit is clear. Either the bit is retired or the 1-byte layout is documented (Q13); a conversion should set the bit until then.
+- **ESAT entry format, and whether H-flip is per-sprite or per-tile.** 2 bytes per sprite, with H-flip and V-flip per sprite (Q4, resolved in v6). Feature Enable C bit 4, which once selected the 2-byte layout, is retired, so a conversion need not set it (Q13, decided October 2026).
 - **Whether 1024-tile unique-cell mode and the 32 KB VRAM expansion are independently selectable or coupled.** Coupled: unique-cell mode needs VRAM expansion (Feature Enable B bit 4) (Q5).
 - **Turbo default state for retagged ROMs, and whether it is profile-set or per-title.** Off at reset. A retagged ROM that wants turbo turns it on itself (Feature Enable A bit 6, then the step on $F3). The enhancement layer's turbo boost is for unmodified software only and never applies to a MasterDrive title (Q6).
 - **Whether reverting a prior conversion patch is expected to be a documented workflow**, given that other GG titles carry similar third-party GG2SMS layers. An emulator (hack maker) workflow, not a machine question (Q10).

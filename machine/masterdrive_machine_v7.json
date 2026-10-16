@@ -66,7 +66,10 @@
   "(after the October 2026 package) Q14 resolved by the owner: $08 bits 6-4 read the PCM FIFO's bytes queued divided by 8, saturating at 7 (audio.pcm.fill_readback); the emulator returned the fill modulo 8.",
   "(after the October 2026 package) Q2 resolved by the owner: the largest cartridge ROM is 4 MB, the stock bank registers' reach (media.cartridge_slot); it was 8 MB, which needed a ninth bank bit. The console also reads the media of the computer side (media.other_media); how is open question Q23.",
   "(after the October 2026 package) Q3 resolved by the owner: cartridge save RAM is 32 KB, two banks of 16 KB as the 315-5235 maps them (memory.cartridge_ram, media.mappers.sega.cart_ram). The emulator mirrored 2 x 8 KB and the Pocket core used 16 KB of its 32 KB; both now map 2 x 16 KB. Open question Q24 added: what a save-card profile holds and what identifies a game on the card.",
-  "(after the October 2026 package) Q12 resolved by the owner: the cartridge wait state at 200 % is kept (cpu.turbo.cartridge_wait), on every read from the cartridge or card slot. The emulator applied it only with its cartridge-timing setting, which is now its default (its ROM-in-RAM setting is an emulator what-if), and the Pocket core adds it. Open question Q25 added: whether cartridge writes take it too."
+  "(after the October 2026 package) Q12 resolved by the owner: the cartridge wait state at 200 % is kept (cpu.turbo.cartridge_wait), on every read from the cartridge or card slot. The emulator applied it only with its cartridge-timing setting, which is now its default (its ROM-in-RAM setting is an emulator what-if), and the Pocket core adds it. Open question Q25 added: whether cartridge writes take it too.",
+  "(after the October 2026 package) Q13 resolved by the owner: Feature Enable C bit 4 (bank 1 R7) is retired and the ESAT is always 2 bytes per sprite (video.sprites.esat). The emulator dropped its 1-byte layout, used while the bit was clear.",
+  "(after the October 2026 package) Q15 resolved by the owner: in MasterDrive mode the TMS modes raise the line interrupt, enabled by R0 bit 4 as in Mode 4 (video.legacy_modes.enhancements.line_interrupts, stock_behaviour.vdp.line_counter). Both implementations already did this.",
+  "(after the October 2026 package) Q17 resolved by the owner: Feature Enable B's 224 and 240 lines apply in the TMS modes, which extend their tables below line 192 (video.legacy_modes.taller_heights). Both implementations already drew the taller picture; they now also let a sprite at Y = $D0 be drawn there and wrap a sprite at Mode 4's line 241, not line 225."
  ],
  "v5_changes": [
   "SG-series capability recovery: features the TMS9918 had and the SMS/GG Mode 4 VDP dropped are restored.",
@@ -264,13 +267,22 @@
     "line_interrupts": {
      "effect": "VDP register 10 line interrupts, an SMS addition, while running legacy modes (proposed in v5)",
      "purpose": "raster splits and mid-screen effects in SG-1000-structured software",
-     "enable": "OPEN - no enable bit is defined, and whether the line counter runs in the legacy modes is undecided (open question Q15)"
+     "enable": "R0 bit 4, as in Mode 4, in MasterDrive mode (open question Q15, decided by the owner). In the stock machine modes the TMS modes raise none, as on the TMS9918."
     }
    },
    "tables": "Base addresses as on the SG-1000: name table R2 x $400, colour table R3 x $40, pattern table R4 x $800, sprite attributes R5 x $80, sprite patterns R6 x $800. In Graphics II, R4 bit 2 and R3 bit 7 pick the half of VRAM for the pattern and colour tables, and R4 bits 1-0 and R3 bits 6-0 mask the pattern and colour index, so the thirds of the screen can share tables.",
    "transparency": "Colour 0 is transparent in every TMS mode, Text and Multicolor included: the backdrop (R7 bits 3-0) shows through.",
-   "sprites": "32 sprites of 4 bytes (Y, X, pattern, attribute: bit 7 early clock, 32 pixels left; bits 3-0 colour), 8x8 or 16x16 (R1 bit 1), magnified by R1 bit 0; none in Text mode. Y = $D0 ends the list. A sprite starts on line Y+1, or Y+1-256 when Y+1 is 225 or more (Gearsystem: 224; the two differ only for Y = $DF, off a 192-line screen either way). Four per line as stock. When sprites overlap, the lowest-numbered is drawn on top. A transparent sprite counts towards the limit but draws nothing; neither implementation lets it take part in collisions, as in Gearsystem, and whether it should is open question Q18.",
+   "sprites": "32 sprites of 4 bytes (Y, X, pattern, attribute: bit 7 early clock, 32 pixels left; bits 3-0 colour), 8x8 or 16x16 (R1 bit 1), magnified by R1 bit 0; none in Text mode. At 192 lines Y = $D0 ends the list, and a sprite starts on line Y+1, or Y+1-256 when Y+1 is 225 or more (Gearsystem: 224; the two differ only for Y = $DF, off a 192-line screen either way); at 224 and 240 lines see taller_heights. Four per line as stock. When sprites overlap, the lowest-numbered is drawn on top. A transparent sprite counts towards the limit but draws nothing; neither implementation lets it take part in collisions, as in Gearsystem, and whether it should is open question Q18.",
    "status_flags": "Status bit 6 is set by a fifth sprite on a displayed line, and status bit 5 when pixels of two drawn sprites meet on the screen; both when the line is drawn, not at the Mode 4 event times. What status bits 4-0 read is open question Q18.",
+   "taller_heights": {
+    "enable": "Feature Enable B bits 7-6 (vdp_registers.feature_enable_b_height) in MasterDrive mode, whichever picture mode is selected (open question Q17, decided by the owner). In the stock machine modes the TMS modes stay at 192 lines: the M1/M3 height selection needs M4.",
+    "name_table": "continues below row 23: 28 or 30 rows of 32 names in Graphics I, Graphics II and Multicolor (896 or 960 bytes), of 40 in Text (1,120 or 1,200 bytes, past the 1 KB that R2 places)",
+    "graphics_ii": "rows 24-29 take their patterns and colours from a fourth bank, as rows 0-23 take them from the first three: the bank number is the character row / 8, masked by R4 bits 1-0 and R3 bits 6-5 like the others, so with both masks fully set the fourth bank is at the pattern and colour bases + $1800",
+    "graphics_i_multicolor": "Graphics I keeps its colour table (one byte per 8 patterns); Multicolor rows continue the four-row cycle through each pattern's 8 bytes (row & 3)",
+    "sprites": "Y = $D0 no longer ends the list, and a sprite starts on line Y+1, or Y+1-256 when Y+1 is 241 or more, as in Mode 4; the sprite limit and flags work on every displayed line",
+    "timing": "as Mode 4 at the same height: the frame interrupt flag at line height + 1 and the line counter on lines 0 to height (stock_behaviour.vdp)",
+    "vram": "the tables stay in the first 16 KB of VRAM, as on the SG-1000"
+   },
    "source": "TMS9918A Data Manual (Texas Instruments); Gearsystem (Video.cpp, RenderBackgroundTMS9918 and RenderSpritesTMS9918), which the emulator matches on the Pocket core's TMS test ROMs"
   },
   "sprites": {
@@ -312,7 +324,7 @@
      "3-0": "palette index (extended CRAM)",
      "7-4": "reserved"
     },
-    "v5_change": "widened from 1 byte to 2 to carry magnify and early clock. The v4 single-byte layout is superseded; the emulator still implements a 1-byte layout while Feature Enable C bit 4 is clear (open question Q13)."
+    "v5_change": "widened from 1 byte to 2 to carry magnify and early clock. The v4 single-byte layout is superseded, and no bit selects it: Feature Enable C bit 4, which did, is retired (open question Q13, decided by the owner)."
    },
    "collision": {
     "extended": "per-sprite hit bitmaps at bank1 R6 base",
@@ -424,7 +436,7 @@
      "1": "Legacy sprite limit raised from 4 to the Mode 4 limit",
      "2": "Text window (window plane renders 40-column 6-pixel text)",
      "3": "1024-tile unique-cell mode",
-     "4": "ESAT extended to 2 bytes per sprite (magnify, early clock)",
+     "4": "reserved (it selected a 2-byte ESAT; retired, since the ESAT is always 2 bytes per sprite: Q13)",
      "5": "SC-3000 keyboard enable",
      "7-6": "reserved"
     },
@@ -678,7 +690,7 @@
  "compatibility": {
   "reset_state": "All features disabled, turbo at 100%, legacy modes authentic. Behaviour-identical to stock hardware in every mode.",
   "extension_gating": "Feature Enable A, B and C; the extended register file behind XRB.",
-  "sg_software": "An unmodified SG-1000 ROM renders with the fixed TMS palette, 4 sprites per line and no line interrupts, exactly as on real hardware, until Feature Enable C bits 0-1 are set. Whether MasterDrive software can enable line interrupts in the legacy modes is open question Q15."
+  "sg_software": "An unmodified SG-1000 ROM renders with the fixed TMS palette, 4 sprites per line and no line interrupts, exactly as on real hardware, until Feature Enable C bits 0-1 are set. MasterDrive software in a legacy mode gets line interrupts with R0 bit 4 (video.legacy_modes.enhancements.line_interrupts)."
  },
  "implementation_order": [
   "1. CRAM expansion and dual write mode",
@@ -691,7 +703,7 @@
   "8. 16-sprite line buffer, 16x16 and 32x32 sprites",
   "9. Window layer, then text window mode",
   "10. Line H and V offset tables, 224/240 heights",
-  "11. Legacy mode enhancements: CRAM colour, raised sprite limit, line interrupts (open question Q15)",
+  "11. Legacy mode enhancements: CRAM colour, raised sprite limit, line interrupts (R0 bit 4 in MasterDrive mode), the 224/240-line heights",
   "12. DMA with copy and fill",
   "13. PCM FIFO, math unit, per-sprite collision",
   "14. Multitap protocols, EXT serial link, SC-3000 keyboard",
@@ -898,7 +910,7 @@
    },
    "h_counter": "00-93 then E9-FF, one count per two pixels; latched on a TH edge for the light gun.",
    "frame_flag": "Status bit 7 is set at cycle 25 (SMS2) / 27 (315-5535) of line height + 1, the second line after the last displayed one, and stays set until the status register is read.",
-   "line_counter": "On lines 0 to height inclusive (one line past the display) the counter counts down; on reaching 0 it reloads from R10 and raises the line interrupt. On other lines it is reloaded from R10. Mode 4 only as stock (TMS modes raise no line interrupt); whether MasterDrive runs it in the TMS modes is open question Q15.",
+   "line_counter": "On lines 0 to height inclusive (one line past the display) the counter counts down; on reaching 0 it reloads from R10 and raises the line interrupt. On other lines it is reloaded from R10. Mode 4 only as stock (TMS modes raise no line interrupt); in MasterDrive mode the TMS modes raise it too, enabled by R0 bit 4 as in Mode 4 (Q15, decided by the owner).",
    "line_timing": "228 CPU cycles per line, 262 lines NTSC, 313 PAL; the overrun of the last instruction of a line belongs to the next line."
   },
   "psg": {
@@ -1037,8 +1049,8 @@
   {
    "id": "Q13",
    "topic": "Feature Enable C bit 4 (ESAT 2-byte)",
-   "status": "open",
-   "detail": "ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still selects a 2-byte mode and the emulator implements a 1-byte layout when it is clear. Retire the bit, or document the 1-byte layout."
+   "status": "resolved",
+   "detail": "ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still selected a 2-byte mode and the emulator implemented a 1-byte layout when it was clear. Decided by the owner in October 2026: the bit is retired (reserved) and the ESAT is always 2 bytes per sprite; the emulator no longer has the 1-byte layout."
   },
   {
    "id": "Q14",
@@ -1049,8 +1061,8 @@
   {
    "id": "Q15",
    "topic": "Line interrupts in the TMS9918 (legacy) modes",
-   "status": "open",
-   "detail": "v5 made line interrupts in the legacy modes a MasterDrive enhancement (video.legacy_modes.enhancements.line_interrupts), but no enable bit was ever assigned; as stock, TMS modes raise none (stock_behaviour.vdp.line_counter), and both implementations follow that in the stock modes. In MasterDrive mode both raise them in the TMS modes whenever R0 bit 4 is set. Should the line counter run in the legacy modes on MasterDrive, and what enables it?"
+   "status": "resolved",
+   "detail": "v5 made line interrupts in the legacy modes a MasterDrive enhancement (video.legacy_modes.enhancements.line_interrupts), but no enable bit was ever assigned; as stock, TMS modes raise none (stock_behaviour.vdp.line_counter). Decided by the owner in October 2026: in MasterDrive mode the line counter runs in the TMS modes and R0 bit 4 enables the interrupt, as in Mode 4; the stock modes stay as stock. Both implementations already did this."
   },
   {
    "id": "Q16",
@@ -1061,8 +1073,8 @@
   {
    "id": "Q17",
    "topic": "Feature Enable B height in the TMS modes",
-   "status": "open",
-   "detail": "Feature Enable B bits 7-6 select 224 or 240 lines for MasterDrive software, but the documents define the heights only for Mode 4. Both implementations also apply them while a TMS9918 mode is selected. Should the machine apply them in the TMS modes, and if so, what do those modes draw below line 192?"
+   "status": "resolved",
+   "detail": "Feature Enable B bits 7-6 select 224 or 240 lines for MasterDrive software, but the documents defined the heights only for Mode 4, while both implementations also applied them in the TMS9918 modes. Decided by the owner in October 2026: they apply in the TMS modes, which extend their tables below line 192 (video.legacy_modes.taller_heights): the name table continues, Graphics II takes rows 24-29 from a fourth pattern and colour bank, and $D0 no longer ends the sprite list."
   },
   {
    "id": "Q18",

@@ -688,6 +688,59 @@ probe('M60', 'Cartridge wait state at 200 % (Q12, kept): the machine reads its c
            note: `default ${m.romMode} ${m.romNs} ns; 200 %: ROM NOP ${rom200} T, RAM ${ram200}, HALT ${halt200}; 175 %: ${rom175}; SF-7000 at 200 %: ${sf200}` };
 });
 
+probe('M61', 'ESAT is always 2 bytes per sprite: entry i at the ESAT base + 2i; byte 0 bit 4 magnifies, bit 5 moves the sprite 32 pixels left, byte 1 bits 3-0 pick the palette (with extended CRAM). Feature Enable C bit 4 is retired and changes nothing (Technical Reference §5, Q13)', () => {
+  const run = fec => {
+    const m = sms('ss'); const V = vdpSetup(m);
+    V.reg[15] = 0x28; V.reg[16 + 2] = 0x02; V.reg[16 + 7] = fec;      // XRB + ESAT; extended CRAM; Feature Enable C
+    V.reg[12] = 0x20;                                                 // ESAT at $2000
+    V.vram[0x3F00] = 9; V.vram[0x3F01] = 9; V.vram[0x3F02] = 0xD0;
+    V.vram[0x3F80] = 40; V.vram[0x3F81] = 1; V.vram[0x3F82] = 100; V.vram[0x3F83] = 1;
+    V.vram[0x2000] = 0x10;                                            // sprite 0: magnified
+    V.vram[0x2002] = 0x20; V.vram[0x2003] = 0x05;                     // sprite 1: early clock, palette 5
+    V.cram[(5 * 16 + 1) * 2] = 0x0F; V.cram[(5 * 16 + 1) * 2 + 1] = 0x00; V.pw[0] |= 1 << 5;   // palette 5 entry 1: red
+    V.renderLine(10);
+    const lit = x => (V.fb[10 * 256 + x] & 0xFFFFFF) !== 0;
+    return { mag: lit(40) && lit(55) && !lit(56), early: lit(68) && lit(75) && !lit(100),
+             pal: (V.fb[10 * 256 + 68] >>> 0) === (V.colour(5, 1) >>> 0) };
+  };
+  const a = run(0x00), b = run(0x10);
+  const ok = a.mag && a.early && a.pal && b.mag && b.early && b.pal;
+  return { ok, note: `bit 4 clear: magnify ${a.mag}, early clock ${a.early}, palette ${a.pal}; set: ${b.mag}, ${b.early}, ${b.pal}` };
+});
+
+probe('M62', 'TMS modes at 224 and 240 lines (MasterDrive software, Feature Enable B): the name table continues and Graphics II takes rows 24-29 from a fourth pattern and colour bank (third 3, masked by R4 bits 1-0 and R3 bits 6-5); Y = $D0 ends the sprite list only at 192 lines, as in Mode 4; a stock SG-1000 stays at 192 lines (Technical Reference §3, Q17)', () => {
+  const setup = (mode, feb) => {
+    const m = sms(mode); const V = tmsSetup(m);
+    V.reg[15] = 0x20; V.reg[16 + 2] = feb;                            // XRB; Feature Enable B height
+    V.reg[0] = 0x02; V.reg[3] = 0xFF; V.reg[4] = 0x03;                // Graphics II, four banks
+    return V;
+  };
+  const V = setup('ss', 0x80);
+  V.vram[0x3800 + 25 * 32] = 5;                                      // row 25 (third 3), column 0: name 5
+  V.vram[0x1800 + 5 * 8] = 0xFF; V.vram[0x3800 + 5 * 8] = 0x80;      // bank 3: pattern 5 row 0 set; colour red
+  V.vram[0x1000 + 5 * 8] = 0xFF; V.vram[0x3000 + 5 * 8] = 0x20;      // bank 2: green
+  V.renderLine(200); const b3 = (V.fb[200 * 256] >>> 0) === (V.tms(8) >>> 0);
+  V.reg[4] = 0x02; V.reg[3] = 0xDF;                                   // masks: third 3 -> pattern bank 2, colour bank 2
+  V.renderLine(200); const b2 = (V.fb[200 * 256] >>> 0) === (V.tms(2) >>> 0);
+  V.reg[4] = 0x03; V.reg[3] = 0xFF;
+  tmsSprite(V, 0, 0xD0, 10, 0x0F); tmsSprite(V, 1, 99, 50, 0x08);
+  V.renderLine(100); const after = (V.fb[100 * 256 + 50] >>> 0) === (V.tms(8) >>> 0);
+  V.renderLine(209); const d0 = (V.fb[209 * 256 + 10] >>> 0) === (V.tms(15) >>> 0);
+  const W = setup('ss', 0x00); tmsSprite(W, 0, 0xD0, 10, 0x0F); tmsSprite(W, 1, 99, 50, 0x08);
+  W.renderLine(100); const ended = (W.fb[100 * 256 + 50] >>> 0) === (W.tms(4) >>> 0);
+  const sg = setup('sg', 0x80);
+  return { ok: V.height() === 240 && b3 && b2 && after && d0 && ended && sg.height() === 192,
+           note: `height ${V.height()}, bank 3 ${b3}, masked to bank 2 ${b2}, sprite after $D0 ${after}, $D0 sprite on 209 ${d0}, 192: $D0 ends ${ended}, SG ${sg.height()}` };
+});
+
+probe('M63', 'TMS modes at 224 and 240 lines: a sprite starts on line Y+1, or Y+1-256 when Y+1 is 241 or more, as in Mode 4 (at 192 lines: 225 or more), as the owner decided (Technical Reference §3, Q17)', () => {
+  const m = sms('ss'); const V = tmsSetup(m); V.reg[15] = 0x20; V.reg[16 + 2] = 0x80;
+  tmsSprite(V, 0, 0xE7, 10, 0x0F);                                    // line 232
+  V.renderLine(232); const tall = (V.fb[232 * 256 + 10] >>> 0) === (V.tms(15) >>> 0);
+  V.reg[16 + 2] = 0x00; V.vram[0x3B00] = 0xFA; V.renderLine(2); const low = (V.fb[2 * 256 + 10] >>> 0) === (V.tms(15) >>> 0);
+  return { ok: tall && low, note: `240 lines: Y=$E7 on line 232 ${tall}; 192 lines: Y=$FA on line 2 ${low}` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

@@ -18,9 +18,12 @@
 #      divide, $0A and $08 read back, also against the expected values), for the
 #      cartridge wait state at 200 % (romwait.sms, NTSC and PAL, NTSC also
 #      against the expected values), for the
-#      VDP-height ROM in Game Gear mode, and for the four TMS9918-mode ROMs on the
+#      VDP-height ROM in Game Gear mode, for the four TMS9918-mode ROMs on the
 #      SG-1000 (Master System colours exactly, true TMS colours within the core's
-#      4-bit rounding, and with the sprite boost); and the FM test ROM's sound
+#      4-bit rounding, and with the sprite boost), and for the TMS9918 modes at 224
+#      and 240 lines in MasterDrive mode (Q17: Graphics II at both heights, Text at
+#      240, true TMS colours at 240, and the 240-line ROM on the SG-1000, where it
+#      stays at 192 lines); and the FM test ROM's sound
 #      follows the $F2 mute states with the right FM pitch and level (Master
 #      System and MasterDrive modes) and has no FM in Game Gear mode, and a
 #      tightly timed FM driver still plays at 200 % turbo; in PAL, frames come at
@@ -28,7 +31,8 @@
 #      enables keep their spacing (a check inside mdr_top)
 #   5. sim/pocket: through the Pocket platform layer the frames match the machine
 #      simulation, NTSC and PAL (a headerless TMS ROM is detected as SG-1000 and
-#      drawn in true TMS colours, the default); the video timing the scaler sees
+#      drawn in true TMS colours, the default; a TMS mode at 240 lines in
+#      MasterDrive mode, the same); the video timing the scaler sees
 #      is regular (PAL lines 345 or 346 pixel clocks), also across a switch from
 #      PAL to NTSC; an export cartridge runs in MasterDrive mode with System =
 #      MasterDrive and in Master System mode with Auto (mdports.sms); Pocket A
@@ -99,6 +103,11 @@ SYS_CASES=(
     "tmstxt|tms_txt.sg|sg|61|20 60|-tmsapprox|AEL=tmscol=0"
     "tmsspr|tms_g1.sg|sg|47|46|-tmsapprox -spr16|AEL=tmscol=0,sprlimit"
     "tmstrue|tms_g2.sg|sg|47|46|||8"
+    "tmsg2t224|tms_g2_224.sms|ss|61|46 60|-tmsapprox|AEL=tmscol=0"
+    "tmsg2t240|tms_g2_240.sms|ss|61|46 60|-tmsapprox|AEL=tmscol=0"
+    "tmstxt240|tms_txt_240.sms|ss|61|60|-tmsapprox|AEL=tmscol=0"
+    "tmstallsg|tms_g2_240.sms|sg|61|60|-tmsapprox|AEL=tmscol=0"
+    "tmstrue240|tms_g2_240.sms|ss|61|60|||8"
 )
 run_sys_case() {
     local name rom mode n dumps topt jenv tol
@@ -163,25 +172,27 @@ for c in "v224|clk_sys 896040-896040|59.92 Hz" "v224pal|clk_sys 1080310-1080320|
     printf '%-9s frame timing %s: ' "$name" "$hz"
     if grep -qF "$want" "$W/sys/$name.log"; then echo "$want"; else echo "WRONG:"; grep 'frame timing' "$W/sys/$name.log"; fail=1; fi
 done
+# The port ROMs' rows are read with sed, which reads to the end: head would close the
+# pipe early and fail the decoder when Python's output is unbuffered.
 # the MasterDrive I/O gate and machine ID (Q1, Q8): mdports.sms reads six ports
 # before Feature Enable A bit 7 is set ($FF), then, with it set, the registers,
 # 200 x 100 from the math unit and $A7 at $17
 printf '%-9s I/O gate and machine ID (MasterDrive mode): ' mdports
-python3 tools/read_ports_ppm.py "$W/sys/mdports_10.ppm" | head -17 | tr '\n' ' ' > "$W/sys/mdports.txt"
+python3 tools/read_ports_ppm.py "$W/sys/mdports_10.ppm" | sed -n 1,17p | tr '\n' ' ' > "$W/sys/mdports.txt"
 want='$01: $FF $06: $FF $09: $FF $0F: $FF $16: $FF $17: $FF $00: $C0 $01: $7F $06: $FF $09: $00 $0E: $00 $0F: $20 $10: $4E $16: $81 $17: $A7 $18: $FF $DC: $FF '
 if [ "$(cat "$W/sys/mdports.txt")" = "$want" ]; then echo 'closed $FF, open $17 = $A7'; else echo "WRONG:"; cat "$W/sys/mdports.txt"; echo; fail=1; fi
 # the MasterDrive registers (Q7, Q9, Q14): mdrregs.sms multiplies and divides
 # (quotient, remainder, divide by zero $FF/$00), reads the work RAM bank back at
 # $0A and the empty PCM FIFO at $08
 printf '%-9s math unit, $0A and $08 (MasterDrive mode): ' mdrregs
-python3 tools/read_ports_ppm.py "$W/sys/mdrregs_10.ppm" | head -17 | tr '\n' ' ' > "$W/sys/mdrregs.txt"
+python3 tools/read_ports_ppm.py "$W/sys/mdrregs_10.ppm" | sed -n 1,17p | tr '\n' ' ' > "$W/sys/mdrregs.txt"
 want='$0F: $20 $10: $4E $0F: $1C $10: $04 $0F: $0F $10: $0F $0F: $00 $10: $05 $0F: $FF $10: $00 $0F: $01 $10: $FE $0A: $0B $0A: $0F $08: $00 $0E: $00 $17: $A7 '
 if [ "$(cat "$W/sys/mdrregs.txt")" = "$want" ]; then echo '200 / 7 = 28 r 4, 200 / 0 = $FF/$00, $0A reads back'; else echo "WRONG:"; cat "$W/sys/mdrregs.txt"; echo; fail=1; fi
 # the cartridge wait state at 200 % (Q12): romwait.sms runs 2,000 NOPs from ROM
 # and from work RAM and reads the V counter after them: at 200 % the ROM run
 # ends five lines later (5 T-states a NOP against 4), at 175 % both end together
 printf '%-9s cartridge wait state at 200 %%: ' romwait
-python3 tools/read_ports_ppm.py "$W/sys/romwait_13.ppm" | head -4 | tr '\n' ' ' > "$W/sys/romwait.txt"
+python3 tools/read_ports_ppm.py "$W/sys/romwait_13.ppm" | sed -n 1,4p | tr '\n' ' ' > "$W/sys/romwait.txt"
 want='$04: $37 $14: $32 $03: $35 $13: $35 '
 if [ "$(cat "$W/sys/romwait.txt")" = "$want" ]; then echo 'ROM line $37, RAM $32 at 200 %; both $35 at 175 %'; else echo "WRONG:"; cat "$W/sys/romwait.txt"; echo; fail=1; fi
 [ "$fail" = 0 ]
@@ -204,6 +215,7 @@ POCKET_CASES=(
     "pbtn2|ports.sms|11|-system 1 -hold 5 10|ntsc"
     "psave|save.sms|10|-save ../../roms/save_in.sav|ntsc"
     "ptms|tms_g2.sg|47|46|ntsc"
+    "ptms240|tms_g2_240.sms|61|60|ntsc"
     "p224pal|vdp224.sms|40|-set 108 1 37|pal"
     "ptoggle|vdp224.sms|30|-set 108 1 -setat 20 200000 108 0|toggle"
 )
@@ -233,7 +245,7 @@ export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
 fail=0
 for pair in "p224_37 v224_37" "pss_10 mdrfeat_10" "pss_11 mdrfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
-            "p224pal_37 v224pal_37" "pmdports_10 mdports_10" "pmdauto_10 smsmdports_10"; do
+            "ptms240_60 tmstrue240_60" "p224pal_37 v224pal_37" "pmdports_10 mdports_10" "pmdauto_10 smsmdports_10"; do
     set -- $pair
     printf '%-12s Pocket vs machine simulation: ' "$1"
     python3 tools/ppmdiff.py "$W/pocket/$1.ppm" "$W/sys/$2.ppm" || fail=1

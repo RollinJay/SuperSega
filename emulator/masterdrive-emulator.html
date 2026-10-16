@@ -1121,7 +1121,9 @@ class VDP{
      where M1 = R1 bit 4, M2 = R0 bit 1, M3 = R1 bit 3, M4 = R0 bit 2.
      MasterDrive additionally exposes the selection through Feature Enable B
      bits 7-6, which is the path its own software uses. Previously only the
-     latter existed, so no SMS title could get an extra-height mode at all. */
+     latter existed, so no SMS title could get an extra-height mode at all.
+     Feature Enable B's heights apply in the TMS modes too (Q17): renderTMS
+     carries the tables on below line 192. */
   height(){
     const M1=(this.reg[1]>>4)&1, M2=(this.reg[0]>>1)&1,
           M3=(this.reg[1]>>3)&1, M4=(this.reg[0]>>2)&1;
@@ -1150,6 +1152,9 @@ class VDP{
     if(M3) return 3;      // Multicolor
     return 0;             // Graphics I
   }
+  /* At 224 and 240 lines (Q17) the same rules run on below row 23: the name
+     table continues (Text past R2's 1 KB), Graphics II rows 24-29 are third 3,
+     a fourth pattern and colour bank, and Multicolor keeps cycling row & 3. */
   renderTMS(y,md){
     const fb=this.fb, base=y*W, V=this.vram;
     const bd=this.tms(this.reg[7]&15);
@@ -1212,10 +1217,13 @@ class VDP{
        limit but draws nothing and collides with nothing (Gearsystem; Q18). */
     const covered=new Uint8Array(W);
     let drawn=0, hit=0;
+    /* At 224 and 240 lines (MasterDrive software, Q17) $D0 no longer ends the list
+       and a sprite wraps to the top as in Mode 4, only when Y + 1 is 241 or more. */
+    const tall=this.height()!==192;
     for(let i=0;i<32;i++){
       let sy=V[(sat+i*4)&0x3FFF];
-      if(sy===0xD0) break;
-      sy=(sy+1)&255; if(sy>=225) sy-=256;
+      if(sy===0xD0 && !tall) break;
+      sy=(sy+1)&255; if(sy>=(tall?241:225)) sy-=256;
       if(y<sy||y>=sy+hh) continue;
       if(drawn>=this.legacySprLimit()){ this.status|=0x40; break; }
       drawn++;
@@ -1402,11 +1410,12 @@ class VDP{
          32-line magnified sprites at Y = $E0-$EF. */
       let top=sy+1; if(top>240) top-=256;
       const dy=y-top;
-      const e2=this.onC(0x10);
-      const attr=esatOn?this.vram[(esat+(e2?i*2:i))&0x7FFF]:0;
-      const attr1=(esatOn&&e2)?this.vram[(esat+i*2+1)&0x7FFF]:0;
-      const smag=(e2&&(attr&0x10))?2:1;
-      const eclk=(e2&&(attr&0x20))?32:0;
+      /* the ESAT is 2 bytes per sprite (Technical Reference §5; Feature Enable C
+         bit 4, which once chose a 1-byte layout, is retired: Q13) */
+      const attr=esatOn?this.vram[(esat+i*2)&0x7FFF]:0;
+      const attr1=esatOn?this.vram[(esat+i*2+1)&0x7FFF]:0;
+      const smag=(attr&0x10)?2:1;
+      const eclk=(attr&0x20)?32:0;
       const hh=(s16||(attr&8))?16:big;
       const zm=zoom*smag;
       const sh=hh*zm, sw=((s16||(attr&8))?16:8)*zm;
@@ -1423,7 +1432,7 @@ class VDP{
       if(attr&1) row=hh-1-row;               // V flip
       if(hh===16) tn&=0xFE;
       const wide=(s16||(attr&8));
-      const pal= (this.onB(0x02)&&esatOn) ? (e2?(attr1&15):((attr>>4)&15)) : 1;
+      const pal= (this.onB(0x02)&&esatOn) ? (attr1&15) : 1;
       const pr=(attr&4);
       for(let px=0;px<(wide?16:8);px++){
         const cx=sx+px*zm;
@@ -1457,8 +1466,8 @@ class VDP{
     if(this.line<h && !this.m.noRender) this.renderLine(this.line);
     if(this.line<=h){
       /* As stock, only Mode 4 raises the line interrupt: the TMS9918 has none.
-         Whether MasterDrive software gets it in the TMS modes is open (Q15); the
-         emulator keeps raising it there. */
+         In MasterDrive mode the TMS modes raise it too, enabled by R0 bit 4 as
+         in Mode 4 (Q15). */
       if(this.lineCtr===0){ this.lineCtr=this.reg[10]; if(this.vmode()===4||this.ss()) this.irqLine=1; }
       else this.lineCtr--;
     } else this.lineCtr=this.reg[10];
@@ -5082,7 +5091,7 @@ function refresh(){
   const A=V.fa(), B=V.fb2();
   const fa=[['CRAM native 12-bit',1],['Line-scroll H',2],['Window layer',4],['ESAT sprites',8],['16 sprites/line',16],['Extended reg banks',32],['Turbo enable ($F3)',64],['I/O registers $01-$17',128]];
   const fbb=[['Line V-offset',1],['Extended CRAM',2],['16x16 sprites',4],['Per-sprite collision',8],['VRAM banking',16]];
-  const fcc=[['Legacy modes use CRAM',1],['Legacy sprite limit raised',2],['Text window (40 col)',4],['1024-tile unique cells',8],['ESAT 2-byte (mag/early clock)',16],['SC-3000 keyboard',32]];
+  const fcc=[['Legacy modes use CRAM',1],['Legacy sprite limit raised',2],['Text window (40 col)',4],['1024-tile unique cells',8],['(reserved, was ESAT 2-byte)',16],['SC-3000 keyboard',32]];
   let ft='<tr><th>Feature Enable A (R15)</th><th>State</th></tr>';
   for(const [n,bit] of fa) ft+='<tr><td>'+n+'</td><td>'+((A&bit)?'<span class="pill g">on</span>':'<span class="pill">off</span>')+'</td></tr>';
   ft+='<tr><th>Feature Enable B (1:2)</th><th>State</th></tr>';
