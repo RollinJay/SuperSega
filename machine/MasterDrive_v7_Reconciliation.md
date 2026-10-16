@@ -181,7 +181,7 @@ The repository corrected the following after the package was imported; each mach
 
 ### Emulator
 
-Fixes to the emulator's model of the machine. M38–M69 each have a probe in `emulator/tools/probes_v7.js` that fails on the page as it was:
+Fixes to the emulator's model of the machine. M38–M70 each have a probe in `emulator/tools/probes_v7.js` that fails on the page as it was:
 
 - **M38.** In MasterDrive mode, writes to the read-only ports `$0F`, `$10` (math result) and `$16` (multitap) fell through to the `$3E`/`$3F` mirror and changed the memory and I/O control registers. MasterDrive decodes `$07`–`$16` itself, as the Pocket core already did.
 - **M39.** In the SG-1000, SC-3000 and SF-7000 modes, writes to `$07`–`$3F` changed the I/O control value, which affects what TH and TR read back. Those machines have no `$3E`/`$3F` registers, and the Pocket core already ignored the writes.
@@ -215,6 +215,7 @@ Fixes to the emulator's model of the machine. M38–M69 each have a probe in `em
 - **M67.** Reset left the PCM output at its last sample, a constant offset on both sides, until new samples came. Reset now returns it to silence (Q16).
 - **M68.** With R0 bit 7 set, the emulator kept map columns 24–31 out of the vertical scroll, so with the background scrolled horizontally the wrong pixels were locked. It now locks screen x 192 to the right edge (item 40). The background is now drawn one screen pixel at a time, which also places the window by screen position as M64 did.
 - **M69.** A magnified sprite whose first doubled pixel started at x = −1 lost the half at x = 0: the emulator skipped any pixel pair that began left of the screen. It now draws the visible half, as Gearsystem, which draws sprites one screen pixel at a time, does.
+- **M70.** The emulator set a line's length in CPU T-states (228 base cycles times the turbo step) once a frame, so a step change by `$F3` mid-frame left the rest of that frame's lines at the old length: after a change from 100 % to 200 % the picture ran twice as fast against the CPU until the next frame, and a program that turned the display on after a long fill at 200 % did so about 120 lines later than the Pocket core, whose VDP keeps to base cycles. The line now takes the new length from the instruction that changes the step, and a change of the turbo boost between frames rescales the T-states carried into the next line. Found by the Pocket core's random-picture ROMs (`pocket-core/roms/gfxfuzz*.sms`), whose frames 40 and 41 differed.
 
 Also, without a probe because no program can see it: the Z80 now resets to interrupt mode 0, as the profile's `cpu.reset_state` says; the emulator takes every interrupt at `$0038` whatever the mode.
 

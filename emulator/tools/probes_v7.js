@@ -799,6 +799,27 @@ probe('M69', 'A magnified sprite cut by the left edge shows the visible half of 
   return { ok, note: `x 0 ${(V.fb[10 * 256] >>> 0) === spr ? 'sprite' : 'background'}, x 14 ${(V.fb[10 * 256 + 14] >>> 0) === spr}, x 15 ${(V.fb[10 * 256 + 15] >>> 0) !== spr ? 'background' : 'sprite'}` };
 });
 
+probe('M70', 'A turbo step change takes effect at once for the line timing: after OUT ($F3) mid-frame a line lasts 228 base cycles at the new step (456 T-states at 200 %) from that instruction on, not from the next frame; a change of the turbo boost between frames rescales the T-states carried into the next line (Technical Reference §1)', () => {
+  // from work RAM (no cartridge wait): wait for line $40, set the step, wait 26,763 T-states, read the V counter
+  const run = (from, to) => {
+    const m = sms('ss'); m.vdp.reg[15] = 0x40;                     // Feature Enable A bit 6: $F3 may set the step
+    m.out(0xF3, from);
+    const code = [0xDB, 0x7E, 0xFE, 0x40, 0x20, 0xFA,              // w: IN A,($7E) ; CP $40 ; JR NZ,w
+                  0x3E, to, 0xD3, 0xF3,                             // LD A,to ; OUT ($F3),A
+                  0x0E, 0x08,                                       // LD C,8
+                  0x06, 0x00, 0x10, 0xFE, 0x0D, 0x20, 0xF9,         // o: LD B,0 ; i: DJNZ i ; DEC C ; JR NZ,o
+                  0xDB, 0x7E, 0x32, 0x00, 0xC1, 0x76];              // IN A,($7E) ; LD ($C100),A ; HALT
+    code.forEach((v, i) => m.wr(0xC000 + i, v)); m.cpu.PC = 0xC000;
+    m.runFrame();
+    return m.rd(0xC100);
+  };
+  const up = run(0, 4), down = run(4, 0);                          // about 58.7 lines at 200 %, 117.4 at 100 %
+  const g = sms('sms'); g.ael.turbo = 2; g.lineCarry = 100;
+  const was = g.cpuMult(); g.ael.turbo = 1; g.rebaseSync(was);
+  return { ok: up === 0x7A && down === 0xB5 && g.lineCarry === 50,
+           note: `V counter $${up.toString(16)} after a step to 200 % (want $7a), $${down.toString(16)} after a step to 100 % (want $b5); carry ${g.lineCarry} T (want 50)` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

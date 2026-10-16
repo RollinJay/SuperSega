@@ -2155,6 +2155,7 @@ class Machine{
     const tc=this.cpu.tc, k=after/before;
     if(this.lastFm!=null) this.lastFm=tc-(tc-this.lastFm)*k;
     if(this.lastVdpAccess!=null) this.lastVdpAccess=tc-(tc-this.lastVdpAccess)*k;
+    this.lineCarry=(this.lineCarry||0)*k;        /* the T-states carried into the next line (M70) */
   }
   busSync(){
     const mult=this.cpuMult(), now=this.cpu.tc, last=this.lastVdpAccess;
@@ -2417,8 +2418,12 @@ class Machine{
     const V=this.vdp;
     const lines=this.pal?313:262;
     const base=this.pal?228:228;
-    const mult=this.cpuMult();
-    const per=Math.round(base*mult);
+    /* The CPU T-states in a line follow the turbo step. Software can change the
+       step mid-frame ($F3): the loop below then rescales the time the line has
+       run, so the VDP keeps to 228 base cycles a line from that instruction on,
+       not from the next frame (M70). */
+    let mult=this.cpuMult();
+    let per=Math.round(base*mult);
     this.frameCycles=0; this.afTick++;
     if(!this.noRender){ this.frameNo++; if(this.lab&&this.lab.flushQ) this.lab.flushQ(); }
     this.aelStats.extraSpr=0; this.aelStats.ovfHidden=0;
@@ -2448,6 +2453,8 @@ class Machine{
            not in the instruction that follows EI. */
         if(C.IFF1 && !C.eiPend && V.irqPending()) c+=C.irq();
         t+=c; this.frameCycles+=c;
+        const m2=this.cpuMult();
+        if(m2!==mult){ t=t*m2/mult; per=Math.round(base*m2); mult=m2; }
       }
       this.lineCarry=t-per;
       V.scanline();

@@ -16,7 +16,7 @@ The patch has 108 edits. Each is labelled **MODEL** (the emulator's model of the
 
 ```sh
 cd tools && mkdir -p out
-node probes_v7.js ../masterdrive-emulator.html          # 73 behavioural probes, each with its hardware source
+node probes_v7.js ../masterdrive-emulator.html          # 74 behavioural probes, each with its hardware source
 node selftest.js ../masterdrive-emulator.html           # the page's own Debug-tab self-test, headless (29 checks)
 python3 profile_crosscheck.py ../masterdrive-emulator.html ../../machine/masterdrive_machine_v7.json
 python3 wiring_audit.py ../masterdrive-emulator.html    # every control wired to code, every subsystem present
