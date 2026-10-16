@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Check an audio capture of roms/fm.sms (tools/mk_testrom.py, build_fm).
+"""Check an audio capture of roms/fm.sms or roms/fm_tight.sms (tools/mk_testrom.py, build_fm).
 
-usage: check_fm_wav.py capture.wav [--no-fm]
+usage: check_fm_wav.py capture.wav [--no-fm] [--pal]
 
-The ROM plays a PSG square wave at 440.4 Hz and an FM sine at 1001.4 Hz and
-steps the FM control port $F2 through 0, 1, 3, 2, 0 every 10 frames. For each
-step this measures both tones over frames 3-7 of the step, on both channels,
-and checks that each is present or absent as that $F2 state says (0 PSG only,
-1 FM only, 2 neither, 3 both). It also checks the FM pitch and the FM level
-against the PSG level (provisional balance, open question Q20).
+The ROM plays a PSG square wave (tone period $0FE: 440.4 Hz on the NTSC
+machine) and an FM sine (F-number 330, block 5: 1001.4 Hz on NTSC) and steps
+the FM control port $F2 through 0, 1, 3, 2, 0 every 10 frames. For each step
+this measures both tones over frames 3-7 of the step, on both channels, and
+checks that each is present or absent as that $F2 state says (0 PSG only,
+1 FM only, 2 neither, 3 both). It also checks the PSG and FM pitches and the
+FM level against the PSG level (provisional balance, open question Q20).
+fm_tight.sms plays the same, with its FM writes spaced the way a sound
+driver spaces them: enough for the YM2413 at 100 %, too close at 200 % turbo
+unless the bus synchroniser holds the CPU.
 
 --no-fm: a mode without the FM unit (Game Gear, SG-1000, SC-3000). $F2 writes
 do nothing there, so the PSG plays through every step and FM never does.
+--pal: the capture is from the PAL machine (313-line frames, 3.546893 MHz), so
+the frames are longer and both tones are about 0.9 % lower.
 """
 import sys
 import wave

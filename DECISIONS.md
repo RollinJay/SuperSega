@@ -19,4 +19,4 @@ The owner answered these on 12 October 2026. They are **decided but not yet appl
 | Q16 undocumented register layouts | Adopt the emulator's current layouts into the documents. |
 | Q17 taller heights in the TMS modes | Yes: the TMS modes extend their tables below line 192 (the name table continues, Graphics II uses a fourth pattern/colour bank, and `$D0` no longer ends the sprite list in the taller modes). |
 
-Still to decide when applying: the machine ID register's port and value (Q8), and the PAL turbo frequencies (they would naturally be the same percentages of the PAL clock).
+Still to decide when applying: the machine ID register's port and value (Q8), and the PAL turbo frequencies (now open question Q22; both implementations already run the same percentages of the PAL clock).

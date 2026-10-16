@@ -512,12 +512,37 @@ probe('M48', 'The pad in the stock modes: A is button 1, B is button 2, and Star
            note: `Start = Pause ${on ? 'on' : 'off'} at power-on, NMIs ${n}; A -> $DC ${hex(a)}, B -> ${hex(b)}` };
 });
 
-probe('M49', 'PAL runs on the PAL clock: base 3.546893 MHz, frames at 49.70 Hz (313 lines of 228 cycles); NTSC 3.579545 MHz, 59.92 Hz (Technical Reference §1)', () => {
-  const m = sms('sms');
-  m.pal = false; const nHz = m.baseHz(), nF = m.frameHz();
-  m.pal = true;  const pHz = m.baseHz(), pF = m.frameHz();
-  return { ok: nHz === 3579545 && pHz === 3546893 && Math.abs(nF - 59.92) < 0.01 && Math.abs(pF - 49.70) < 0.01,
-           note: `NTSC ${nF.toFixed(2)} Hz, PAL ${pF.toFixed(2)} Hz` };
+probe('M49', 'PAL runs on the PAL clock: base 3.546893 MHz, frames at 49.70 Hz (313 lines of 228 cycles); NTSC 3.579545 MHz, 59.92 Hz; the slower clock also reaches cartridge timing, so a 230 ns ROM needs a wait state at 200 % on NTSC but not on PAL (Technical Reference §1)', () => {
+  const m = sms('sms'); m.romMode = 'cart'; m.romNs = 230; m.ael.turbo = 2;
+  m.pal = false; const nHz = m.baseHz(), nF = m.frameHz(), nWs = m.romWaitStates();
+  m.pal = true;  const pHz = m.baseHz(), pF = m.frameHz(), pWs = m.romWaitStates();
+  return { ok: nHz === 3579545 && pHz === 3546893 && Math.abs(nF - 59.92) < 0.01 && Math.abs(pF - 49.70) < 0.01 &&
+               nWs === 1 && pWs === 0,
+           note: `NTSC ${nF.toFixed(2)} Hz, PAL ${pF.toFixed(2)} Hz; 230 ns ROM at 200 %: ${nWs} / ${pWs} wait` };
+});
+
+probe('M50', 'The FM write timing of the bus synchroniser carries over a frame boundary: an FM write late in one frame still holds the first FM write of the next at turbo; reset starts it afresh (Technical Reference §1)', () => {
+  const m = sms('sms'); m.ael.turbo = 2;
+  const core = m.runFrameCore; m.runFrameCore = () => m.vdp.fb;  // the frame boundary only, no instructions
+  m.out(0xF0, 0x10); m.runFrame(); m.cpu.tc += 4;                   // address write, frame ends, 2 base cycles later:
+  const b = m.cpu.tc; m.out(0xF1, 0x4A); const held = m.cpu.tc - b;  // the data write waits out the 12
+  m.runFrameCore = core;
+  m.reset(); const r = m.cpu.tc; m.out(0xF1, 0x4A); const afterReset = m.cpu.tc - r;
+  return { ok: held === 2 * (12 - 2) && afterReset === 0,
+           note: `across the frame boundary held ${held} T; first write after reset ${afterReset} T` };
+});
+
+probe('M51', 'Every port access is timed at the same point of its instruction: OUT (C),A straight after OUT ($F0),A is 12 T-states later, as OUT ($F1),A would be 11, so at 200 % the FM data write is held for the rest of the 12 base cycles, not for all of them (Technical Reference §1)', () => {
+  const held = code => {                                           // run code from $C000 at 200 %; T-states of hold
+    const m = sms('sms'); m.ael.turbo = 2;
+    code.forEach((v, i) => m.wr(0xC000 + i, v)); m.cpu.PC = 0xC000;
+    for (let i = 0; i < code.length && m.cpu.PC < 0xC000 + code.length; i++) m.cpu.step();
+    return m.syncWait || 0;
+  };
+  const viaC = held([0x0E, 0xF1, 0xD3, 0xF0, 0xED, 0x79]);         // LD C,$F1 ; OUT ($F0),A ; OUT (C),A
+  const viaN = held([0xD3, 0xF0, 0xD3, 0xF1]);                     // OUT ($F0),A ; OUT ($F1),A
+  return { ok: viaC === 2 * 12 - 12 && viaN === 2 * 12 - 11,
+           note: `data write held ${viaC} T after OUT (C),A, ${viaN} T after OUT ($F1),A` };
 });
 
 let pass = 0;

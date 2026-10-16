@@ -382,7 +382,8 @@ p['glossary'] = {
     'ESAT': 'Extended Sprite Attribute Table: per-sprite flip, priority, size, magnification, early clock and palette.',
     'unique_cell': 'A mode with 1024 tiles, so every cell of the 32x24 screen can have its own tile.',
     'AEL': 'Auto-Enhancement Layer: the optional boosts for stock software (see enhancement_layer).',
-    'bus_synchroniser': 'FPGA logic that holds the CPU (Z80 WAIT) until the VDP can accept an access, needed when turbo runs the CPU faster than the VDP.',
+    'bus_synchroniser': ('FPGA logic that holds the CPU (Z80 WAIT) until the VDP can accept an access, or the FM chip a '
+                         'write, needed when turbo runs the CPU faster than those chips.'),
     'SDSC': 'A debug-console convention used by Master System homebrew (ports $FC/$FD).',
 }
 p['vdp_registers']['bank_0']['15'] = ('Feature Enable A - bit0 CRAM native, bit1 line-scroll H, bit2 window, bit3 ESAT, '
@@ -453,7 +454,8 @@ p['enhancement_layer'] = {
         'start_pause': 'Start on the pad raises the Pause NMI (SMS, SG-1000, SC-3000 modes).',
         'turbo': ('A turbo step (125-200 %) for stock software in the SMS, GG, SG-1000 and SC-3000 modes. '
                   'MasterDrive software sets its own step through $F3.'),
-        'vram_boost': 'No VDP access wait (bus synchroniser bypassed) while a turbo step is active.',
+        'vram_boost': ('No VDP access wait while a turbo step is active: the bus synchroniser stops holding VDP '
+                       'accesses, but still holds FM writes (cpu.turbo.fm_writes).'),
         'autofire': ('While C is held, button 2 repeats: it toggles every two frames (15 Hz at 60 Hz). '
                      'The pad state itself is not changed, so releasing C leaves button 2 as the pad has it.'),
         'pseudo_stereo': ('Until software writes $06, the PSG is panned tone 0 left, tone 1 right, tone 2 '
@@ -499,9 +501,9 @@ p['open_questions'] = [
     {'id': 'Q10', 'topic': 'Reverting third-party GG2SMS layers', 'status': 'emulator workflow',
      'detail': 'A hack-maker workflow, not a machine question; listed so it is not lost.'},
     {'id': 'Q11', 'topic': 'Default of the TMS colour boost', 'status': 'resolved',
-     'detail': ('Decided by the owner in October 2026: true TMS9918 colours are on at power-on, the one '
-                'exception to every boost starting off, and the boost also acts on the TMS modes of MasterDrive '
-                'software. The emulator already did both; the Pocket core does the same.')},
+     'detail': ('Decided by the owner in October 2026: true TMS9918 colours are on at power-on, one of the '
+                'two boosts that start on (Start = Pause is the other), and the boost also acts on the TMS modes '
+                'of MasterDrive software. The emulator already did both; the Pocket core does the same.')},
     {'id': 'Q13', 'topic': 'Feature Enable C bit 4 (ESAT 2-byte)', 'status': 'open',
      'detail': ('ESAT has been 2 bytes per sprite since v5, and v6 confirmed it (Q4), but Feature Enable C bit 4 still '
                 'selects a 2-byte mode and the emulator implements a 1-byte layout when it is clear. Retire the bit, '
@@ -647,6 +649,9 @@ p['cpu']['turbo']['fm_writes'] = ('The FM chip stays at 1x. At turbo steps above
                                   'the CPU on a write to $F0/$F1 until 12 base cycles have passed since an address '
                                   'write, or 84 since a data write (audio.fm.write_timing), so software written '
                                   'for 100 % keeps its FM music. Open question Q21, decided by the owner.')
+p['cpu']['bus_synchroniser']['purpose'] = ('Holds the CPU until the VDP reaches a safe access point, and holds an FM '
+                                           'write until the FM chip can take it (cpu.turbo.fm_writes), since the CPU '
+                                           'clock is decoupled from the VDP and the FM chip under turbo.')
 change(LATER + 'Open question Q21 added and decided by the owner: FM register writes at turbo could come faster '
        'than the YM2413 accepts them, so the bus synchroniser holds the CPU on $F0/$F1 until the chip is ready '
        '(cpu.turbo.fm_writes). audio.fm.write_timing gives the chip\'s write timing.')

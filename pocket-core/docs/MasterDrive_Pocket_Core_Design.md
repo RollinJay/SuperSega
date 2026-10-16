@@ -15,7 +15,7 @@ It is split in two:
 
 The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in either.
 
-**Terms.** The *enhancement layer* (AEL) is the machine's set of optional boosts for unmodified software, such as removing sprite flicker; all but True TMS colours and Start = Pause are off by default (§10). The *bus synchroniser* holds the CPU when turbo makes it faster than the video chip can accept data. *ESAT* (extended sprite attributes) and *unique-cell mode* (1024 tiles, one per screen cell) are MasterDrive drawing features; the Technical Reference describes them.
+**Terms.** The *enhancement layer* (AEL) is the machine's set of optional boosts for unmodified software, such as removing sprite flicker; all but True TMS colours and Start = Pause are off by default (§10). The *bus synchroniser* holds the CPU when turbo makes it faster than the video chip, or the FM chip, can accept data. *ESAT* (extended sprite attributes) and *unique-cell mode* (1024 tiles, one per screen cell) are MasterDrive drawing features; the Technical Reference describes them.
 
 ## 2. What runs in milestone 1
 
@@ -239,9 +239,9 @@ Not yet done: anything on hardware.
 | Decision | Why it matters |
 |---|---|
 | Core author name | The core is `MasterDrive.MasterDrive` on the SD card: the part before the dot is the APF's author field, here the project's name. The owner may want their own name there; changing it moves the core's folder, so a test install has to be copied again |
-| Math unit divide (Q7), mirror range (Q1), TMS-mode line interrupts (Q15), register layouts written only in the emulator (Q16), Feature Enable B height in the TMS modes (Q17) | Machine questions that block parts of later milestones |
+| Math unit divide (Q7), mirror range (Q1), TMS-mode line interrupts (Q15), register layouts written only in the emulator (Q16), Feature Enable B height in the TMS modes (Q17) | Machine questions that block parts of later milestones. The owner has decided all five (`../DECISIONS.md`), but the decisions are not yet applied to the machine documents or either implementation |
 
 Decided (October 2026):
 
-- **Licence.** The project's own files, the RTL included, are MIT (`../../LICENSE`). Third-party code keeps its own licence, and `pocket/build_core.sh` puts the notices of tv80, T80, IKAOPLL and agg23's utilities in the SD-card files.
+- **Licence.** The project's own files, the RTL included, are MIT (`../LICENSE`). Third-party code keeps its own licence, and `pocket/build_core.sh` puts the notices of tv80, T80, IKAOPLL and agg23's utilities in the SD-card files.
 - **IKAOPLL's provenance.** IKAOPLL is BSD 2-Clause, but its README says its 9-bit digital output design and its VRC7 instrument set were copied from nukeykt's `ym2413.v` in Nuked-SMS-FPGA, which is GPL-2.0-or-later. The owner left the choice to us, and the core keeps IKAOPLL under the BSD licence its author gives it: that is the licence the whole of IKAOPLL is published under, the core never selects the VRC7 instrument set, and IKAOPLL describes itself as reverse-engineered from Yamaha's data sheet and die shots of the chip. The provenance stays recorded (`rtl/third_party/ikaopll/VERSION`). If IKAOPLL's author or nukeykt ever says those parts are GPL, the core can be distributed as a whole under GPL-2.0-or-later (MIT and BSD code may be combined into a GPL work) or the FM core replaced.

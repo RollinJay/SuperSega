@@ -98,9 +98,10 @@ run_sys_case() {
 }
 export -f run_sys_case
 # FM sound: the FM test ROMs captured as audio and checked by tools/check_fm_wav.py,
-# in the two modes with the FM unit and in one without it, and the tightly timed
-# driver at 200 % turbo (the bus synchroniser must hold its writes); run
-# alongside the frame cases
+# in the two modes with the FM unit and in one without it, the tightly timed
+# driver at 200 % turbo (the bus synchroniser must hold its writes), and both
+# ROMs again on the PAL machine (pitches at 3.546893 MHz); run alongside the
+# frame cases
 # name | ROM | mode | tb_mdr options | check_fm_wav.py options
 FM_CASES=("fmsms|fm.sms|sms||" "fmss|fm.sms|ss||" "fmgg|fm.sms|gg||--no-fm" "fmturbo|fm_tight.sms|sms|-turbo 4|"
           "fmpal|fm.sms|sms|-pal|--pal" "fmturbopal|fm_tight.sms|sms|-pal -turbo 4|--pal")
@@ -153,8 +154,8 @@ build pocket
 # name | ROM | frames to run | options and frames to dump | video timing to expect
 #   ntsc: every line 342 pixel clocks, every frame 89604; pal: lines of 345 or
 #   346 (machine time is held, the pixel clock is not), frames 108031-108032,
-#   313 lines; toggle: PAL switched to NTSC mid-frame restarts the machine and
-#   never gives a frame of more than 313 lines
+#   313 lines; toggle: PAL switched to NTSC mid-frame restarts the machine:
+#   lines of both kinds appear, and every frame has 262 to 313 lines
 POCKET_CASES=(
     "p224|vdp224.sms|40|37|ntsc"
     "pss|mdrfeat.sms|12|10 11|ntsc"
@@ -176,22 +177,18 @@ run_pocket_case() {
         > "$W/pocket/$name.log" 2>&1 || { echo "tb_pocket $name failed:"; cat "$W/pocket/$name.log"; return 1; }
     grep -q 'slot-word errors 0 ' "$W/pocket/$name.log" \
         || { echo "tb_pocket $name: scaler slot-word errors:"; cat "$W/pocket/$name.log"; return 1; }
+    grep -q ', 0 violations' "$W/pocket/$name.log" \
+        || { echo "tb_pocket $name: clock enable check failed:"; grep 'enable check' "$W/pocket/$name.log"; return 1; }
     tline=$(grep '^timing:' "$W/pocket/$name.log")
     case "$tim" in
         ntsc) need=('HS period 342-342' 'VS period 89604-89604') ;;
         pal)  need=('HS period 345-346' 'VS period 108031-108032' 'HS per frame 313-313') ;;
+        toggle) need=('[345 x' '[342 x' 'HS per frame 262-313;') ;;
     esac
     need+=('wide HS/VS 0;' 'skip 0')
     for x in "${need[@]}"; do
         grep -qF -- "$x" <<< "$tline" || { echo "tb_pocket $name: video timing, expected '$x':"; echo "$tline"; return 1; }
     done
-    if [ "$tim" = toggle ]; then
-        python3 - "$tline" <<'PY' || { echo "tb_pocket $name: a frame outside 262-313 lines:"; echo "$tline"; return 1; }
-import re, sys
-lo, hi = map(int, re.search(r'HS per frame (\d+)-(\d+)', sys.argv[1]).groups())
-sys.exit(0 if 262 <= lo and hi <= 313 else 1)
-PY
-    fi
 }
 export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _

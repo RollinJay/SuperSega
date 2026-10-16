@@ -15,6 +15,15 @@
 //   -save FILE       load FILE into the save slot before reset is released
 //   -readsave FILE   after the last frame, read the save slot back over the bridge
 //   -hold BIT        hold APF controller-1 key BIT throughout (4 A, 5 B, 7 Y)
+//   -setat F D A V   in frame F, D clk_sys cycles in, make interact write A = V
+//                    (a setting changed while the machine runs, e.g. Video)
+//
+// After the last frame it prints a timing line for the video bus: the HS
+// period in clk_vid cycles (with a histogram of the periods seen more than
+// twice), the VS period and frame rate, HS pulses per frame, the DE run per
+// line, DE lines per frame, the shortest VS-to-HS gap, HS/VS pulses longer
+// than one cycle, and how many frames the scaler was told to skip. Then the
+// machine's enable check reports its violations (mdr_top, Verilator only).
 #include "Vtb_pocket_top.h"
 #include "verilated.h"
 #include <cstdio>
@@ -225,7 +234,7 @@ int main(int argc, char** argv) {
     while (frame < frames) {
         long phase = frame % 120;
         uint32_t k = 0x10000000 | hold;
-        if (phase >= 90 && phase < 96) k |= 1u << 5;            // face_b = button 1
+        if (phase >= 90 && phase < 96) k |= 1u << 4;            // face_a = pad A (button 1), as tb_mdr
         if (gg && phase >= 60 && phase < 66) k |= 1u << 15;     // Start
         t->cont1_key = k;
         if (setat_f >= 0 && frame == setat_f) {
@@ -253,6 +262,7 @@ int main(int argc, char** argv) {
         fclose(o);
         printf("save read back to %s\n", readsave.c_str());
     }
+    t->final();                                  // runs the enable check's final report
     delete t;
     return 0;
 }

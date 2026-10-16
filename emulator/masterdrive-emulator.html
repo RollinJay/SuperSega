@@ -90,6 +90,10 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       <option value="ss" selected>MasterDrive</option>
       <option value="msx">MSX2 (analysis)</option>
     </select>
+    <select id="tv" title="Video standard: PAL runs the machine on the PAL clock (3.546893 MHz, 313 lines, 49.70 frames a second); changing it restarts the machine">
+      <option value="ntsc">NTSC 60 Hz</option>
+      <option value="pal">PAL 50 Hz</option>
+    </select>
     <select id="scram" title="SC-3000 cartridge RAM layout">
       <option value="16">cart RAM 16K</option>
       <option value="32">cart RAM 32K</option>
@@ -584,7 +588,7 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
       </div>
       <div class="note">These are runtime interceptions, not ROM patches. They watch the standard hardware
       interfaces every game already uses, so they work on any title with no binary modification and can be
-      toggled mid-frame. Everything defaults to stock behaviour; enable one at a time when evaluating a new game.</div>
+      toggled mid-frame. Everything except True TMS colours and Start = Pause defaults to stock behaviour; enable one at a time when evaluating a new game.</div>
       <div class="note"><b>Sprite limit raise</b> is the highest-value item &#8212; sprite flicker is the defining
       flaw of 8-bit Sega action games and it disappears without touching the ROM. If a game misbehaves, pair it
       with <b>overflow flag preservation</b>: a few titles read that flag as game logic.</div>
@@ -1019,12 +1023,17 @@ class Z80{
       case 0x6F:{const v=this.rb(this.HL),a=R[7];
         this.wb(this.HL,((v<<4)|(a&15))&255);R[7]=(a&0xF0)|(v>>4);
         R[6]=(R[6]&FC)|SZP[R[7]];return 18;}
+      /* The I/O forms count their T-states before the port access, as the
+         unprefixed IN A,(n) and OUT (n),A do, so the bus synchroniser sees
+         every port access at the same point of its instruction. */
       case 0x40:case 0x48:case 0x50:case 0x58:case 0x60:case 0x68:case 0x78:{
+        this.tc+=12;
         const r=(op>>3)&7,v=this.bus.inp(this.BC);
-        if(r!==6)R[r===7?7:r]=v; R[6]=(R[6]&FC)|SZP[v];return 12;}
+        if(r!==6)R[r===7?7:r]=v; R[6]=(R[6]&FC)|SZP[v];return 0;}
       case 0x41:case 0x49:case 0x51:case 0x59:case 0x61:case 0x69:case 0x79:{
-        const r=(op>>3)&7;this.bus.out(this.BC,r===6?0:R[r===7?7:r]);return 12;}
-      case 0x71:this.bus.out(this.BC,0);return 12;
+        this.tc+=12;
+        const r=(op>>3)&7;this.bus.out(this.BC,r===6?0:R[r===7?7:r]);return 0;}
+      case 0x71:this.tc+=12;this.bus.out(this.BC,0);return 0;
       // block transfer
       case 0xA0:case 0xB0:{const v=this.rb(this.HL);this.wb(this.DE,v);
         this.HL=(this.HL+1)&0xFFFF;this.DE=(this.DE+1)&0xFFFF;this.BC=(this.BC-1)&0xFFFF;
@@ -1043,15 +1052,17 @@ class Z80{
         R[6]=(R[6]&FC)|FN|SZ[r]|h|(this.BC?FP:0);
         if((op&0xF0)===0xB0&&this.BC&&r!==0){this.PC=(this.PC-2)&0xFFFF;return 21;} return 16;}
       case 0xA2:case 0xB2:case 0xAA:case 0xBA:{
+        this.tc+=16;
         const inc=(op&8)?-1:1,v=this.bus.inp(this.BC);
         this.wb(this.HL,v);this.HL=(this.HL+inc)&0xFFFF;R[0]=(R[0]-1)&255;
         R[6]=SZ[R[0]]|FN;
-        if((op&0xF0)===0xB0&&R[0]){this.PC=(this.PC-2)&0xFFFF;return 21;} return 16;}
+        if((op&0xF0)===0xB0&&R[0]){this.PC=(this.PC-2)&0xFFFF;return 5;} return 0;}
       case 0xA3:case 0xB3:case 0xAB:case 0xBB:{
+        this.tc+=16;
         const inc=(op&8)?-1:1,v=this.rb(this.HL);
         R[0]=(R[0]-1)&255;this.bus.out(this.BC,v);this.HL=(this.HL+inc)&0xFFFF;
         R[6]=SZ[R[0]]|FN;
-        if((op&0xF0)===0xB0&&R[0]){this.PC=(this.PC-2)&0xFFFF;return 21;} return 16;}
+        if((op&0xF0)===0xB0&&R[0]){this.PC=(this.PC-2)&0xFFFF;return 5;} return 0;}
       default:return 8;
     }
   }
@@ -1620,7 +1631,7 @@ class Machine{
     this.psg.pstereo=!!this.ael.stereo&&this.mode!=='ss';
     this.aelStats={extraSpr:0,ovfHidden:0};
     this.afTick=0;
-    this.fmPresent=(this.mode==='sms'||this.mode==='ss'); this.fmReg=0;
+    this.fmPresent=(this.mode==='sms'||this.mode==='ss'); this.fmReg=0; this.lastFm=null; this.lastFmData=false;
     this.psgTarget=null; this.noRender=false; this.dual=this.dual||false;
     this.layerBusy=false; this.layerQ=[]; this.frameNo=0;
     this.chUse={psg:[0,0,0,0],fm:new Array(9).fill(0)};
@@ -2061,17 +2072,20 @@ class Machine{
      (YM2413 Application Manual; Technical Reference section 1). At 100 % the
      software leaves that time itself. */
   fmSync(p){
-    const mult=this.cpuMult(), now=this.cpu.tc/mult;
+    /* lastFm is the CPU's T-state count at the last FM write; it carries over
+       from one frame to the next (a write late in a frame still holds the
+       first write of the next) and is cleared by reset and state loads. */
+    const mult=this.cpuMult();
     let waitCpu=0;
     if(mult>1 && this.lastFm!=null){
-      const need=this.lastFmData?84:12, gap=now-this.lastFm;
+      const need=(this.lastFmData?84:12)*mult, gap=this.cpu.tc-this.lastFm;
       if(gap>=0 && gap<need){
-        waitCpu=Math.ceil((need-gap)*mult);
+        waitCpu=Math.ceil(need-gap);
         this.cpu.tc+=waitCpu; this.syncWait=(this.syncWait||0)+waitCpu;
         if(this.fpga) this.fpga.did('busSync');
       }
     }
-    this.lastFm=this.cpu.tc/mult; this.lastFmData=(p===0xF1);
+    this.lastFm=this.cpu.tc; this.lastFmData=(p===0xF1);
     return waitCpu;
   }
   busSync(){
@@ -2321,7 +2335,7 @@ class Machine{
     return fb;
   }
   runFrame(){
-    this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0; this.lastVdpAccess=0; this.lastFm=null;
+    this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0; this.lastVdpAccess=0;
     if(this.fpga){ this.fpga.did('clockGen'); this.fpga.did('composite');
       this.fpga.did('asicBg'); this.fpga.did('asicInt'); this.fpga.did('shadowVdp'); }
     const r = this.dual? this.runFrameDual() : this.runFrameCore();
@@ -2468,7 +2482,7 @@ function b64(u8){ let s=''; for(let i=0;i<u8.length;i++) s+=String.fromCharCode(
 function unb64(s){ const b=atob(s), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i); return u; }
 function saveState(m){
   const C=m.cpu,V=m.vdp,P=m.psg;
-  return {v:1, mode:m.mode, id:m.romId||'',
+  return {v:1, mode:m.mode, id:m.romId||'', pal:m.pal,
     cpu:{R:Array.from(C.R),S:Array.from(C.S),PC:C.PC,SP:C.SP,I:C.I,Rr:C.Rr,
       IFF1:C.IFF1,IFF2:C.IFF2,IM:C.IM,halt:C.halt,tc:C.tc},
     vdp:{vram:b64(V.vram),cram:b64(V.cram),pw:V.pw[0],reg:Array.from(V.reg),
@@ -2487,6 +2501,8 @@ function loadState(m,st){
   const C=m.cpu,V=m.vdp,P=m.psg;
   m.mode=st.mode;
   m.fmPresent=(m.mode==='sms'||m.mode==='ss'); m.fmReg=st.fmReg??0;   /* $F2: which chips are heard; older states have none (power-on) */
+  m.lastFm=null; m.lastFmData=false;                                   /* the FM write timing starts afresh */
+  m.pal=!!st.pal;                                                      /* older states have none: NTSC */
   C.R.set(st.cpu.R); C.S.set(st.cpu.S);
   Object.assign(C,{PC:st.cpu.PC,SP:st.cpu.SP,I:st.cpu.I,Rr:st.cpu.Rr,
     IFF1:st.cpu.IFF1,IFF2:st.cpu.IFF2,IM:st.cpu.IM,halt:st.cpu.halt,tc:st.cpu.tc});
@@ -3433,10 +3449,11 @@ function batLoad(m,profile){
 
 /* ================= per-game config ================= */
 function cfgSave(m){ if(!m.romId) return false;
-  store.set('cfg_'+m.romId, JSON.stringify({ael:m.ael,mode:m.mode})); return true; }
+  store.set('cfg_'+m.romId, JSON.stringify({ael:m.ael,mode:m.mode,pal:m.pal})); return true; }
 function cfgLoad(m){ if(!m.romId) return null;
   const v=store.get('cfg_'+m.romId); if(!v) return null;
   try{ const c=JSON.parse(v); Object.assign(m.ael,c.ael||{});
+    if(typeof c.pal==='boolean' && c.pal!==m.pal){ setTv(c.pal); m.reset(); }   /* settings saved before the PAL setting have none */
     return c; }catch(e){ return null; } }
 
 /* ================= input binding ================= */
@@ -4629,7 +4646,7 @@ function bootItems(m){
           {t:'COMPUTER',d:'SC-3000 AND WORKSTATION',go:'computer'},
           {t:'SETTINGS',d:'VIDEO  AUDIO  INPUT',go:'settings'},
           {t:'SYSTEM',d:'DIAGNOSTICS AND FIRMWARE',go:'system'}],
-    play:[{t:'START',d:cart},{t:'REGION',d:'NTSC'},
+    play:[{t:'START',d:cart},{t:'REGION',d:m.pal?'PAL':'NTSC'},
           {t:'ENHANCEMENTS',d:m.ael&&m.ael.sprlimit?'SPRITE LIMIT RAISED':'OFF'},
           {t:'TURBO',d:Math.round(m.cpuMult()*100)+'%'},
           {t:'ROM ACCESS',d:m.romMode==='cart'?('CART '+m.romNs+'NS'):'IN RAM'},
@@ -4729,42 +4746,49 @@ function draw(){
   cx.putImageData(img,0,0);
 }
 
-let ffOn=false, paceAcc=0, paceT=null;
+/* Machine frames are run at the machine's own rate (59.92 Hz NTSC, 49.70 Hz
+   PAL), not the display's: a 50 Hz game on a 60 Hz screen, or any game on a
+   120 Hz screen, keeps its speed. framesDue says how many frames are due at
+   display time t (ms): a frame runs once three quarters of one is due, so a
+   59.92 Hz machine on a 60 Hz screen runs one frame per refresh and drops one
+   every few seconds instead of stuttering on timer jitter; more than four
+   frames behind (a background tab), it catches up no further. */
+function framesDue(st,t,hz){
+  if(st.t===null) st.t=t;
+  st.acc+=Math.min(t-st.t,250); st.t=t;
+  const fp=1000/hz; let k=0;
+  if(st.acc>=fp*0.75){ st.acc-=fp; k=1; while(st.acc>=fp && k<4){ st.acc-=fp; k++; } }
+  if(k===4) st.acc=0;
+  return k;
+}
+let ffOn=false; const pace={acc:0,t:null};
+/* Fast-forward runs four frames per display frame; pacing resumes from now when it ends. */
+function ffFrames(t){ pace.acc=0; pace.t=t; return 4; }
 function loop(t){
   if(!running) return;
   pollPad();
-  const n=ffOn?4:1;
   if(m.mode==='msx'){
     if(!MSX.mach){ stop(); log('MSX2 mode: load a BIOS and MSX ROM in the MSX Lab tab, then press Boot'); return; }
+    const n=ffOn?ffFrames(t):framesDue(pace,t,3579545/59736);   /* 59,736 T-states a frame: 59.92 Hz */
     for(let i=0;i<n;i++){
       if(MSX.mach.K && !MSX.live) MSX.mach.K.press = MSX.frames>120 && ((MSX.frames>>4)&1)===0;
       let t2=0; while(t2<59736){ try{ t2+=MSX.cpu.step(); }catch(e){ break; } }
       MSX.mach.vblank(); if(MSX.mach.V.reg[1]&0x20) MSX.cpu.irq(); MSX.frames++;
       if(window.__msxSample) window.__msxSample();
       if(MSX.stage && MSX.frames%90===0){ try{ MSX.stage.addScreen(MSX.mach.V); }catch(e){} } }
-    drawMSXMain(); frames+=n;
+    if(n) drawMSXMain(); frames+=n;
     if(t-fpsT>500){ document.getElementById('fps').textContent=Math.round(frames*1000/(t-fpsT))+' fps';
       fpsT=t; frames=0; refresh(); }
     raf=requestAnimationFrame(loop); return;
   }
-  /* Run machine frames at the machine's own rate (59.92 Hz NTSC, 49.70 Hz PAL),
-     not the display's: a 50 Hz game on a 60 Hz screen, or any game on a 120 Hz
-     screen, keeps its speed. Fast-forward runs four frames per display frame. */
-  let k=n;
-  if(!ffOn){
-    if(paceT===null) paceT=t;
-    paceAcc+=Math.min(t-paceT,250); paceT=t;
-    const fp=1000/m.frameHz();
-    k=0; while(paceAcc>=fp && k<4){ paceAcc-=fp; k++; }
-    if(k===4) paceAcc=0;                          // behind by more than four frames: catch up no further
-  }
+  const k=ffOn?ffFrames(t):framesDue(pace,t,m.frameHz());
   for(let i=0;i<k;i++) m.runFrame();
   if(k) draw(); frames+=k;
   if(t-fpsT>500){ document.getElementById('fps').textContent=Math.round(frames*1000/(t-fpsT))+' fps';
     fpsT=t; frames=0; refresh(); }
   raf=requestAnimationFrame(loop);
 }
-function start(){ if(running)return; running=true; fpsT=performance.now(); frames=0; paceAcc=0; paceT=null; raf=requestAnimationFrame(loop);
+function start(){ if(running)return; running=true; fpsT=performance.now(); frames=0; pace.acc=0; pace.t=null; raf=requestAnimationFrame(loop);
   document.getElementById('run').textContent='Pause'; }
 function stop(){ running=false; cancelAnimationFrame(raf); document.getElementById('run').textContent='Run'; }
 
@@ -5060,14 +5084,14 @@ $('sv').onclick=()=>{ if(!m.cart){log('no ROM');return;}
     log('state saved to slot '+(slotIdx()+1)); refresh(); }catch(e){ log('save failed: '+e.message); } };
 $('ld').onclick=()=>{ const st=STATES[slotIdx()];
   if(!st){log('slot '+(slotIdx()+1)+' empty');return;}
-  try{ loadState(m,st.d); $('mode').value=m.mode; draw(); refresh(); log('state loaded'); }
+  try{ loadState(m,st.d); $('mode').value=m.mode; setTv(m.pal); draw(); refresh(); log('state loaded'); }
   catch(e){ log('load failed: '+e.message); } };
 $('expst').onclick=()=>{ const st=STATES[slotIdx()]; if(!st){log('slot empty');return;}
   const blob=new Blob([JSON.stringify(st.d)],{type:'application/json'});
   const a=document.createElement('a'); a.download=(m.romName||'state')+'.sss';
   a.href=URL.createObjectURL(blob); a.click(); };
 $('impst').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
-  f.text().then(txt=>{ try{ loadState(m,JSON.parse(txt)); $('mode').value=m.mode;
+  f.text().then(txt=>{ try{ loadState(m,JSON.parse(txt)); $('mode').value=m.mode; setTv(m.pal);
     draw(); refresh(); log('state imported'); }catch(err){ log('import failed: '+err.message); } }); };
 
 $('vol').oninput=e=>{ if(window.__gain) window.__gain.gain.value=e.target.value/100; };
@@ -5633,7 +5657,14 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
     labPaint('labcvC',r.fb);
     if(drawOnly||(LAB.frames&15)===0) labReadouts(r.fromDonor);
   }
-  function labLoop(){ if(!LAB.playing) return; labFrame(false); LAB.raf=requestAnimationFrame(labLoop); }
+  /* Called with no time to start (Boot, Play), then once per display frame;
+     the builds run at their machine's frame rate, as the main screen does. */
+  function labLoop(t){
+    if(t===undefined){ cancelAnimationFrame(LAB.raf); LAB.pace={acc:0,t:null}; }
+    if(!LAB.playing) return;
+    if(t!==undefined){ const k=framesDue(LAB.pace,t,LAB.mA.frameHz()); for(let i=0;i<k;i++) labFrame(false); }
+    LAB.raf=requestAnimationFrame(labLoop);
+  }
   function labLoadSlot(which,el){
     el.onchange=e=>{ const f=e.target.files[0]; if(!f) return;
       f.arrayBuffer().then(b=>{
@@ -5810,6 +5841,13 @@ $('rommode').onchange=e=>{ m.romMode=e.target.value; store.set('rommode',m.romMo
 $('romns').onchange=e=>{ m.romNs=+e.target.value; store.set('romns',String(m.romNs)); romNote(); refresh(); };
 (function(){ const a=store.get('rommode'); if(a){ m.romMode=a; $('rommode').value=a; }
   const b=store.get('romns'); if(b){ m.romNs=+b; $('romns').value=b; } romNote(); })();
+/* Video standard. A change restarts the machine, as on the Pocket core: the
+   line count and the clock change together. */
+function setTv(pal){ m.pal=!!pal; $('tv').value=m.pal?'pal':'ntsc'; }
+$('tv').onchange=e=>{ const was=m.pal; setTv(e.target.value==='pal'); store.set('tv',e.target.value);
+  if(m.pal!==was){ m.reset(); pace.acc=0; pace.t=null; draw(); refresh(); romNote();
+    log((m.pal?'PAL 50 Hz':'NTSC 60 Hz')+': machine restarted'); } };
+(function(){ const v=store.get('tv'); if(v) setTv(v==='pal'); })();
 
 /* ---- reusable choice dialog ---- */
 function choiceDlg(title,body,choices){

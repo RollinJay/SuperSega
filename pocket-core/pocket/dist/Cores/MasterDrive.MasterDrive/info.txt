@@ -1,11 +1,11 @@
 MasterDrive 8-bit machine core (milestone 1, untested on hardware).
 
-Runs Master System, Game Gear, SG-1000 and SC-3000 software on the Super
-Sega machine model: Z80, VDP (Mode 4 at 192/224/240 lines, Game Gear CRAM,
-the four TMS9918 picture modes), PSG, the FM unit (a YM2413, as IKAOPLL) in
-Master System and MasterDrive modes, Sega, Codemasters and Korean mappers,
-cartridge saves. MasterDrive titles run, but ESAT, the window and text
-layers, line tables and unique-cell mode are not drawn yet.
+Runs Master System, Game Gear, SG-1000 and SC-3000 software on the
+MasterDrive machine model: Z80, VDP (Mode 4 at 192/224/240 lines, Game Gear
+CRAM, the four TMS9918 picture modes), PSG, the FM unit (a YM2413, as
+IKAOPLL) in Master System and MasterDrive modes, Sega, Codemasters and
+Korean mappers, cartridge saves. MasterDrive titles run, but ESAT, the
+window and text layers, line tables and unique-cell mode are not drawn yet.
 
 ROMs go in /Assets/masterdrive/common/. The Pocket's buttons are the
 console's Mega Drive pad: A = A, B = B, Y = C, Start = Start. Master System

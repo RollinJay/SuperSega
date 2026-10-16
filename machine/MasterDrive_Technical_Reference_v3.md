@@ -488,7 +488,7 @@ Explicit software intent always wins: every boost acts only on software running 
 | Stock overflow flag | with the raised limit, status bit 6 is still set by a ninth sprite, for software that reads it as logic. Mode 4 only: in the TMS modes it has no effect |
 | Start = Pause | Start on the pad raises the Pause NMI (Master System, SG-1000, SC-3000 modes). On at power-on |
 | Turbo | a turbo step for stock software; MasterDrive software sets its own through `$F3` |
-| VRAM speed-up | no VDP access wait while turbo is active |
+| VRAM speed-up | no VDP access wait while turbo is active (the bus synchroniser still holds FM writes, §1) |
 | Auto-fire | while C is held, button 2 repeats (toggles every two frames: 15 Hz); releasing C leaves button 2 as the pad has it |
 | Pseudo-stereo | until software writes `$06`: tone 0 left, tone 1 right, tone 2 and noise centre |
 | Game Gear uncrop | show the full 256 × 192 picture the Game Gear VDP draws, instead of the 160 × 144 window |
@@ -553,7 +553,7 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q8 | Run-time detection of a MasterDrive by a single ROM | open (§14) |
 | Q9 | Work RAM bank readback at `$0A` | open |
 | Q10 | Reverting third-party GG-to-SMS patches | an emulator workflow, not a machine question |
-| Q11 | Should the true-TMS-colours boost default off like every other boost, and act only in the stock modes? | resolved (owner, October 2026): on at power-on, the one exception, and it also acts on MasterDrive software's TMS modes (§15). Both implementations do this |
+| Q11 | Should the true-TMS-colours boost default off like every other boost, and act only in the stock modes? | resolved (owner, October 2026): on at power-on, one of the two boosts that start on (Start = Pause is the other), and it also acts on MasterDrive software's TMS modes (§15). Both implementations do this |
 | Q12 | One cartridge wait state at 200 % turbo: the emulator applies it; the Pocket core does not yet | open |
 | Q13 | Feature Enable C bit 4 (ESAT 2-byte) contradicts ESAT being 2 bytes per sprite (Q4); the emulator still has a 1-byte layout when the bit is clear. Retire the bit or document the 1-byte layout | open |
 | Q14 | `$08` reports a 64-byte FIFO's fill in three bits; the emulator returns the fill modulo 8, so a full FIFO reads as empty. Proposal: bytes queued ÷ 8, saturating at 7 | open |

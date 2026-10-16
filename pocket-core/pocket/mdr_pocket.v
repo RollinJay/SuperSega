@@ -81,10 +81,10 @@ module mdr_pocket (
     // $0000_0120 SC RAM      0 16 KB 1 32 KB cartridge RAM (SC-3000 BASIC carts)
     // $0000_0134 TMS colours 1 = true TMS9918 colours (default), 0 = Master System approximation
     // Boosts: the machine's enhancement layer, all off by default (stock) except
-    // TMS colours ($0000_0134, above):
+    // TMS colours ($0000_0134, above) and Start = Pause ($0000_0118):
     // $0000_0114 sprites     0 8 per line, 1 16 per line, 2 16 per line with the
     //                        overflow flag still set by a 9th sprite
-    // $0000_0118 Start=Pause 1 = Start raises Pause (SMS, SG-1000, SC-3000)
+    // $0000_0118 Start=Pause 1 = Start raises Pause (SMS, SG-1000, SC-3000) (default)
     // $0000_0124 turbo       0 off, 1-4 = 125/150/175/200 % (stock software only)
     // $0000_0128 VRAM boost  1 = no VDP access wait at turbo
     // $0000_012C auto-fire   1 = C held repeats button 2
