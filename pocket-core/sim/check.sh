@@ -245,9 +245,10 @@ python3 - "$PC/roms/save_in.sav" "$W/pocket/back.sav" <<'EOF'
 import sys
 loaded = open(sys.argv[1], 'rb').read()
 back = open(sys.argv[2], 'rb').read()
-want = bytearray(loaded)                      # save.sms writes (address low byte ^ $5A) to $0100-$01FF
-for i in range(0x100, 0x200):
-    want[i] = (i & 0xFF) ^ 0x5A
+want = bytearray(loaded)                      # save.sms (SAVE_BLOCKS): two 16 KB banks (Q3)
+for bank, addr, key in ((0, 0x8100, 0x00), (0, 0xA200, 0x11), (1, 0x8300, 0x22), (1, 0xA400, 0x33)):
+    for k in range(256):
+        want[bank * 0x4000 + addr - 0x8000 + k] = ((addr + k) & 0xFF) ^ 0x5A ^ key
 bad = sum(1 for i in range(min(len(back), len(want))) if back[i] != want[i])
 print(f'save slot read back: {len(back)} bytes, {bad} differ from the expected')
 sys.exit(0 if len(back) == len(want) and bad == 0 else 1)

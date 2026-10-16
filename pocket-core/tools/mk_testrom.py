@@ -163,21 +163,28 @@ def build(height):
     return bytes(rom)
 
 
+# save.sms: (bank, address, key) of each 256-byte block it writes; the byte at
+# address A is (A low byte) XOR $5A XOR key. Cartridge RAM is two 16 KB banks
+# (Q3), so the blocks land at .sav offsets $0100, $2200, $4300 and $6400.
+SAVE_BLOCKS = [(0, 0x8100, 0x00), (0, 0xA200, 0x11), (1, 0x8300, 0x22), (1, 0xA400, 0x33)]
+
+
 def build_save():
-    """Cartridge RAM test: map cart RAM bank 0 at $8000 ($FFFC = $08) and write
-    (address low byte XOR $5A) to $8100-$81FF, leaving the rest of the RAM as
-    loaded. The save slot read back over the bridge must show the loaded file
-    with only offsets $0100-$01FF replaced."""
+    """Cartridge RAM test: map cart RAM ($FFFC = $08 for bank 0, $0C for bank 1)
+    and write the SAVE_BLOCKS, leaving the rest of the RAM as loaded. The save
+    slot read back over the bridge must show the loaded file with only those
+    blocks replaced, each at bank x 16 KB + (address - $8000)."""
     a = Asm()
     a.org(0x0000)
     a.db(0xF3, 0xED, 0x56)                     # DI ; IM 1
     a.db(0x31); a.dw(0xDFF0)                   # LD SP,$DFF0
-    a.db(0x3E, 0x08, 0x32); a.dw(0xFFFC)       # LD A,$08 ; LD ($FFFC),A
-    a.db(0x21); a.dw(0x8100)                   # LD HL,$8100
-    a.db(0x06, 0x00)                           # LD B,0 (256 passes)
-    a.label('fill')
-    a.db(0x7D, 0xEE, 0x5A, 0x77, 0x23)         # LD A,L ; XOR $5A ; LD (HL),A ; INC HL
-    a.db(0x10); a.rel('fill')                  # DJNZ fill
+    for i, (bank, addr, key) in enumerate(SAVE_BLOCKS):
+        a.db(0x3E, 0x08 | (bank << 2), 0x32); a.dw(0xFFFC)   # LD A,$08/$0C ; LD ($FFFC),A
+        a.db(0x21); a.dw(addr)                 # LD HL,addr
+        a.db(0x06, 0x00)                       # LD B,0 (256 passes)
+        a.label(f'fill{i}')
+        a.db(0x7D, 0xEE, 0x5A ^ key, 0x77, 0x23)   # LD A,L ; XOR ($5A ^ key) ; LD (HL),A ; INC HL
+        a.db(0x10); a.rel(f'fill{i}')          # DJNZ
     a.label('loop')
     a.db(0x18); a.rel('loop')
     a.resolve()

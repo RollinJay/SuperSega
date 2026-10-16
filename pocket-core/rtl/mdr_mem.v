@@ -140,7 +140,9 @@ module mdr_mem (
                         if (ss && slot_sel[0] && card_present) tgt = T_CARD;
                         roff = (ss && slot_sel[0] && card_present) ? {4'd0, card_bank, a[13:0]} : rom16(page1, a[13:0]);
                     end else begin
-                        if (ram_sel[3]) begin tgt = T_CRAM; coff = {1'b0, ram_sel[2], a[12:0]}; end
+                        // $FFFC bit 3 maps cartridge RAM over $8000-$BFFF, bit 2 picks one
+                        // of two 16 KB banks: 32 KB (Q3)
+                        if (ram_sel[3]) begin tgt = T_CRAM; coff = {ram_sel[2], a[13:0]}; end
                         else if (ss && slot_sel[1] && card_present) begin tgt = T_CARD; roff = {4'd0, card_bank, a[13:0]}; end
                         else roff = rom16(page2, a[13:0]);
                     end
@@ -252,7 +254,7 @@ module mdr_mem (
                             2'd3: page2 <= dout;
                             endcase
                         end else if (a >= 16'h8000 && a < 16'hC000 && ram_sel[3]) begin
-                            c_we <= 1'b1; c_addr <= {1'b0, ram_sel[2], a[12:0]}; c_din <= dout;
+                            c_we <= 1'b1; c_addr <= {ram_sel[2], a[13:0]}; c_din <= dout;
                         end
                     end
                     endcase

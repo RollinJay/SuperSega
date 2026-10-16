@@ -26,7 +26,7 @@ The emulator-only tools (hack maker, MSX porting, Lab, etc.) have no part in eit
 | SG-1000 / SC-3000 software | runs in simulation, in all four TMS9918 picture modes (Graphics I and II, Text, Multicolor) with their sprites. Four SG-1000 test ROMs give the same pictures as the emulator and Gearsystem (within the core's 4-bit-per-channel colour output for true TMS colours). A headerless ROM of 64 KB or less starts in SG-1000 mode; SC-3000 cartridges need System set to SC-3000. The keyboard is implemented but not yet tested on the core |
 | MasterDrive system registers | all behind the I/O gate: in MasterDrive mode `$01`–`$17` answer only while Feature Enable A bit 7 is set, and until then are the Master System's `$3E`/`$3F` mirrors (Q1, decided; Q-numbers are the machine's open questions, Technical Reference §17). Work RAM banking (`$0A`, read back, Q9); the math unit (`$0C`–`$10`), its divide giving the quotient and the remainder (Q7); multitap detection (`$16`); the machine ID (`$17`, reads `$A7`, Q8); the Game Gear serial registers (`$01`–`$05`), which hold what is written. Slot select (`$09`) and the card bank (`$0B`) are decoded, but the platform loads no card, so the card slot is always empty |
 | Sound | PSG with stereo, and the FM unit (the YM2413, as IKAOPLL) in Master System and MasterDrive modes, with the four `$F2` states (PSG only, FM only, neither, both). Games that check for FM find it and play their FM music. FM is checked with a test ROM in simulation, not yet with games. No PCM/wavetable |
-| Saves | cartridge RAM saved to the SD card (32 KB `.sav`). Save states would be a feature of the Pocket platform layer, not of the machine, and are not planned in this milestone |
+| Saves | cartridge RAM, two 16 KB banks (Q3), saved to the SD card (32 KB `.sav`). Save states would be a feature of the Pocket platform layer, not of the machine, and are not planned in this milestone |
 | Enhancement-layer boosts | sprite limit (Mode 4 and the TMS modes), stock overflow flag, turbo, VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop — all off by default — and True TMS colours (Q11) and Start = Pause (the pad has no Pause button), on by default. All are switchable in the settings menu and act only on Master System, Game Gear, SG-1000 and SC-3000 software, except True TMS colours, which also acts on MasterDrive software's TMS modes |
 | Not yet | PCM, wavetable, DMA engine, SF-7000 and floppy, debug unit, mouse/trackball, multitap protocols, link cable, loading a card, sleep |
 
@@ -48,7 +48,7 @@ Inside the machine everything runs on `clk_sys` with clock enables: the CPU enab
 
 | Content | Where | Size |
 |---|---|---|
-| Cartridge ROM | PSRAM chip 0, die 0 | up to 8 MB |
+| Cartridge ROM | PSRAM chip 0, die 0 | up to 4 MB, the largest cartridge the machine takes (Q2) |
 | Card ROM (dual slot) | PSRAM chip 0, die 1 (reserved) | up to 512 KB |
 | Work RAM | block RAM | 128 KB |
 | VRAM | block RAM | 32 KB |
@@ -71,7 +71,7 @@ The machine reads ROM over a request/acknowledge bus; the platform serves it fro
 
 ## 6. Saves
 
-Data slot 1 (`Save`, nonvolatile, `.sav`, up to 32 KB) maps to the machine's cartridge RAM:
+Data slot 1 (`Save`, nonvolatile, `.sav`, up to 32 KB) maps to the machine's cartridge RAM, two 16 KB banks: bank 0 is `.sav` `$0000`–`$3FFF` and bank 1 `$4000`–`$7FFF` (Q3). A `.sav` written by an earlier build held two 8 KB banks; a game that uses only the first 8 KB of bank 0, as nearly all do, reads it unchanged:
 
 - **Load**: at start the APF writes the file over the bridge at `$2000_0000`; it goes into the cartridge RAM's second port.
 - **Write back**: on quit or power-off the APF reads `$2000_0000`–`$2000_7FFF`. A small read-out block (`pocket/mdr_save_unload.v`) fetches the four bytes of each word in the machine clock domain and hands the word back in one step. (agg23's `data_unloader` was tried first; it assumes the memory side is much faster than the bridge, and with this design it returned the fourth byte of every word four times.)

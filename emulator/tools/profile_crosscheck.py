@@ -36,6 +36,12 @@ chk('work RAM bank port %s'%wram['bank_register_port'], 'case %s: this.wramBank=
 
 chk('work RAM bank reads back at %s'%wram['bank_register_port'],
     'bank_readback' in wram and 'if(p===%s) return this.wramBank;'%hexlit(wram['bank_register_port']) in js)
+cr=prof['memory']['cartridge_ram']
+chk('cartridge RAM %d x %d KB'%(cr['banks'], cr['bank_size_bytes']//1024),
+    cr['size_bytes']==cr['banks']*cr['bank_size_bytes'] and
+    'this.ram[0x2000+((this.ramSel&4)?0x%X:0)+(a&0x%X)]'%(cr['bank_size_bytes'], cr['bank_size_bytes']-1) in js)
+chk('largest cartridge %d MB'%(prof['media']['cartridge_slot']['max_size_bytes']>>20),
+    'const CART_MAX=0x%X;'%prof['media']['cartridge_slot']['max_size_bytes'] in js)
 mu=prof['math_unit']
 chk('divide: quotient in $0F, remainder in $10, $FF/$00 on zero',
     'quotient in $0F, the remainder in $10' in mu['divide'] and '$FF in $0F and $00' in mu['divide']

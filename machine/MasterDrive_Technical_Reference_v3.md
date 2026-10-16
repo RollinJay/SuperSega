@@ -63,6 +63,7 @@ The FM chip also needs time between register writes (§7): 12 base cycles after 
 | Work RAM window | `$C000`–`$DFFF`, mirrored at `$E000`–`$FFFF` | |
 | Video RAM (VRAM) | 16 KB, expandable to 32 KB | Feature Enable B bit 4 enables; bank1 R3 bit 0 selects the bank the CPU reaches |
 | Colour RAM (CRAM) | 32 entries, expandable to 256 | bank1 R2 bit 1 |
+| Cartridge save RAM | 32 KB, 2 banks of 16 KB, at `$8000`–`$BFFF` | Sega mapper `$FFFC`: bit 3 maps it, bit 2 selects the bank (§8) |
 
 Bank 0 at reset is the stock 8 KB that Master System software expects. The first 64 KB can be used as one contiguous block, which the SF-7000 disk system needs.
 
@@ -282,7 +283,7 @@ Reading `$08` gives the PCM FIFO's fill: bits 6–4 are the bytes queued divided
 
 | Family | Registers |
 |---|---|
-| Sega | `$FFFC` RAM/misc, `$FFFD`–`$FFFF` bank for slots 0–2. Reset `$00`, `$00`, `$01`, `$02`. The first 1 KB of slot 0 never banks, keeping the interrupt vectors |
+| Sega | `$FFFC` RAM/misc (bit 3 maps cartridge RAM over `$8000`–`$BFFF`, bit 2 selects its bank), `$FFFD`–`$FFFF` bank for slots 0–2. Reset `$00`, `$00`, `$01`, `$02`. The first 1 KB of slot 0 never banks, keeping the interrupt vectors |
 | Codemasters | exactly `$0000`, `$4000`, `$8000`. Power-on banks 0, 1, 0. No vector protection. Bit 7 written to `$4000` maps 8 KB of cartridge RAM at `$A000` |
 | Korean | exactly `$A000` selects slot 2; slots 0 and 1 fixed to banks 0 and 1 |
 | MSX / Nemesis (Korean MSX ports) | `$0000`–`$0003` select 8 KB banks: 0 → `$8000`, 1 → `$A000`, 2 → `$4000`, 3 → `$6000`. The MSX variant fixes the first 16 KB; the Nemesis variant (last 8 KB bank fixed at `$0000`) is not implemented yet in the emulator or the Pocket core |
@@ -291,7 +292,7 @@ Only a Sega-mapper cartridge has hardware at `$FFFC`–`$FFFF`; on the other fam
 
 **v2 error:** the Codemasters and Korean registers were said to respond to any address in their slot. Gearsystem and MAME decode the exact address, every known title writes there, and with any-address decoding a write into Codemasters cartridge RAM would also have switched banks.
 
-The Sega mapper's 8-bit bank registers reach 4 MB; the slot is specified for 8 MB, which needs a ninth bank bit (open question Q2). The cartridge-RAM size the machine guarantees is open (Q3).
+The Sega mapper's 8-bit bank registers reach 4 MB, and 4 MB is the largest cartridge ROM the machine takes (Q2, decided October 2026; the slot was once specified for 8 MB, which would have needed a ninth bank bit). Cartridge save RAM is 32 KB, two 16 KB banks as the 315-5235 maps them (Q3, decided October 2026).
 
 ### SF-7000 disk system
 
@@ -307,9 +308,13 @@ The IPL drives `/ROM SEL` with 8255 bit set/reset on `$E7`. As on the keyboard P
 
 The floppy controller (uPD765 class, `$E0` status, `$E1` data, 40 tracks × 16 sectors × 256 bytes) is implemented in the FPGA and backed by disk images.
 
+### Other media
+
+The console also reads the media of its computer side: SC-3000 cassettes and SF-7000 disks (Q2, decided October 2026). How it reads them — in which modes, through which ports, and whether the boot menu loads an image or software reads the signal — is open question Q23.
+
 ### Storage
 
-32 KB save card: 16 directory slots, 112 sparse 256-byte pages, per-game profiles with their own icons. Cartridge save RAM is snapshotted before a card profile loads, and shutdown flushes the card before restoring the cartridge.
+32 KB save card: 16 directory slots, 112 sparse 256-byte pages, per-game profiles with their own icons. A profile holds the first 8 KB of bank 0 of the game's cartridge RAM; whether it should hold all 32 KB, and what identifies a game on the card, is open question Q24. Cartridge save RAM is snapshotted before a card profile loads, and shutdown flushes the card before restoring the cartridge.
 
 Mods reach real hardware as BPS patches, applied by computer mode while it writes a blank card. The console plays mods; making them is an emulator tool.
 
@@ -552,8 +557,8 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | # | Question | Status |
 |---|---|---|
 | Q1 | Ports `$06`–`$16` sit in the `$3E`/`$3F` mirror range. They act as registers only in MasterDrive mode (`$06` also in Game Gear mode, §11), so stock software in its own mode is unaffected. The risk is old code run in MasterDrive mode that writes a mirror address in `$06`–`$16`: a title retagged to region 8 (§14), a converted title, or a stock cartridge started in MasterDrive mode (one proposed answer to Q8 is a boot-menu option that does this). Move them above `$F0`? | resolved (owner, October 2026): they stay; in MasterDrive mode `$01`–`$17` answer only while Feature Enable A bit 7 is set (the I/O gate, §11), and `$00` always answers. Both implementations do this |
-| Q2 | Maximum ROM size and the mapper register layout above 4 MB | open |
-| Q3 | Cartridge save-RAM size the machine guarantees (the 315-5235 maps 2 × 16 KB; the emulator models 2 × 8 KB) | open |
+| Q2 | Maximum ROM size and the mapper register layout above 4 MB | resolved (owner, October 2026): 4 MB, the stock bank registers' reach (§8); the console also reads the computer side's media, how is Q23 |
+| Q3 | Cartridge save-RAM size the machine guarantees (the 315-5235 maps 2 × 16 KB; the emulator models 2 × 8 KB) | resolved (owner, October 2026): 32 KB, two banks of 16 KB (§2, §8). Both implementations do this |
 | Q4 | ESAT format | resolved in v6: 2 bytes per sprite |
 | Q5 | Unique-cell mode and 32 KB VRAM | resolved in v6: coupled |
 | Q6 | Turbo default | resolved: off at reset; a title turns it on itself (Feature Enable A bit 6, then `$F3`). The enhancement layer's turbo is for unmodified software only |
@@ -573,6 +578,8 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q20 | The balance of FM and PSG (§7). On the original Japanese Master System the two chips are mixed in analogue, and how loud each is is not known: MAME gives both the same gain, Gearsystem lowers the PSG to 0.8 while both play, and neither cites a measurement. Both implementations make one FM channel at full volume peak at half a PSG channel at full volume. The chip also has separate melody and rhythm outputs, whose mix on the console's board is not known either; the Pocket core uses IKAOPLL's default weights (2 and 3), and the emulator has no rhythm instruments. What balance should the machine have? | open |
 | Q21 | FM register writes at turbo (§1). The YM2413 needs 12 master-clock cycles after an address write and 84 after a data write before it takes the next write. Software written for 100 % spaces its writes by CPU time, so at turbo steps above 100 % they can come too close: on the Pocket core a test driver that leaves the chip little more than the minimum at 100 % played no FM at 200 %. Should the bus synchroniser hold the CPU on `$F0`/`$F1` until the FM chip is ready, as it does for the VDP? | resolved (owner, October 2026): yes (§1). Both implementations do this, and the test driver now plays at 200 % |
 | Q22 | PAL turbo clocks (§1). The turbo steps are defined at the NTSC clock: 4.47, 5.37, 6.26 and 7.16 MHz. In PAL both implementations run the same percentages of the PAL clock, 4.434, 5.320, 6.207 and 7.094 MHz, because their turbo is a multiple of the base clock. Should PAL turbo be those, or the NTSC frequencies? | resolved (owner, October 2026): the same percentages of the PAL clock (§1). Both implementations do this |
+| Q23 | Reading cassettes and disks (§8). The console reads SC-3000 cassettes and SF-7000 disks (Q2). In which modes, through which ports, and does the boot menu load an image or does software read the signal? Does it write them too? | open |
+| Q24 | The save card (§8). A profile holds the first 8 KB of bank 0 of a game's cartridge RAM, which is 32 KB (Q3), and each card entry carries a 32-bit game ID that the machine does not define: the emulator derives it from a sampled hash of the ROM, so two ROMs of the same size that differ only between sampled bytes share their card saves. Should a profile hold all 32 KB, and what identifies a game: a CRC-32 of the whole ROM, the header's product code, version and region (SG-1000 and SC-3000 cartridges have no header), or something else? How do existing cards carry over? | open |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in MasterDrive mode, the only mode in which those registers act (§10): an old title that set R15 bit 7 there would also open the I/O registers (§11); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
@@ -606,6 +613,7 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Link cable | not yet | not yet |
 | MasterDrive register banks, native/extended CRAM, 16 sprites per line, turbo and bus synchroniser | yes | yes |
 | Work RAM banking (`$0A`) | yes | yes |
+| Cartridge save RAM, 2 × 16 KB | yes | yes (saved as a 32 KB `.sav`) |
 | Math unit (`$0C`–`$10`) | yes | yes |
 | Card slot: slot select (`$09`) and card bank (`$0B`) | yes | registers and memory decode only: the Pocket platform loads no card, so the slot is always empty |
 | VRAM expansion | yes | CPU access only (the render bank, bank1 R4, is not implemented) |

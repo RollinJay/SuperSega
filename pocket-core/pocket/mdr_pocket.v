@@ -151,7 +151,8 @@ module mdr_pocket (
     reg [31:0] rom_bytes   = 32'd0;
     reg        save_loaded = 1'b0;
 
-    // smallest power of two >= size, minus one
+    // smallest power of two >= size, minus one; at most 4 MB, the largest
+    // cartridge the machine takes (Q2: the Sega mapper's 8-bit banks reach 4 MB)
     function [22:0] pow2mask;
         input [31:0] n;
         reg   [31:0] m;
@@ -160,7 +161,7 @@ module mdr_pocket (
             m = m | (m >> 1); m = m | (m >> 2); m = m | (m >> 4);
             m = m | (m >> 8); m = m | (m >> 16);
             if (m < 32'h3FFF) m = 32'h3FFF;          // at least 16 KB
-            pow2mask = (m > 32'h7FFFFF) ? 23'h7FFFFF : m[22:0];
+            pow2mask = (m > 32'h3FFFFF) ? 23'h3FFFFF : m[22:0];
         end
     endfunction
 
@@ -246,7 +247,7 @@ module mdr_pocket (
     reg hdr_skip_s1, hdr_skip_s2;
     always @(posedge clk_sys) begin hdr_skip_s1 <= hdr_skip; hdr_skip_s2 <= hdr_skip_s1; end
     wire [27:0] ld_off  = hdr_skip_s2 ? ld_addr - 28'd512 : ld_addr;
-    wire        ld_keep = ld_we && !(hdr_skip_s2 && ld_addr < 28'd512) && ld_off < 28'h0800000;
+    wire        ld_keep = ld_we && !(hdr_skip_s2 && ld_addr < 28'd512) && ld_off < 28'h0400000;
 
     // header detection on the stream: "TMR SEGA" at $7FF0, $3FF0 or $1FF0
     // (checked in that order), region nibble in the high nibble of +15

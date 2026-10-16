@@ -485,10 +485,13 @@ p['open_questions'] = [
                 'that writes a mirror address there. Decided by the owner in October 2026: the registers stay, and '
                 'in MasterDrive mode $01-$17 answer only while Feature Enable A bit 7 is set; until then those ports '
                 'are the $3E/$3F mirrors and read $FF, and $00 still answers (port_map.native_gate).')},
-    {'id': 'Q2', 'topic': 'Maximum ROM size and mapper layout above 4 MB', 'status': 'open',
-     'detail': 'See media.cartridge_slot.sega_mapper_reach.'},
-    {'id': 'Q3', 'topic': 'Cartridge save-RAM size', 'status': 'open',
-     'detail': 'See media.mappers.sega.cart_ram_open.'},
+    {'id': 'Q2', 'topic': 'Maximum ROM size and mapper layout above 4 MB', 'status': 'resolved',
+     'detail': ('The slot was specified for 8 MB, which needs a ninth bank bit. Decided by the owner in October 2026: '
+                '4 MB, the stock bank registers\' reach (media.cartridge_slot.sega_mapper_reach); the console also '
+                'reads the media of the computer side (media.other_media).')},
+    {'id': 'Q3', 'topic': 'Cartridge save-RAM size', 'status': 'resolved',
+     'detail': ('Decided by the owner in October 2026: 32 KB, two banks of 16 KB as the 315-5235 maps them '
+                '(memory.cartridge_ram, media.mappers.sega.cart_ram).')},
     {'id': 'Q4', 'topic': 'ESAT entry format; H-flip per sprite or per tile', 'status': 'resolved in v6',
      'detail': '2 bytes per sprite; byte 0 bit 1 H-flip, bit 0 V-flip, per sprite.'},
     {'id': 'Q5', 'topic': 'Unique-cell mode and 32 KB VRAM: coupled or independent', 'status': 'resolved in v6',
@@ -810,6 +813,51 @@ change(LATER + 'Q9 resolved by the owner: $0A reads the selected work RAM bank i
        '(memory.work_ram.bank_readback); it read $FF.')
 change(LATER + 'Q14 resolved by the owner: $08 bits 6-4 read the PCM FIFO\'s bytes queued divided by 8, saturating at 7 '
        '(audio.pcm.fill_readback); the emulator returned the fill modulo 8.')
+
+# ------------------------------------------------------------------ Q2 and Q3 (decided by the owner, October 2026)
+cs = p['media']['cartridge_slot']
+cs['max_size_bytes'] = 4 * 1024 * 1024
+cs['sega_mapper_reach'] = ('8-bit bank registers address 256 x 16 KB = 4 MB, the largest cartridge ROM the machine '
+                           'takes (open question Q2, decided by the owner).')
+put_after(p['media'], 'sf7000', 'other_media', (
+    'Decided by the owner (Q2): the console also reads the media of its computer side, SC-3000 cassettes and SF-7000 '
+    'disks. How it reads them (in which modes, through which ports, and whether the boot menu loads an image or '
+    'software reads the signal) is open question Q23.'))
+sega = p['media']['mappers']['sega']
+sega.pop('cart_ram_open', None)
+put_after(sega, 'coverage', 'cart_ram', (
+    '32 KB in two banks of 16 KB, as the 315-5235 maps them: $FFFC bit 3 maps cartridge RAM over $8000-$BFFF and bit 2 '
+    'selects the bank (open question Q3, decided by the owner; memory.cartridge_ram). Bits 7, 4 and 1-0 of $FFFC are '
+    'implemented by neither implementation.'))
+put_after(p['memory'], 'cram', 'cartridge_ram', {
+    'size_bytes': 32768,
+    'banks': 2,
+    'bank_size_bytes': 16384,
+    'window': '0x8000-0xBFFF',
+    'control': '$FFFC bit 3 maps it, bit 2 selects the bank (media.mappers.sega.cart_ram)',
+    'save_card': 'a save-card profile holds the first 8 KB of bank 0 (open question Q24)',
+})
+p['open_questions'] += [
+    {'id': 'Q23', 'topic': 'Reading cassettes and disks', 'status': 'open',
+     'detail': ('The owner decided that the console reads SC-3000 cassettes and SF-7000 disks (Q2, media.other_media). '
+                'In which modes, through which ports, and whether the boot menu loads an image or software reads the '
+                'signal (and whether it writes them) is not defined. The SF-7000 floppy controller exists in SF-7000 '
+                'mode; neither implementation reads cassettes.')},
+    {'id': 'Q24', 'topic': 'The save card: game identity and profile size', 'status': 'open',
+     'detail': ('A save-card profile holds the first 8 KB of bank 0 of a game\'s cartridge RAM, which is 32 KB (Q3), and '
+                'each card entry carries a 32-bit game ID that the machine does not define (the emulator derives it from '
+                'a sampled hash of the ROM, so two ROMs of the same size that differ only between sampled bytes share '
+                'their card saves). Should a profile hold all 32 KB, and what identifies a game: a CRC-32 of the whole '
+                'ROM, the header\'s product code, version and region (SG-1000 and SC-3000 cartridges have no header), '
+                'or something else? How do existing cards carry over?')},
+]
+change(LATER + 'Q2 resolved by the owner: the largest cartridge ROM is 4 MB, the stock bank registers\' reach '
+       '(media.cartridge_slot); it was 8 MB, which needed a ninth bank bit. The console also reads the media of the '
+       'computer side (media.other_media); how is open question Q23.')
+change(LATER + 'Q3 resolved by the owner: cartridge save RAM is 32 KB, two banks of 16 KB as the 315-5235 maps them '
+       '(memory.cartridge_ram, media.mappers.sega.cart_ram). The emulator mirrored 2 x 8 KB and the Pocket core used '
+       '16 KB of its 32 KB; both now map 2 x 16 KB. Open question Q24 added: what a save-card profile holds and what '
+       'identifies a game on the card.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

@@ -1582,6 +1582,10 @@ class FM{
 /* The machine ID at $17 (Q8): high nibble $A = MasterDrive, low nibble = the
    machine version (7). Software tests the high nibble. */
 const MACHINE_ID=0xA7;
+/* The largest cartridge ROM the machine takes: 4 MB, the reach of the Sega
+   mapper's 8-bit bank registers (Q2). A bigger image still loads, but nothing
+   past 4 MB can be reached. */
+const CART_MAX=0x400000;
 /* ---------------- Machine ---------------- */
 class Machine{
   constructor(){
@@ -1656,7 +1660,9 @@ class Machine{
   }
   loadCart(buf){ let d=new Uint8Array(buf);
     if(d.length%1024===512) d=d.slice(512);           // strip copier header
-    this.cart=d; log('cart loaded: '+d.length+' bytes'); this.reset(); }
+    this.cart=d; log('cart loaded: '+d.length+' bytes');
+    if(d.length>CART_MAX) log('this ROM is larger than 4 MB, the most the machine takes: the bank registers cannot reach the rest');
+    this.reset(); }
   loadCard(buf){ let d=new Uint8Array(buf);
     if(d.length%1024===512) d=d.slice(512);
     this.card=d; log('card loaded: '+d.length+' bytes'); }
@@ -1714,7 +1720,8 @@ class Machine{
     if(a<0x8000){ const s=this.srcFor(1);
       return s? this.romByte(this.card,this.cardBank,a&0x3FFF) : this.romByte(this.cart,this.page[1],a&0x3FFF); }
     if(a<0xC000){
-      if(this.ramSel&8) return this.ram[0x2000+((this.ramSel&4)?0x2000:0)+(a&0x1FFF)];
+      /* $FFFC bit 3 maps cartridge RAM, bit 2 picks one of two 16 KB banks (32 KB, Q3) */
+      if(this.ramSel&8) return this.ram[0x2000+((this.ramSel&4)?0x4000:0)+(a&0x3FFF)];
       const s=this.srcFor(2);
       return s? this.romByte(this.card,this.cardBank,a&0x3FFF) : this.romByte(this.cart,this.page[2],a&0x3FFF); }
     return this.wram[(this.wramBank*0x2000)+(a&0x1FFF)];   // $E000-$FFFF mirrors $C000
@@ -1756,8 +1763,9 @@ class Machine{
       return;
     }
     if(a>=0x8000&&a<0xC000&&(this.ramSel&8)){
-      this.ram[0x2000+((this.ramSel&4)?0x2000:0)+(a&0x1FFF)]=v;
-      this.sramDirty |= (1<<(((a&0x1FFF)>>8)&31));      // 256-byte page of the 8 KB window
+      this.ram[0x2000+((this.ramSel&4)?0x4000:0)+(a&0x3FFF)]=v;
+      /* the save card's profile holds the first 8 KB of bank 0: mark its 256-byte pages */
+      if(!(this.ramSel&4)&&a<0xA000) this.sramDirty |= (1<<((a>>8)&31));
     }
   }
   updIrq(){}
@@ -2525,7 +2533,7 @@ function saveState(m){
       line:V.line,lineCtr:V.lineCtr,status:V.status,irqLine:V.irqLine},
     psg:{tone:P.tone.slice(),vol:P.vol.slice(),noise:P.noise,lat:P.lat,type:P.type,
       cnt:P.cnt.slice(),out:P.out.slice(),sr:P.sr,stereo:P.stereo,stereoSet:P.stereoSet||0},
-    ram:b64(m.ram), page:m.page.slice(), ramSel:m.ramSel, memCtl:m.memCtl, ioCtl:m.ioCtl,
+    ram:b64(m.ram), cartRam:2, page:m.page.slice(), ramSel:m.ramSel, memCtl:m.memCtl, ioCtl:m.ioCtl,
     slotSel:m.slotSel, cardBank:m.cardBank, wramBank:m.wramBank, turbo:m.turbo, fmReg:m.fmReg,
     ggReg:Array.from(m.ggReg), dma:Array.from(m.dma), mathRes:m.mathRes,
     wram:b64(m.wram), eiPend:C.eiPend, lineCarry:m.lineCarry||0,
@@ -2550,6 +2558,8 @@ function loadState(m,st){
   P.lat=st.psg.lat; P.type=st.psg.type; P.cnt=st.psg.cnt.slice();
   P.out=st.psg.out.slice(); P.sr=st.psg.sr; P.stereo=st.psg.stereo; P.stereoSet=st.psg.stereoSet||0;
   m.ram.set(unb64(st.ram)); m.page=st.page.slice();
+  /* states saved before the 32 KB cartridge RAM (Q3) hold 2 x 8 KB at $2000-$5FFF */
+  if(!st.cartRam&&(m.mode==='sms'||m.mode==='gg'||m.mode==='ss')) cartRamSet(m,Uint8Array.from(m.ram.subarray(0x2000,0x6000)));
   Object.assign(m,{ramSel:st.ramSel,memCtl:st.memCtl,ioCtl:st.ioCtl,slotSel:st.slotSel,
     cardBank:st.cardBank,wramBank:st.wramBank,turbo:st.turbo,mathRes:st.mathRes});
   m.ggReg.set(st.ggReg); m.dma.set(st.dma);
@@ -2757,13 +2767,22 @@ function cardTintPalette(pal,shift){
    do is decide what to PRELOAD into that SRAM before the game runs, and whether to
    additionally snapshot it into a card profile. */
 function cartKey(m){ return m.romId?('cartsram_'+m.romId):null; }
+/* Cartridge RAM is 32 KB, two 16 KB banks at ram $2000-$5FFF and $6000-$9FFF (Q3).
+   Images saved before held 2 x 8 KB (16 KB, each bank mirrored in its window):
+   they load with each old bank repeated over its new 16 KB, so the game sees what
+   it saw before. */
+function cartRamSet(m,d){
+  if(d.length===0x4000){ const b0=d.subarray(0,0x2000), b1=d.subarray(0x2000,0x4000);
+    m.ram.set(b0,0x2000); m.ram.set(b0,0x4000); m.ram.set(b1,0x6000); m.ram.set(b1,0x8000); }
+  else m.ram.set(d.subarray(0,0x8000),0x2000);
+}
 function cartSramSave(m){
   const k=cartKey(m); if(!k) return false;
-  store.set(k, b64(m.ram.subarray(0x2000,0x6000))); return true; }
+  store.set(k, b64(m.ram.subarray(0x2000,0xA000))); return true; }
 function cartSramLoad(m){
   const k=cartKey(m); if(!k) return false;
   const v=store.get(k); if(!v) return false;
-  try{ m.ram.set(unb64(v),0x2000); return true; }catch(e){ return false; } }
+  try{ cartRamSet(m,unb64(v)); return true; }catch(e){ return false; } }
 function cartHasSave(m){
   const k=cartKey(m); if(!k) return false;
   const v=store.get(k); if(!v) return false;
@@ -2783,7 +2802,7 @@ function usesSaveRam(m){ return !!(m.ramSel&8) || cartHasSave(m) || cardHasSave(
 function snapKey(m){ return m.romId?('cartsnap_'+m.romId):null; }
 function cartSnapshot(m){
   const k=snapKey(m); if(!k) return false;
-  m.cartSnap=Uint8Array.from(m.ram.subarray(0x2000,0x6000));   // volatile copy
+  m.cartSnap=Uint8Array.from(m.ram.subarray(0x2000,0xA000));   // volatile copy
   store.set(k, b64(m.cartSnap));                               // FRAM-equivalent mirror
   store.set('cartdirty_'+m.romId,'1');                         // not-yet-restored flag
   return true;
@@ -2793,7 +2812,7 @@ function cartRestore(m){
   let d=m.cartSnap;
   if(!d){ const v=store.get(k); if(!v) return false;
     try{ d=unb64(v); }catch(e){ return false; } }
-  m.ram.set(d,0x2000);
+  cartRamSet(m,d);
   cartSramSave(m);                                             // write it back down
   store.del('cartdirty_'+m.romId);
   return true;

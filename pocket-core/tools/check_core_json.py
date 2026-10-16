@@ -90,6 +90,18 @@ for v, a in zip(var, addrs):
         if not 0 <= v.get('defaultval', 0) < len(opts):
             bad(f"interact.json: {n!r} default {v.get('defaultval')} is outside its {len(opts)} options")
 
+# the data slots hold what the machine defines: the largest cartridge (Q2) plus a
+# 512-byte copier header, and the cartridge save RAM (Q3)
+prof = json.load(open(os.path.join(HERE, '..', '..', 'machine', 'masterdrive_machine_v7.json'), encoding='utf-8'))
+slots = {s_['name']: s_ for s_ in json.load(open(os.path.join(DIST, 'data.json')))['data']['data_slots']}
+cart_max = prof['media']['cartridge_slot']['max_size_bytes']
+if int(slots['Cartridge']['size_maximum'], 16) != cart_max + 512:
+    bad(f"data.json: the Cartridge slot holds {slots['Cartridge']['size_maximum']}; the machine takes "
+        f"{cart_max} bytes plus a 512-byte header")
+sav = prof['memory']['cartridge_ram']['size_bytes']
+if int(slots['Save']['size_maximum'], 16) != sav:
+    bad(f"data.json: the Save slot holds {slots['Save']['size_maximum']}; cartridge RAM is {sav} bytes")
+
 for p in problems:
     print('PROBLEM', p)
 nmap = sum(len(c.get('mappings', [])) for c in ctrls)

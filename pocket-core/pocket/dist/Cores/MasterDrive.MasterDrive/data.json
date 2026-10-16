@@ -14,7 +14,7 @@
           "sc"
         ],
         "address": "0x10000000",
-        "size_maximum": "0x800200"
+        "size_maximum": "0x400200"
       },
       {
         "name": "Save",

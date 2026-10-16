@@ -662,6 +662,17 @@ probe('M58', 'PCM FIFO fill (Q14): $08 bits 6-4 read the bytes queued divided by
            note: got.map(([n, v]) => `${n}:$${v.toString(16)}`).join(' ') };
 });
 
+probe('M59', 'Cartridge save RAM (Q3): 32 KB, two banks of 16 KB as the 315-5235 maps them: $FFFC bit 3 maps it over $8000-$BFFF and bit 2 picks the bank, so $8000 and $A000 are different bytes and the two banks are separate (Technical Reference \u00a72, \u00a78)', () => {
+  const m = sms('sms'); m.mapper = 'sega';
+  const put = (sel, a, v) => { m.wr(0xFFFC, sel); m.wr(a, v); };
+  put(0x08, 0x8000, 0x11); put(0x08, 0xA000, 0x22); put(0x0C, 0x8000, 0x33); put(0x0C, 0xBFFF, 0x44);
+  const get = (sel, a) => { m.wr(0xFFFC, sel); return m.rd(a); };
+  const got = [get(0x08, 0x8000), get(0x08, 0xA000), get(0x0C, 0x8000), get(0x0C, 0xBFFF)];
+  const hex = v => '$' + v.toString(16).toUpperCase().padStart(2, '0');
+  return { ok: got.join(',') === [0x11, 0x22, 0x33, 0x44].join(',') && m.ram[0x2000] === 0x11 && m.ram[0x4000] === 0x22 && m.ram[0x6000] === 0x33,
+           note: `bank 0 $8000 ${hex(got[0])}, $A000 ${hex(got[1])}; bank 1 $8000 ${hex(got[2])}, $BFFF ${hex(got[3])}` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);
