@@ -42,6 +42,8 @@
 module mdr_vdp (
     input  wire        clk,
     input  wire        rst,
+    input  wire        rst_out,       // reset of the video output stage: the cold reset only,
+                                      // so the platform's video keeps its timing through the launch
     input  wire        ce_cyc,        // one pulse per base CPU cycle
     input  wire        gg_mode,       // Game Gear native mode
     input  wire        ss_mode,       // MasterDrive mode: extensions reachable
@@ -1088,7 +1090,7 @@ module mdr_vdp (
     always @(posedge clk) ol_q <= out_line[{out_ln[1:0], px_rel[7:0]}];
 
     always @(posedge clk) begin
-        if (rst) begin
+        if (rst_out) begin
             px <= 9'd0; vid_de <= 1'b0; vid_hs <= 1'b0; vid_vs <= 1'b0; vid_rgb <= 12'h000;
             vid_frame <= 1'b0;
         end else begin

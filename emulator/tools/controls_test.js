@@ -1,6 +1,7 @@
 'use strict';
 // Key and gamepad bindings, checked in headless Chromium with a simulated gamepad:
-// keyboard and pad input merge, the default pad mapping, Select = Pause, click-to-bind,
+// keyboard and pad input merge, the default pad mapping, Select = Pause, the Pause key
+// (one NMI per press, not per auto-repeat), click-to-bind,
 // Esc to cancel, persistence across a reload, reset to defaults, and an unplugged
 // pad releasing its buttons. Needs Playwright with Chromium.
 // usage: node controls_test.js page.html rom.sms
@@ -55,6 +56,12 @@ const rom = path.resolve(process.argv[3]);
   await page.evaluate(() => { window.__nmi = 0; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { window.__nmi++; f(); }; });
   await setBtn(8, true); await frames(10); await setBtn(8, false); await frames(5);
   ok('Select raises one NMI per press', await page.evaluate(() => window.__nmi) === 1, 'nmi=' + await page.evaluate(() => window.__nmi));
+  // the Pause key (Tab): one NMI per press, not one per auto-repeat
+  await page.evaluate(() => { window.__nmi = 0; });
+  await page.keyboard.down('Tab');
+  for (let i = 0; i < 8; i++) { await frames(2); await page.keyboard.down('Tab'); }   // repeats, as a held key sends
+  await page.keyboard.up('Tab'); await frames(5);
+  ok('Pause key held raises one NMI', await page.evaluate(() => window.__nmi) === 1, 'nmi=' + await page.evaluate(() => window.__nmi));
   // rebind A to R1 (button 5) while running
   await page.evaluate(() => document.querySelector('button[data-padbind="a"]').click());
   await frames(3);

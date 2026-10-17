@@ -28,8 +28,14 @@ module tb_pocket_top (
     output wire        video_vs,
     output wire        video_skip,
     output wire signed [15:0] audio_l,
-    output wire signed [15:0] audio_r
+    output wire signed [15:0] audio_r,
+    output wire        dbg_launch,         // the machine's BIOS launches the game (simulation only)
+    output wire        dbg_mreset,         // the platform holds the machine in reset (a cold reset)
+    output wire [2:0]  dbg_mode            // the machine running
 );
+    assign dbg_launch = u_pocket.u_machine.launch_rst;
+    assign dbg_mode   = u_pocket.u_machine.mode;
+    assign dbg_mreset = u_pocket.m_reset;
     wire [21:16] a;
     wire [15:0]  dq;
     wire         wt, pclk, adv_n, cre, ce0_n, ce1_n, oe_n, we_n, ub_n, lb_n;

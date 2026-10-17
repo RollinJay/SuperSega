@@ -3,7 +3,7 @@
 ; Copyright (c) 2026 the MasterDrive project. MIT licence (see LICENSE).
 ; Written for this project: no Sega code, logo or wording.
 ;
-; It is the 8 KB BIOS ROM that port $3E bit 3 maps (Technical Reference section 2). A cold
+; It is the 8 KB BIOS ROM that port $3E bit 3 maps (Technical Reference section 20). A cold
 ; reset puts the machine in MasterDrive mode with $3E = $E0 (the BIOS, work RAM and the
 ; controllers on; the cartridge off) and starts it here. It reads the platform's information
 ; through its ports ($18, $19), reads the cartridge's header as the Master System BIOS does
@@ -22,12 +22,13 @@ PAD_A:		equ 0xDC		; port A
 MEMCTL:		equ 0x3E		; memory enables, active low
 MEM_BIOS:	equ 0xE0		; the BIOS, work RAM and controllers on (the cold reset value)
 MEM_CART:	equ 0xA8		; the cartridge, work RAM and controllers on
-BOOT_IDX:	equ 0x18		; the BIOS's ports (while $3E bit 3 is clear)
+BOOT_IDX:	equ 0x18		; the BIOS's ports while $3E bit 3 is clear (Technical Reference section 20)
 BOOT_VAL:	equ 0x19
 BOOT_LAUNCH:	equ 0x1F
 MACHINE_ID:	equ 0x17
+PSG:		equ 0x7F
 
-; settings (section 20.2)
+; settings (Technical Reference section 20)
 S_MACHINE:	equ 0
 S_BOOSTS:	equ 1		; 1-9
 S_FORCE:	equ 16
@@ -68,7 +69,8 @@ PAD_MENU:	equ 0x90	; Start and B (either launches) from the menu
 ; ---------------------------------------------------------------- VRAM layout
 VR_TILES:	equ 0x0000	; Mode 4 tiles: 0 blank, 1 cursor, 2 rule, $20-$7E the font
 VR_TXTPAT:	equ 0x2800	; text window patterns (bank 1 R8 = $28): character c at +c*8
-VR_TXTNT:	equ 0x3000	; text window name table (bank 1 R0 = $30): 40 bytes a row
+VR_TXTNT:	equ 0x3000	; text window name tables (bank 1 R0 = $30 or $34): 40 bytes a row;
+				; one is on screen, the next page is drawn in the other
 VR_NT:		equ 0x3800	; Mode 4 name table (R2 = $FF)
 VR_SAT:		equ 0x3F00	; sprite table (R5 = $FF)
 TXT_ROWS:	equ 21		; screen rows 3-23
@@ -91,10 +93,15 @@ v_size:		equ 0xC00B	; log2 of the cartridge size, 0 unknown
 v_region:	equ 0xC00C
 v_items:	equ 0xC00D	; items on the CART page
 v_mask:		equ 0xC00E	; index 21: the machines the platform runs
+v_tbuf:		equ 0xC00F	; 0 or 4: the text name table on screen is at VR_TXTNT + v_tbuf * 256
 v_boost:	equ 0xC010	; 9 bytes
 v_bi:		equ 0xC019	; the boost being drawn
 v_rel:		equ 0xC01A	; the buttons the launch waits to see released
 v_test:		equ 0xC01B	; 1: the controller test is running
+v_tptr:		equ 0xC01C	; 2 bytes: where tout writes in the text shadow
+v_dlo:		equ 0xC01E	; the first and last text rows changed since the last flush
+v_dhi:		equ 0xC01F
+TXT_SHADOW:	equ 0xC200	; the text window's 21 x 40 characters, copied to VRAM by flush
 v_bnew:		equ 0xC040	; 9 bytes: the boosts as read this frame
 RAM_CODE:	equ 0xC100	; the header reader runs here (the cartridge replaces the BIOS)
 v_hdrbuf:	equ 0xC020	; 16 bytes
@@ -120,17 +127,23 @@ v_num:		equ 0xC030	; number formatting
 	retn
 
 	ds 0x0080-$, 0xFF
+psg_quiet:	db 0x9F, 0xBF, 0xDF, 0xFF
 title_text:	db "MASTERDRIVE", 0
 version_text:	db "BIOS 1", 0
 
 ; ================================================================ start
 start:
 	ld sp,0xDFF0
+	ld hl,psg_quiet		; the PSG's four channels silent (attenuation 15), whatever state
+	ld bc,4 << 8 | PSG	; it powered up in
+	otir
 	ld hl,0xC000		; clear the BIOS's variables
 	ld de,0xC001
 	ld bc,0x00FF
 	ld (hl),0
 	ldir
+	ld a,0xFF		; no text rows changed yet
+	ld (v_dlo),a
 	call platform_info
 	call read_pad
 	ld (v_padold),a		; a button held now is not a new press
@@ -139,8 +152,7 @@ start:
 	pop af
 	bit P_START,a		; Start held at power-on: straight to the game
 	jr z,show_menu
-	ld a,(v_flags)
-	bit F_CART,a
+	call can_play
 	jp nz,play_skip
 show_menu:
 	call vdp_init
@@ -177,7 +189,9 @@ ml_pad:	call read_pad
 	jr z,ml_same
 	ld a,(v_dev)
 	cp 3
-	call z,draw_pad_test
+	jr nz,ml_same
+	call draw_pad_test
+	call flush
 ml_same:
 	ld a,(v_pad)		; (the controller test does not keep B)
 	ld b,a
@@ -203,8 +217,7 @@ ml_act:	ld a,(v_press)
 	jp z,menu_loop
 	bit P_START,a
 	jr z,ml_lr
-	ld a,(v_flags)
-	bit F_CART,a
+	call can_play
 	jp nz,play
 	jr menu_loop
 ml_lr:	bit P_LEFT,a
@@ -221,7 +234,8 @@ ml_r:	bit P_RIGHT,a
 ml_dev:	ld (v_dev),a
 	xor a
 	ld (v_item),a
-	call draw_all
+	call draw_page		; the new page, shown in a vertical blank ...
+	call draw_devrow	; ... in which the device row follows it
 	jp menu_loop
 ml_page:
 	ld a,(v_dev)
@@ -237,6 +251,7 @@ ml_page:
 	ld (v_test),a
 	ld hl,s_st_test
 	call status
+	call flush
 	jp menu_loop
 
 ; ---------------------------------------------------------------- CART page keys
@@ -308,10 +323,13 @@ ck_bset:
 	out (BOOT_VAL),a
 	jp draw_page
 
-; Machine: Auto, then each machine the platform runs (index 21), then Auto again.
+; Machine: Auto, then each machine the platform runs (index 21), then Auto again; not
+; the SF-7000, which starts from its own ROM and disks, not from the cartridge.
 next_machine:
 	ld a,(v_choice)
 nm_inc:	inc a			; AUTO ($FF) steps to 0
+	cp M_SF
+	jr z,nm_inc
 	cp M_MD+1
 	jr nc,nm_auto
 	ld b,a			; offered when its bit in index 21 is set
@@ -337,6 +355,14 @@ platform_info:
 	ld (v_choice),a		; the platform's choice is the default
 	in a,(BOOT_VAL)		; 17: flags
 	ld (v_flags),a
+	bit F_CART,a		; with a cartridge a choice of the SF-7000, which does not play
+	jr z,pi_cart		; it, is Auto
+	ld a,(v_choice)
+	cp M_SF
+	jr nz,pi_cart
+	ld a,AUTO
+	ld (v_choice),a
+pi_cart:
 	in a,(BOOT_VAL)		; 18: the cartridge size
 	ld (v_size),a
 	in a,(BOOT_VAL)		; 19: the mapper (not used by the menu yet)
@@ -457,6 +483,26 @@ machine:
 	ld a,(v_detect)
 	ret
 
+; can_play: NZ when Play can start a machine: a cartridge is inserted, or the platform's
+; choice is the SF-7000 and it runs one (index 21), which starts from its own ROM and disks
+can_play:
+	ld a,(v_flags)
+	bit F_CART,a
+	ret nz
+	call sf_play
+	ret
+
+; sf_play: NZ when the machine is the SF-7000 and the platform runs one
+sf_play:
+	call machine
+	cp M_SF
+	jr nz,sf_no
+	ld a,(v_mask)
+	and 1 << M_SF
+	ret
+sf_no:	xor a
+	ret
+
 ; ================================================================ pad
 ; Returns A: bit 0 up, 1 down, 2 left, 3 right, 4 B, 5 C, 6 A, 7 Start (1 = pressed), read
 ; from a Mega Drive pad through port A's TH line (Technical Reference section 6).
@@ -491,6 +537,7 @@ play_skip:
 play:
 	ld a,PAD_MENU
 pl_go:	di
+	ld sp,0xDFF0		; the same stack from the menu (inside a call) and the skip path
 	ld (v_rel),a
 pl_rel:	call wait_frame
 	call read_pad
@@ -508,15 +555,21 @@ pl_rel:	call wait_frame
 	out (BOOT_IDX),a
 	ld a,b
 	out (BOOT_VAL),a
-	; Leave what the BIOS used as a direct start finds it: the display and the frame
-	; interrupt off (then no interrupt can come), VRAM $0000-$3FFF, the 32 colours and
-	; work RAM bank 0 zero. The launch resets every register.
+	; Leave what the BIOS used as a direct start finds it: VRAM $0000-$3FFF, the 32
+	; colours and work RAM bank 0 zero. First the display, the frame interrupt (R1) and
+	; the line interrupt (R0 bit 4, on at power-on) go off, so no interrupt can come;
+	; the machine raises no Pause (NMI) while the BIOS runs. The launch resets every
+	; register.
 	xor a
 	out (VDP_CTRL),a
 	ld a,0x81
 	out (VDP_CTRL),a
+	ld a,0x04
+	out (VDP_CTRL),a
+	ld a,0x80
+	out (VDP_CTRL),a
 	call vram_clear
-	di			; (vram_w turned them on; nothing can interrupt now anyway)
+	di			; (vram_w turned them on)
 	xor a			; CRAM entries 0-31
 	out (VDP_CTRL),a
 	ld a,0xC0
@@ -526,8 +579,11 @@ pl_rel:	call wait_frame
 pl_cram:
 	call vout
 	djnz pl_cram
-	ld ix,0			; the registers a CPU reset leaves alone start at zero (AF and
-				; AF' are $FFFF after the reset)
+	ld hl,0xFFFF		; AF' $FFFF: a Z80 reset leaves it alone (the stack's bytes are
+	push hl			; cleared with the rest of bank 0 below)
+	pop af
+	ex af,af'
+	ld ix,0			; the other registers a CPU reset leaves alone start at zero
 	ld iy,0
 	exx
 	ld bc,0
@@ -540,7 +596,6 @@ pl_cram:
 	ld (hl),0
 	ldir
 	ld hl,0
-	ld (0xDFEE),hl		; again where a Pause (NMI) during the clear would have pushed
 	ld de,0			; (LDIR left BC zero)
 	ld a,0xA5
 	out (BOOT_LAUNCH),a
@@ -548,14 +603,25 @@ pl_wait:
 	halt			; the CPU is held from the launch write until the frame ends
 	jr pl_wait
 
-; wait_frame: wait for the VDP to reach line 192 (the V counter, port $7E), then to leave it;
-; it works with the display and the frame interrupt off
+; wait_vblank: wait for line 192, the first below the picture (the V counter reads $C0
+; there; in PAL it does again at line 249, also below the picture): the vertical blank
+; that follows has at least 60 lines in either standard.
+wait_vblank:
+	in a,(VDP_VCOUNT)
+	cp 0xC0
+	jr nz,wait_vblank
+	ret
+
+; wait_frame: wait for the VDP to reach line 0, then to leave it. In the 192-line mode
+; the BIOS keeps, the V counter (port $7E) reads 0 there and nowhere else in a frame, NTSC
+; or PAL (a value above $B9 comes twice in a PAL frame). It works with the display and
+; the frame interrupt off.
 wait_frame:
 	in a,(VDP_VCOUNT)
-	cp 192
+	or a
 	jr nz,wait_frame
 wf_on:	in a,(VDP_VCOUNT)
-	cp 192
+	or a
 	jr z,wf_on
 	ret
 
@@ -564,9 +630,10 @@ wf_on:	in a,(VDP_VCOUNT)
 ; make the VDP take the second byte as a first one; so both routines keep interrupts off
 ; while they write. A register write also sets the VDP's address: set the address after it.
 
-; vout: write A to the VDP's data port. Every write goes through it but the two clears
-; (which run with the display off), so writes are at least 29 T-states apart, as the stock
-; VDP needs during the active display at 100 % (Technical Reference section 1).
+; vout: write A to the VDP's data port. Every write with the display on goes through it,
+; so those writes are at least 29 T-states apart, as the stock VDP needs during the active
+; display at 100 % (Technical Reference section 1). With the display off (the set-up and the
+; launch's clears) writes come at least 16 T-states apart.
 vout:
 	out (VDP_DATA),a
 	ret
@@ -705,13 +772,15 @@ font:
 
 ; ================================================================ drawing
 draw_all:
-	call draw_top
+	call draw_title
+	call draw_devrow
 	jp draw_page
 
-; The top three rows (Mode 4 tiles): the title, the device row, a rule.
-draw_top:
+; The top three rows are Mode 4 tiles: the title, the device row, a rule.
+draw_title:
 	ld hl,VR_NT		; row 0
 	call vram_w
+	ld c,0
 	ld a,' '
 	call nt_char
 	ld hl,title_text
@@ -728,7 +797,20 @@ dt_sp:	ld a,' '
 	call nt_str
 	ld a,' '
 	call nt_char
-	ld hl,VR_NT+64		; row 1: the devices
+	ld hl,VR_NT+128		; row 2: the rule
+	call vram_w
+	ld b,32
+dt_rule:
+	ld a,2
+	call vout
+	xor a
+	call vout
+	djnz dt_rule
+	ret
+
+; row 1: the devices, the current one in yellow
+draw_devrow:
+	ld hl,VR_NT+64
 	call vram_w
 	ld b,0			; device number
 	ld hl,dev_names
@@ -755,15 +837,6 @@ dt_fill:
 	call nt_char
 	pop bc
 	djnz dt_fill
-	ld hl,VR_NT+128		; row 2: the rule
-	call vram_w
-	ld b,32
-dt_rule:
-	ld a,2
-	call vout
-	xor a
-	call vout
-	djnz dt_rule
 	ret
 
 dev_names:	db "[CART]",0,"[CARD]",0,"[USB]",0,"[SYSTEM]",0
@@ -784,9 +857,36 @@ nt_str:	ld a,(hl)
 	jr nt_str
 
 ; ---------------------------------------------------------------- text window
-; txt_at: set the VDP to write the text window at row D, column E
+; The text window is drawn into a copy in RAM (TXT_SHADOW) and flush copies the rows
+; that changed to VRAM. A whole page goes to the name table that is not on screen, which
+; is then shown from a vertical blank: a page change is one frame to the next, never half
+; of each page.
+
+; txt_at: write the text window at row D, column E (BC is not kept)
 txt_at:
 	push hl
+	ld a,(v_dlo)		; the rows changed
+	cp d
+	jr c,ta_lo
+	ld a,d
+	ld (v_dlo),a
+ta_lo:	ld a,(v_dhi)
+	cp d
+	jr nc,ta_hi
+	ld a,d
+	ld (v_dhi),a
+ta_hi:	call row_off		; HL = row D * 40
+	ld c,e
+	ld b,0
+	add hl,bc
+	ld bc,TXT_SHADOW
+	add hl,bc
+	ld (v_tptr),hl
+	pop hl
+	ret
+
+; row_off: HL = D * 40 (BC is not kept)
+row_off:
 	ld l,d
 	ld h,0
 	add hl,hl		; row * 8
@@ -797,14 +897,74 @@ txt_at:
 	add hl,hl		; row * 32
 	add hl,hl
 	add hl,bc		; row * 40
-	ld c,e
-	ld b,0
-	add hl,bc
-	ld bc,VR_TXTNT
-	add hl,bc
-	call vram_w
+	ret
+
+; tout: write character A at the text position, which steps on (keeps every register)
+tout:
+	push hl
+	ld hl,(v_tptr)
+	ld (hl),a
+	inc hl
+	ld (v_tptr),hl
 	pop hl
 	ret
+
+; flush: copy the text rows changed since the last flush to VRAM: every row (a page,
+; after txt_clear) to the table not on screen, then shown; fewer to the table on screen
+flush:
+	ld a,(v_dhi)
+	ld e,a
+	ld a,(v_dlo)
+	cp e
+	jr z,fl_go
+	ret nc			; nothing changed
+fl_go:	ld d,a
+	ld c,0			; C: 0 the table on screen, 4 the other
+	or a
+	jr nz,fl_n
+	ld a,e
+	cp TXT_ROWS-1
+	jr nz,fl_n
+	ld c,4
+fl_n:	ld a,e
+	sub d
+	inc a
+	ld e,a			; rows to copy
+	push bc
+	call row_off		; HL = the first row's offset
+	pop bc
+	push hl
+	ld a,(v_tbuf)
+	xor c
+	add a,VR_TXTNT>>8
+	add a,h
+	ld h,a
+	call vram_w
+	pop hl
+	push bc
+	ld bc,TXT_SHADOW
+	add hl,bc
+fl_row:	ld b,40
+fl_ch:	ld a,(hl)
+	inc hl
+	call vout
+	djnz fl_ch
+	dec e
+	jr nz,fl_row
+	pop bc
+	ld a,0xFF		; nothing changed
+	ld (v_dlo),a
+	xor a
+	ld (v_dhi),a
+	or c
+	ret z
+	call wait_vblank	; show the other table
+	ld a,(v_tbuf)
+	xor 4
+	ld (v_tbuf),a
+	add a,VR_TXTNT>>8
+	ld b,0x90		; bank 1 R0
+	jp vdp_reg
 
 ; txt_str: write the zero-ended string at HL; HL ends after the zero
 txt_str:
@@ -812,24 +972,24 @@ txt_str:
 	inc hl
 	or a
 	ret z
-	call vout
+	call tout
 	jr txt_str
 
 ; print: row D, column E, string HL
 print:	call txt_at
 	jp txt_str
 
-; txt_clear: every text row blank
+; txt_clear: every text row blank (in the shadow; flush shows it)
 txt_clear:
-	ld hl,VR_TXTNT
-	call vram_w
-	ld bc,TXT_ROWS*40
-tc_lp:	ld a,' '
-	call vout
-	dec bc
-	ld a,b
-	or c
-	jr nz,tc_lp
+	ld hl,TXT_SHADOW
+	ld de,TXT_SHADOW+1
+	ld bc,TXT_ROWS*40-1
+	ld (hl),' '
+	ldir
+	xor a
+	ld (v_dlo),a
+	ld a,TXT_ROWS-1
+	ld (v_dhi),a
 	ret
 
 ; hex8: write A as two hex digits
@@ -845,7 +1005,7 @@ hex4:	and 0x0F
 	cp '9'+1
 	jr c,hx_out
 	add a,'A'-'9'-1
-hx_out:	call vout
+hx_out:	call tout
 	ret
 
 ; dec8: write A (0-255) in decimal, without leading zeros
@@ -855,7 +1015,7 @@ dec8:	ld b,100
 	ld b,10
 	call dec_digit
 	add a,'0'
-	call vout
+	call tout
 	ret
 ; dec16: write HL (0-65535) in decimal, without leading zeros
 dec16:	ld c,0
@@ -869,7 +1029,7 @@ dec16:	ld c,0
 	call dec16_digit
 	ld a,l
 	add a,'0'
-	call vout
+	call tout
 	ret
 dec16_digit:
 	ld a,'0'-1
@@ -883,7 +1043,7 @@ d16_lp:	inc a
 	bit 0,c
 	ret z
 d16_out:
-	call vout
+	call tout
 	ld c,1
 	ret
 
@@ -899,7 +1059,7 @@ dd_lp:	inc d
 	jr nz,dd_out
 	bit 0,c
 	jr z,dd_skip
-dd_out:	call vout
+dd_out:	call tout
 	ld c,1
 dd_skip:
 	ld a,e
@@ -908,10 +1068,10 @@ dd_skip:
 ; ---------------------------------------------------------------- pages
 draw_page:
 	call txt_clear
-	ld hl,VR_SAT		; no cursor unless the page sets one
-	call vram_w
-	ld a,0xD0
-	call vout
+	call dp_page
+	call flush
+	jp place_cursor
+dp_page:
 	ld a,(v_dev)
 	or a
 	jp z,page_cart
@@ -964,7 +1124,7 @@ page_system:
 	ld hl,s_id
 	call print
 	ld a,'$'
-	call vout
+	call tout
 	pop af
 	call hex8
 	ld de,0x0301
@@ -1016,11 +1176,11 @@ dpt_sp:	; not held: as many spaces as the name has letters
 	or a
 	jr z,dpt_nx
 	ld a,' '
-	call vout
+	call tout
 	jr dpt_sp
 dpt_on:	call txt_str
 dpt_nx:	ld a,' '
-	call vout
+	call tout
 	pop bc
 	srl c
 	djnz dpt_lp
@@ -1037,7 +1197,13 @@ page_cart:
 	call print
 	xor a
 	ld (v_items),a
+	call sf_play
 	ld hl,s_st_nocart
+	jp z,status
+	ld de,0x0201
+	ld hl,s_sf_nocart
+	call print
+	ld hl,s_st_sf
 	jp status
 pg_have:
 	; line 1: the kind of software
@@ -1046,9 +1212,9 @@ pg_have:
 	ld a,(v_hdr)
 	or a
 	jr nz,pg_kind
-	ld hl,s_nohdr		; what Auto will launch it as
+	ld hl,s_nohdr		; what PLAY will launch it as
 	call txt_str
-	ld a,(v_detect)
+	call machine
 	call machine_name
 	call txt_str
 	jr pg_l2
@@ -1176,8 +1342,8 @@ pg_bl:	push de
 	ld a,(hl)
 	call dec8
 	ld a,'%'
-	call vout
-	jr pg_bn
+	call tout
+	jr pg_eff
 pg_onoff:
 	ld a,(ix+0)
 	or a
@@ -1185,6 +1351,21 @@ pg_onoff:
 	jr z,pg_v
 	ld hl,s_on
 pg_v:	call txt_str
+pg_eff:	ld a,(v_bi)		; a boost that does not act on the machine PLAY starts
+	ld e,a
+	ld d,0
+	ld hl,boost_acts
+	add hl,de
+	call machine
+	ld b,a
+	inc b
+	ld a,(hl)
+pg_ebit:
+	rrca
+	djnz pg_ebit
+	jr c,pg_bn
+	ld hl,s_noeff
+	call txt_str
 pg_bn:	pop hl
 	pop de
 	inc ix
@@ -1196,21 +1377,28 @@ pg_bn:	pop hl
 	jr nz,pg_bl
 pg_done:
 	ld hl,s_st_cart
-	call status
-	jp place_cursor
+	jp status
 
 turbo_pct:	db 100, 125, 150, 175, 200
+; the machines each boost acts on, a bit each (Technical Reference section 15): the stock
+; overflow flag only in Mode 4, Start = Pause not on the Game Gear (it has a Start of its
+; own), the uncrop only on the Game Gear; True TMS colours on MasterDrive software too
+boost_acts:	db 0x1F, 0x03, 0x1D, 0x1F, 0x1F, 0x1F, 0x1F, 0x02, 0x3F
 
 ; the cursor sprite beside the selected item on the CART page
 place_cursor:
-	ld a,(v_dev)
-	or a
-	ret nz
-	ld a,(v_items)
-	or a
-	ret z
 	ld hl,VR_SAT
 	call vram_w
+	ld a,(v_dev)		; only the CART page with items has one
+	or a
+	jr nz,pc_none
+	ld a,(v_items)
+	or a
+	jr nz,pc_on
+pc_none:
+	ld a,0xD0		; the end of the list: no sprite
+	jp vout
+pc_on:
 	ld a,(v_item)		; text row 6 + item; screen line (3 + row) * 8, Y = line - 1
 	add a,TXT_TOP+6
 	add a,a
@@ -1248,6 +1436,7 @@ boost_names:	db "Sprite limit 16     ",0,"Stock overflow flag ",0,"Start = Pause
 		db "Turbo               ",0,"VRAM speed-up       ",0,"Auto-fire           ",0
 		db "Pseudo-stereo       ",0,"Game Gear uncrop    ",0,"True TMS colours    ",0
 
+s_noeff:	db " (no effect)",0
 s_software:	db " software",0
 s_nohdr:	db "No header found: plays as ",0
 s_product:	db "Product ",0
@@ -1282,6 +1471,8 @@ s_skip1:	db "Hold Start while switching on to start",0
 s_skip2:	db "the game straight away.",0
 s_st_cart:	db "CART  START play  B change  C top",0
 s_st_nocart:	db "CART  insert a cartridge",0
+s_sf_nocart:	db "The SF-7000 starts from its disks.",0
+s_st_sf:	db "CART  START SF-7000",0
 s_st_card:	db "CARD  <> devices",0
 s_st_usb:	db "USB  <> devices",0
 s_st_system:	db "SYSTEM  B controller test  <> devices",0

@@ -6,7 +6,13 @@
 // format of ../ref/gstrace.cpp so the CPU/VDP timing can be compared with
 // Gearsystem cycle for cycle.
 //
-// usage: tb_mdr rom mode(sms|gg|ss) frames outprefix [options] [dumpframes...]
+// The machine starts in its BIOS (Technical Reference section 20). The harness
+// gives the mode as the platform's machine choice and holds Start for the first
+// two frames, the BIOS's skip path; everything (frames, input script, trace,
+// audio, frame timing) counts from the BIOS's launch, so a run matches a game
+// started directly, as the emulator's tools start it.
+//
+// usage: tb_mdr rom mode(sms|gg|sg|sc|ss; auto: no platform choice, the BIOS decides) frames outprefix [options] [dumpframes...]
 //   options: -pal  -gg1 (315-5535 timing; default for all modes)  -sms2 (SMS2 timing)
 //            enhancement layer: -spr16 -ovf -turbo N -vboost -afire -pstereo
 //                            -tmsapprox (TMS modes in the SMS approximation; true TMS colours by default)
@@ -15,6 +21,13 @@
 //            -wav FILE       48 kHz stereo capture of the audio output
 //            -trace N file   write the first N instruction starts
 //            -lat N          ROM bus latency in system cycles (default 4)
+//            -bios           look at the BIOS itself: frames and the trace count from
+//                            power-on and the pad follows -press only (no launch needed)
+//            (it prints the frame of the launch, and the NMIs the game took after it)
+//            -press F:B[:N]  with -bios: pad bits B (0 up 1 down 2 left 3 right 4 B 5 C
+//                            6 A 7 Start, the BIOS's order) for N frames (default 3) from
+//                            frame F; a frame's input starts at line 0, as in the
+//                            emulator's tools; Start = Pause on, the emulator's default
 #include "Vmdr_top.h"
 #include "verilated.h"
 #include <cstdio>
@@ -54,6 +67,7 @@ int main(int argc, char** argv) {
     int ael_spr = 0, ael_ovf = 0, ael_turbo = 0, ael_vboost = 0, ael_afire = 0, ael_pst = 0, ael_tmscol = 1;
     FILE* wav_f = nullptr; std::vector<int16_t> wav; uint64_t wav_acc = 0;
     std::set<long> dumps;
+    bool bios_view = false; std::vector<uint8_t> press(4096, 0);
     for (int i = 5; i < argc; i++) {
         if (!strcmp(argv[i], "-pal")) pal = true;
         else if (!strcmp(argv[i], "-sms2")) sms2 = true;
@@ -69,15 +83,26 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "-pstereo")) ael_pst = 1;
         else if (!strcmp(argv[i], "-tmsapprox")) ael_tmscol = 0;
         else if (!strcmp(argv[i], "-wav")) wav_f = fopen(argv[++i], "wb");
+        else if (!strcmp(argv[i], "-bios")) bios_view = true;
+        else if (!strcmp(argv[i], "-press")) {
+            long f = 0, b = 0, n = 3; sscanf(argv[++i], "%ld:%ld:%ld", &f, &b, &n);
+            for (long k = 0; k < n && f + k < 4096; k++) press[f + k] = (uint8_t)b;
+        }
         else dumps.insert(atol(argv[i]));
     }
     uint32_t pow2 = 1; while (pow2 < rom.size()) pow2 <<= 1;
 
+    int log2up = 0; while ((1u << log2up) < rom.size()) log2up++;
+
     Vmdr_top* t = new Vmdr_top;
-    t->mode = (mode == "gg") ? 1 : (mode == "ss") ? 5 : (mode == "sg") ? 2 : (mode == "sc") ? 3 : 0;
+    t->plat_mode = (mode == "gg") ? 1 : (mode == "ss") ? 5 : (mode == "sg") ? 2 : (mode == "sc") ? 3 : 0;
+    t->plat_auto = (mode == "auto"); t->plat_flags = 0x11 | (pal ? 0x08 : 0); t->rom_log2 = rom.empty() ? 0 : log2up;
+    t->machines = 0x2F; t->ael_ggwide = 0;
     t->mapper = 0; t->pal = pal; t->jp_region = 0; t->timing_gg = !sms2; t->sc_ram32 = 0;
-    t->rom_mask = pow2 - 1; t->card_present = 0; t->card_mask = 0; t->gg_crop = (mode == "gg");
-    t->ael_sprlimit = ael_spr; t->ael_startpause = 0; t->ael_ovf_stock = ael_ovf; t->ael_turbo = ael_turbo;
+    t->rom_mask = pow2 - 1; t->card_present = 0; t->card_mask = 0;
+    t->ael_chg = 0;   // the boosts are fixed for the run: the first cold reset takes them
+    t->ael_sprlimit = ael_spr; t->ael_ovf_stock = ael_ovf; t->ael_turbo = ael_turbo;
+    t->ael_startpause = bios_view;   // -bios: on, the emulator's default
     t->ael_vramboost = ael_vboost; t->ael_autofire = ael_afire; t->ael_pstereo = ael_pst; t->ael_tmscol = ael_tmscol;
     t->pad1 = 0; t->pad2 = 0; t->pause_btn = 0; t->reset_btn = 0; t->kb_ghosting = 1;
     for (int i = 0; i < 3; i++) t->kb_keys[i] = 0;
@@ -98,26 +123,34 @@ int main(int argc, char** argv) {
     int pstate = 0; bool pend = false; Rec pr = {};
     long dumped = 0;
     uint64_t sys = 0;
+    bool launched = bios_view; long bios_frames = 0; uint64_t launch_sys = 0;
+    long in_frame = 0; int line_prev = 0;                // -bios: frames counted at line 0
+    bool after_launch = false; long nmis = 0; bool nmi_m1 = false;   // NMIs the game takes (M1 at $0066)
+    long launch_frame = -1;
 
     while (frame < frames) {
-        // inputs for this frame
+        // inputs for this frame; in the BIOS, Start for its first two frames
         int phase = frame % 120;
         uint8_t p1 = 0;
-        if (phase >= 90 && phase < 96) p1 |= 0x10;          // button 1 / A... TL
-        if (mode == "gg" && phase >= 60 && phase < 66) p1 |= 0x80;  // Start
-        if (hold_c) p1 |= 0x40;                              // C held throughout
+        if (bios_view) {
+            if (t->dbg_line == 0 && line_prev != 0) in_frame++;
+            line_prev = t->dbg_line;
+            uint8_t b = press[in_frame < 4096 ? in_frame : 0];
+            p1 = (b & 0x8F) | ((b & 0x10) << 1) | ((b & 0x20) << 1) | ((b & 0x40) >> 2);   // B C A -> pad1's A B C order
+        }
+        else if (!launched) {
+            if (bios_frames < 2) p1 = 0x80;
+        } else {
+            if (phase >= 90 && phase < 96) p1 |= 0x10;          // button 1 / A... TL
+            if (mode == "gg" && phase >= 60 && phase < 66) p1 |= 0x80;  // Start
+            if (hold_c) p1 |= 0x40;                              // C held throughout
+        }
         t->pad1 = p1;
 
         // one system clock
         t->clk_sys = 0; t->eval();
         t->clk_sys = 1; t->eval();
         sys++;
-
-        // audio: 48 kHz samples of the machine's (unfiltered) output
-        if (wav_f) {
-            wav_acc += 48000;
-            if (wav_acc >= 53693175ULL) { wav_acc -= 53693175ULL; wav.push_back((int16_t)t->audio_l); wav.push_back((int16_t)t->audio_r); }
-        }
 
         // ROM bus: fixed latency
         if (t->rom_req && !req_prev) rom_cnt = lat;
@@ -129,6 +162,29 @@ int main(int argc, char** argv) {
             t->rom_data = (a & 0x800000) ? 0xFF : rom[(a & (pow2 - 1)) % rom.size()];
             t->rom_ack = 1;
             rom_cnt = -1;
+        }
+
+        if (t->dbg_launch) { after_launch = true; launch_frame = bios_view ? in_frame : bios_frames; }
+        {
+            bool m66 = t->dbg_m1 && t->dbg_addr == 0x0066;
+            if (after_launch && m66 && !nmi_m1) nmis++;
+            nmi_m1 = m66;
+        }
+
+        // the BIOS's launch: the game starts here
+        if (!launched) {
+            if (t->dbg_launch) { launched = true; launch_sys = sys; fx = 0; fy = 0; de_prev = false; }
+            else {
+                if (t->vid_ce && t->vid_vs) bios_frames++;
+                if (bios_frames > 200) { fprintf(stderr, "tb_mdr: the BIOS did not launch in 200 frames\n"); return 1; }
+                continue;
+            }
+        }
+
+        // audio: 48 kHz samples of the machine's (unfiltered) output
+        if (wav_f) {
+            wav_acc += 48000;
+            if (wav_acc >= 53693175ULL) { wav_acc -= 53693175ULL; wav.push_back((int16_t)t->audio_l); wav.push_back((int16_t)t->audio_r); }
         }
 
         // trace. An M1 begins at dbg_m1 (T1); whether it starts an instruction is
@@ -183,7 +239,7 @@ int main(int argc, char** argv) {
             if (t->vid_vs) {
                 if (dumps.count(frame + 1)) {
                     // width from the crop; height = active lines seen this frame
-                    int w = (mode == "gg") ? 160 : 256, h = (fy > 0 && fy <= H) ? fy : 192;
+                    int w = (mode == "gg" && !bios_view) ? 160 : 256, h = (fy > 0 && fy <= H) ? fy : 192;
                     char name[512]; snprintf(name, sizeof name, "%s_%ld.ppm", pre.c_str(), frame + 1);
                     FILE* o = fopen(name, "wb");
                     if (!o) { perror(name); exit(1); }
@@ -216,7 +272,10 @@ int main(int argc, char** argv) {
         fwrite("data", 1, 4, wav_f); w32(n); fwrite(wav.data(), 2, wav.size(), wav_f);
         fclose(wav_f);
     }
-    printf("frames %ld sys %llu dumped %ld traced %ld\n", frame, (unsigned long long)sys, dumped, traced);
+    printf("BIOS launched after %ld frames (clk_sys %llu)\n", bios_frames, (unsigned long long)launch_sys);
+    printf("frames %ld sys %llu dumped %ld traced %ld\n", frame, (unsigned long long)(sys - launch_sys), dumped, traced);
+    if (after_launch) printf("launch in frame %ld\n", launch_frame);
+    printf("NMIs after the launch: %ld\n", nmis);
     t->final();
     delete t;
     return 0;

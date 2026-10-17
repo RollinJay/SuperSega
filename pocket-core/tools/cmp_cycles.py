@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare the core's instruction timing with the emulator's on a ROM run at 100 %.
 
-usage: cmp_cycles.py core.bin emulator.bin rom
+usage: cmp_cycles.py core.bin emulator.bin rom [--no-dma] [--count N]
 
 core.bin comes from sim/sys/tb_mdr -trace, emulator.bin from
 ../emulator/tools/jstrace.js: one record per instruction (PC, SP, A, F, cycle
@@ -12,7 +12,10 @@ starts it (an OUT to $FA), the core holds the CPU in the next instruction's
 opcode fetch, so the difference may move for that one instruction and must be
 back at the next. Stops at the first OUT ($F3),A, a turbo step, after which
 the core's count (base cycles) is no longer in T-states. Used by sim/check.sh
-on roms/dma.sms."""
+on roms/dma.sms, where a run with no DMA transfer is an error, and with --no-dma on
+the BIOS (rom being bios/masterdrive_bios.rom), which makes none: there the
+difference may never move. --count N: exactly N instructions must be compared
+(both traces at least that long), so a short trace cannot pass."""
 import struct
 import sys
 
@@ -39,7 +42,14 @@ def more(x):
 
 def main():
     core, emu, rom = load(sys.argv[1]), load(sys.argv[2]), open(sys.argv[3], 'rb').read()
+    opts = sys.argv[4:]
+    no_dma = '--no-dma' in opts
+    want = int(opts[opts.index('--count') + 1]) if '--count' in opts else None
     n = min(len(core), len(emu))
+    if want is not None:
+        if n < want:
+            sys.exit(f'WRONG: {want} instructions wanted, the traces have {len(core)} (core) and {len(emu)} (emulator)')
+        n = want
     base = emu[0][4] - core[0][4]
     moved = checked = 0
     for i in range(n):
@@ -54,13 +64,18 @@ def main():
             continue
         nxt = emu[i + 1][4] - core[i + 1][4] - base if i + 1 < n else None
         after_out = i and is_out(rom, emu[i - 1][0])
-        if after_out and nxt == 0:
+        if after_out and nxt == 0 and not no_dma:
             moved += 1
             continue
-        if after_out and nxt is not None:
+        if after_out and nxt is not None and not no_dma:
             sys.exit(f'WRONG: after the output at PC ${emu[i - 1][0]:04X} (instruction {i - 1}) the core has '
                      f'spent {more(-nxt)} than the emulator')
         sys.exit(f'WRONG: at instruction {i} (PC ${pc:04X}) the core has spent {more(-d)} than the emulator')
+    if want is not None and checked != want:
+        sys.exit(f'WRONG: {checked} instructions compared, {want} wanted (a turbo step came first)')
+    if no_dma:
+        print(f'{checked} instructions: same time as the emulator')
+        return
     if moved == 0:
         sys.exit(f'WRONG: {checked} instructions compared and no DMA transfer seen')
     print(f'{checked} instructions, {moved} transfers: same time as the emulator')

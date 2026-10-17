@@ -8,7 +8,7 @@ MasterDrive is an 8-bit console in the Sega SG-1000 / Master System / Game Gear 
 
 Two ideas run through everything below:
 
-- **Stock behaviour.** At power-on every extension is off. The machine then behaves exactly like the original hardware — a Master System with the FM sound unit fitted, or a Game Gear, SG-1000 or SC-3000, depending on the mode it boots in.
+- **Stock behaviour.** At power-on the machine runs its own BIOS, a menu that starts the game (§20). The game then finds every extension off, and the machine behaves exactly like the original hardware — a Master System with the FM sound unit fitted, or a Game Gear, SG-1000 or SC-3000, depending on the mode the BIOS starts it in.
 - **Opt-in extensions.** New software turns extensions on through three *Feature Enable* registers (A, B and C, described in §10). Old software never touches them, so it can never see them. MasterDrive's own I/O registers are opened the same way, by Feature Enable A bit 7 (§11).
 
 A third, separate idea is the **enhancement layer** (AEL, §15): optional boosts for *old* software, such as removing sprite flicker. They are user settings, all off by default except True TMS colours and Start = Pause (§15).
@@ -27,7 +27,7 @@ The machine exists in three forms that must behave the same: the physical consol
 |---|---|
 | CPU | Z80, CMOS static (Z84C00 class) |
 | Base clock | 3.579545 MHz (NTSC); 3.546893 MHz in PAL, as on a PAL Master System, which gives 49.70 Hz frames of 313 lines |
-| State at hand-over to software | PC `$0000`, SP `$DFF0` (where the Master System BIOS leaves it), interrupts disabled, interrupt mode 0 as after a Z80 reset |
+| State at hand-over to software (the BIOS's launch, §20) | PC `$0000`, SP `$DFF0` (where the Master System BIOS leaves it), interrupts disabled, interrupt mode 0, I and R 0 (as a Z80 reset sets them), AF `$FFFF` (as real Z80s come out of reset, though Zilog does not document it), AF' `$FFFF` (a Z80 reset leaves it; the BIOS sets it); BC, DE, HL, IX, IY, BC', DE' and HL' zero (a Z80 reset leaves them; the BIOS clears them). The emulator and the Pocket core also set SP and AF' in their CPU reset; how the console reaches SP `$DFF0` is open (Q32) |
 | Interrupt mode | IM 1 (`RST 38h`), selected by software; NMI is the Pause button |
 | Turbo steps | 100 / 125 / 150 / 175 / 200 % |
 | Turbo control | port `$F3`, bits 2–0, step 0–4 |
@@ -49,7 +49,7 @@ With turbo on, the CPU runs faster than the VDP can accept data. The FPGA theref
 
 An `OUTI` loop takes 16 cycles, so streaming to video memory during vertical blank is free at any turbo step. During active display each access waits for its slot: at 200 %, an access every 58 CPU cycles, so a stream of bare `OUTI` instructions waits 42 cycles per byte. This is the hardware reason Sega's manual forbids two `OUT`s to the VDP back to back without a gap, and why software streams video data during blanking.
 
-Cartridge ROM adds its own wait: a 250 ns ROM is fast enough up to 175 %, and at 200 %, in PAL as in NTSC, every read from the cartridge or card slot (`$0000`–`$BFFF`) takes one wait state, a halted CPU's repeated M1 reads included (Q12, decided October 2026: kept). Code that runs from cartridge ROM therefore gains little at 200 % over 175 %; code in work RAM runs at the full 200 %. The SF-7000's RAM and IPL are not a cartridge and take no wait. Whether cartridge writes take it too is open question Q25.
+Cartridge ROM adds its own wait: a 250 ns ROM is fast enough up to 175 %, and at 200 %, in PAL as in NTSC, every read from the cartridge or card slot (`$0000`–`$BFFF`) takes one wait state, a halted CPU's repeated M1 reads included (Q12, decided October 2026: kept). Code that runs from cartridge ROM therefore gains little at 200 % over 175 %; code in work RAM runs at the full 200 %. The SF-7000's RAM and IPL are not a cartridge and take no wait, nor does the BIOS ROM (§20). Whether cartridge writes take it too is open question Q25.
 
 The FM chip also needs time between register writes (§7): 12 base cycles after an address write, 84 after a data write. Software written for 100 % leaves that time itself, but at turbo it would write too soon, so the synchroniser also holds the CPU on a write to `$F0`/`$F1` until that time has passed (open question Q21, decided October 2026).
 
@@ -64,6 +64,7 @@ The FM chip also needs time between register writes (§7): 12 base cycles after 
 | Video RAM (VRAM) | 16 KB, expandable to 32 KB | Feature Enable B bit 4 enables; bank1 R3 bit 0 selects the bank the CPU reaches |
 | Colour RAM (CRAM) | 32 entries, expandable to 256 | bank1 R2 bit 1 |
 | Cartridge save RAM | 32 KB, 2 banks of 16 KB, at `$8000`–`$BFFF` | Sega mapper `$FFFC`: bit 3 maps it, bit 2 selects the bank (§8) |
+| BIOS ROM | 8 KB, repeated through `$0000`–`$BFFF` | `$3E` bit 3 (below, §20) |
 
 Bank 0 at reset is the stock 8 KB that Master System software expects. The first 64 KB can be used as one contiguous block, which the SF-7000 disk system needs.
 
@@ -76,13 +77,13 @@ Active low: writing 1 to a bit disables that region, which then reads as open bu
 | Bit | Region |
 |---|---|
 | 2 | I/O chip (controller ports) — see §11 for exactly what it covers |
-| 3 | base 8 KB BIOS ROM |
+| 3 | base 8 KB BIOS ROM: the machine's own BIOS (§20) |
 | 4 | internal 8 KB RAM |
 | 5 | card ROM |
 | 6 | cartridge ROM |
 | 7 | expansion port |
 
-Reset value `$A8`: the state of a machine whose BIOS has handed over to a cartridge — cartridge, RAM and controllers enabled; BIOS, card and expansion disabled.
+Reset values: `$E0` at a cold reset — the BIOS ROM, RAM and controllers enabled; cartridge, card and expansion disabled — so the machine starts in its BIOS (§20); `$A8` when the BIOS launches a game, the state of a machine whose BIOS has handed over to a cartridge — cartridge, RAM and controllers enabled; BIOS, card and expansion disabled. The BIOS ROM answers only while the cartridge is disabled: with bits 3 and 6 both clear the cartridge answers.
 
 ---
 
@@ -175,7 +176,7 @@ These are MasterDrive additions to Mode 4, for MasterDrive software. Their regis
 - **Line scroll table** (Feature Enable A bit 1). One byte per line, at bank 0 R11's base: on line *y* the background's horizontal scroll is the byte at base + *y*, in place of R8, the horizontal scroll register (§16). The top two rows that R0 bit 6 exempts stay unscrolled.
 - **Line vertical-offset table** (Feature Enable B bit 0). One byte per line, at bank 1 R1's base: on line *y* the byte at base + *y* is added to the vertical scroll (R9), modulo 256. Screen x 192 and right, which R0 bit 7 exempts (§16), stay unscrolled.
 - **Window layer** (Feature Enable A bit 2). A second, fixed tile layer over part of the background. It covers screen *x* from 8 × bank 0 R13 (bits 4–0) to the right edge, on the lines bank 0 R14 selects: bits 4–0 give the split row (8 lines each), and bit 7 set puts the window above the split, clear from the split down. Its tilemap, at bank 1 R0's base, holds 32 × 32 entries of 2 bytes in the Mode 4 name-table format. The window does not scroll: the cell at screen row *r*, column *c* shows entry (*r*, *c*). In its area it replaces the background, priority bits included, and sprites are drawn over it as over the background.
-- **Text window** (Feature Enable C bit 2). The window area shows 40 columns of 6-pixel characters instead of tiles: the area is filled with the background colour of bank 1 R9 (bits 7–4; bits 3–0 are the characters' colour, both from palette 0), then the characters are drawn from its left edge. Their patterns are at bank 1 R8's base (8 bytes each); their name table is at bank 1 R0's base, 40 bytes a row, with row 0 at the window's top edge.
+- **Text window** (Feature Enable C bit 2). The window area shows 40 columns of 6-pixel characters instead of tiles: the area is filled with the background colour of bank 1 R9 (bits 7–4; bits 3–0 are the characters' colour, both from palette 0), then the characters are drawn from its left edge. Their patterns are at bank 1 R8's base, 8 bytes each, one byte a row: bits 7–2 are the row's six pixels, bit 7 leftmost, and bits 1–0 are not drawn. Their name table is at bank 1 R0's base, 40 bytes a row, with row 0 at the window's top edge.
 
 The tile window counts its rows from the top of the screen and the text window from its own top edge, the window can lie only right of the X split, and it reads bank 1 R0 even while XRB is clear (§10); all three are open (Q29).
 
@@ -192,7 +193,7 @@ Colours are 12-bit (4 bits each of red, green, blue), the Game Gear format, stor
 
 The Game Gear uses the native scheme over 64 bytes (32 entries). With extended CRAM on (256 entries) the native scheme covers 512 bytes.
 
-Sixteen *palette-written* flags let an unwritten palette fall back to palette (index AND 1), so legacy software sees the two palettes it expects.
+Sixteen *palette-written* flags let an unwritten palette fall back to palette (index AND 1), so legacy software sees the two palettes it expects. A cold reset and the BIOS's launch clear the flags. CRAM itself need not be cleared by a cold reset (the Pocket core's does not clear it, the emulator's does), and the launch keeps it: the BIOS clears entries 0–31 before it starts a game (§20, Q38).
 
 ---
 
@@ -321,7 +322,7 @@ A voice with frequency 0 is silent. How the frequency maps to a pitch and how th
 | Master System | Sega mapper, standard map |
 | Game Gear | as Master System, with Game Gear port decoding |
 | SF-7000 | see below |
-| MasterDrive | Master System map plus the extensions. The boot menu can also start an export cartridge in this mode (§14) |
+| MasterDrive | Master System map plus the extensions; the machine's BIOS runs in it (§20), and its menu can also start an export cartridge in this mode (§14) |
 
 ### Cartridge mappers
 
@@ -336,7 +337,7 @@ Only a Sega-mapper cartridge has hardware at `$FFFC`–`$FFFF`; on the other fam
 
 **v2 error:** the Codemasters and Korean registers were said to respond to any address in their slot. Gearsystem and MAME decode the exact address, every known title writes there, and with any-address decoding a write into Codemasters cartridge RAM would also have switched banks.
 
-**Card slot.** MasterDrive mode can read the card slot alongside the cartridge. `$09` bit 0 set maps the card at `$4000`–`$7FFF`, bit 1 at `$8000`–`$BFFF` (cartridge RAM mapped by `$FFFC` bit 3 comes first); each reads the card bank `$0B` selects (bits 4–0: 32 banks of 16 KB, 512 KB). Clear, they read the cartridge through its mapper. `$09` acts only with a Sega-mapper cartridge: with the Codemasters, Korean and Korean MSX mappers, `$4000`–`$BFFF` reads the cartridge whatever `$09` holds. `$0000`–`$3FFF` is always the cartridge. Bits 7–2 of `$09` are kept and read back but do nothing, and `$09` acts only with a card inserted. How it combines with the slot enables in `$3E` (§2) is open (Q30).
+**Card slot.** MasterDrive mode can read the card slot alongside the cartridge. `$09` bit 0 set maps the card at `$4000`–`$7FFF`, bit 1 at `$8000`–`$BFFF` (cartridge RAM mapped by `$FFFC` bit 3 comes first); each reads the card bank `$0B` selects (bits 4–0: 32 banks of 16 KB, 512 KB). Clear, they read the cartridge through its mapper. `$09` acts only with a Sega-mapper cartridge: with the Codemasters, Korean and Korean MSX mappers, `$4000`–`$BFFF` reads the cartridge whatever `$09` holds. `$0000`–`$3FFF` is always the cartridge, except while the BIOS ROM is mapped (§20). Bits 7–2 of `$09` are kept and read back but do nothing, and `$09` acts only with a card inserted. How it combines with the slot enables in `$3E` (§2) is open (Q30).
 
 The Sega mapper's 8-bit bank registers reach 4 MB, and 4 MB is the largest cartridge ROM the machine takes (Q2, decided October 2026; the slot was once specified for 8 MB, which would have needed a ninth bank bit). Cartridge save RAM is 32 KB, two 16 KB banks as the 315-5235 maps them (Q3, decided October 2026).
 
@@ -374,13 +375,13 @@ DMA on `$F4`–`$FA`, in MasterDrive mode (these ports are fully decoded, like `
 |---|---|
 | `$F4` | source address, low byte; in fill mode, the fill byte |
 | `$F5` | source address, high byte |
-| `$F6` | bits 1–0 the source of a memory transfer: 0 the CPU address space (as the CPU reads it), 1 the card (card bank `$0B`, address bits 13–0), 2 work RAM (the selected 8 KB bank, address bits 12–0) · bits 3–2 the mode: 0 memory to VRAM or CRAM, 1 VRAM to VRAM, 2 fill |
+| `$F6` | bits 1–0 the source of a memory transfer: 0 the CPU address space (as the CPU reads it, the BIOS ROM included while it is mapped, §20), 1 the card (card bank `$0B`, address bits 13–0), 2 work RAM (the selected 8 KB bank, address bits 12–0) · bits 3–2 the mode: 0 memory to VRAM or CRAM, 1 VRAM to VRAM, 2 fill |
 | `$F7` | destination address, low byte |
 | `$F8` | bits 5–0 destination address, high bits (a transfer starts in VRAM `$0000`–`$3FFF`) · bit 6 set: the destination is CRAM (address bits 8–0, its 512 bytes) |
 | `$F9` | length, low byte |
 | `$FA` | bits 5–0 length, high bits · bit 7 written as 1 starts the transfer. A length of 0 (`$F9` and `$FA` bits 5–0 all clear) means 16,384 bytes |
 
-The bits not listed, source 3 and mode 3 are reserved. A transfer moves *length* bytes, source and destination each counting up by one. A VRAM destination counts on past `$3FFF` into the upper 16 KB (address bits 14–0), and VRAM to VRAM reads source address bits 14–0, whether or not VRAM expansion is on. The registers keep what was written (the addresses do not advance) and read back at `$F4`–`$FA`. A transfer to CRAM stores the bytes as CRAM holds them (the Game Gear 12-bit format, two bytes per entry, whatever the CRAM write mode, §4) and marks each palette it writes as written. How long a transfer takes, whether the CPU waits and whether it may write VRAM during the display are open, as is how far the destination should reach (Q26): the emulator completes a transfer at once and charges the CPU one T-state per byte, plus, for a transfer from the CPU address space, the cartridge wait state (§1) on each byte it reads from `$0000`–`$BFFF` at 200 %.
+The bits not listed, source 3 and mode 3 are reserved. A transfer moves *length* bytes, source and destination each counting up by one. A VRAM destination counts on past `$3FFF` into the upper 16 KB (address bits 14–0), and VRAM to VRAM reads source address bits 14–0, whether or not VRAM expansion is on. The registers keep what was written (the addresses do not advance) and read back at `$F4`–`$FA`. A transfer to CRAM stores the bytes as CRAM holds them (the Game Gear 12-bit format, two bytes per entry, whatever the CRAM write mode, §4) and marks each palette it writes as written. How long a transfer takes, whether the CPU waits and whether it may write VRAM during the display are open, as is how far the destination should reach (Q26): the emulator completes a transfer at once and charges the CPU one T-state per byte, plus, for a transfer from the CPU address space, the cartridge wait state (§1) on each byte it reads from `$0000`–`$BFFF` at 200 % (not on the BIOS ROM's).
 
 | Math port | Function |
 |---|---|
@@ -397,6 +398,8 @@ Multiply is A × B, unsigned 16-bit. Divide is A ÷ B, unsigned: the quotient in
 ## 10. Register Map
 
 The VDP register-write command byte is `10bbnnnn`. On stock hardware bits 5–4 are ignored. MasterDrive uses them to select one of four register banks — but only when bank 0 register 15 bit 5 (**XRB**, extended register banks) is set. XRB is clear at reset and in all legacy software, so bits 5–4 are discarded exactly as on real silicon. While XRB is clear the bank 1–3 registers also have no effect: they keep their values, but the features they switch on (everything in Feature Enable B and C) are off. One exception: the window layer (Feature Enable A bit 2) reads its tilemap base from bank 1 R0 whether or not XRB is set (Q29).
+
+At a cold reset and at the BIOS's launch (§20), bank 0 R11–R15 and every bank 1–3 register are 0, as are `$09`, `$0B`, the math unit (`$0C`–`$10`) and the DMA registers (`$F4`–`$FA`); R0–R10 take the power-on values of §3.
 
 ### Bank 0
 
@@ -451,6 +454,7 @@ Bank 2 unallocated; bank 3 reserved.
 | `$11`–`$15` | wavetable audio |
 | `$16` | multitap detection (reads `$81`: pad found, detection complete) |
 | `$17` | machine ID, read-only: `$A7` (§14) |
+| `$18`–`$1F` | the BIOS's ports, in MasterDrive mode while the BIOS ROM is mapped (§20): `$18` setting index, `$19` setting, `$1F` launch; the rest read `$FF` and ignore writes; otherwise mirrors |
 | `$3E` | memory enables (write) |
 | `$3F` | I/O control (write) |
 | `$7E`–`$7F` | V / H counters (read); PSG (write) |
@@ -464,7 +468,7 @@ Bank 2 unallocated; bank 3 reserved.
 | `$FC`–`$FD` | SDSC debug console |
 | `$FE`–`$FF` | watchpoint register select / data |
 
-On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V counter reads at every even port and the H counter at every odd port in `$40`–`$7F`. The SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers: in those modes writes to `$00`–`$3F` do nothing. The Game Gear decodes `$00`–`$06` separately, and MasterDrive extends that to `$17`, but only once software has set Feature Enable A bit 7: this *I/O gate* (Q1) keeps old code run in MasterDrive mode from reaching the new registers. Until the bit is set, in MasterDrive mode `$01`–`$17` act as the `$3E`/`$3F` mirrors and read `$FF`, as on a Master System, and only `$00` (Start and region) answers. The gate is live: clearing the bit closes the ports again, and what the registers were set to (work RAM bank, slot select, card bank, stereo, the math operands, PCM and wavetable) stays in force. In every other mode these ports do what they do on the stock machine; writes to VDP registers 11–15 (§10) likewise take effect only in MasterDrive mode.
+On the Master System every even port in `$00`–`$3E` acts as `$3E` and every odd one as `$3F` (mirrors). On every stock machine the PSG is written at any port in `$40`–`$7F` and the VDP answers across `$80`–`$BF` (even ports data, odd ports control); on the Master System and Game Gear the V counter reads at every even port and the H counter at every odd port in `$40`–`$7F`. The SG-1000, SC-3000 and SF-7000 have no `$3E`/`$3F` registers: in those modes writes to `$00`–`$3F` do nothing. The Game Gear decodes `$00`–`$06` separately, and MasterDrive extends that to `$17`, but only once software has set Feature Enable A bit 7: this *I/O gate* (Q1) keeps old code run in MasterDrive mode from reaching the new registers. Until the bit is set, in MasterDrive mode `$01`–`$17` act as the `$3E`/`$3F` mirrors and read `$FF`, as on a Master System, and only `$00` (Start and region) answers. While the BIOS ROM is mapped, MasterDrive mode also takes `$18`–`$1F` out of the mirrors for the BIOS's ports (§20). The gate is live: clearing the bit closes the ports again, and what the registers were set to (work RAM bank, slot select, card bank, stereo, the math operands, PCM and wavetable) stays in force. In every other mode these ports do what they do on the stock machine; writes to VDP registers 11–15 (§10) likewise take effect only in MasterDrive mode.
 
 **Reads.** `$00`–`$3F` are write-only on the Master System and read `$FF`; on the Game Gear and MasterDrive every port there that is not a register listed above also reads `$FF`. In MasterDrive mode, `$01`–`$17` (while the I/O gate is open) and `$F0`–`$FF` are fully decoded: unreadable ports return `$FF`, never the controller mirror. In the other modes `$FB`–`$FF` read as on the stock machine — the controller mirror, or `$FF` on the Game Gear — because stock software may read its pads there (§13).
 
@@ -480,7 +484,7 @@ A real 315-5535 ASIC draws the base picture; the FPGA owns everything the ASIC h
 
 **ASIC (5 jobs):** Mode 4 and TMS background · sprites 1–8 per line · CRAM palettes 0–1 · PSG and stereo panning · line and frame interrupts.
 
-**FPGA (27 jobs):** VDP control-port gating · bus synchroniser · clock generation and turbo · cartridge wait states · shadow VDP state · sprites 9–16 · extended sprite attributes · per-sprite collision · line H offset table · line V offset table · window layer · text window · unique-cell mode · extended CRAM · DMA engine · math unit · PCM and wavetable · mapper and slot arbitration · SK-1100 keyboard · mouse and trackball · floppy controller · debug unit · video compositing and output · overlay dialogs · power sequencing · non-volatile storage · player-sprite correlation.
+**FPGA (28 jobs):** VDP control-port gating · bus synchroniser · clock generation and turbo · cartridge wait states · shadow VDP state · sprites 9–16 · extended sprite attributes · per-sprite collision · line H offset table · line V offset table · window layer · text window · unique-cell mode · extended CRAM · DMA engine · math unit · PCM and wavetable · mapper and slot arbitration · BIOS ROM and launch · SK-1100 keyboard · mouse and trackball · floppy controller · debug unit · video compositing and output · overlay dialogs · power sequencing · non-volatile storage · player-sprite correlation.
 
 **Control-port gating is the load-bearing job.** A write to register bank 1 or above must be absorbed by the FPGA; the ASIC would otherwise take it as a write to its own register of that number.
 
@@ -519,7 +523,7 @@ The power-on self test runs before the CPU leaves reset, with ten documented cod
 
 ## 14. Software Identification
 
-The `TMR SEGA` header is checked at `$7FF0`, `$3FF0` and `$1FF0`, in that order (8 KB and 16 KB ROMs carry it lower down).
+The `TMR SEGA` header is checked at `$7FF0`, `$3FF0` and `$1FF0`, in that order (8 KB and 16 KB ROMs carry it lower down). The machine's BIOS reads it and offers the machine the region asks for (§20).
 
 | Offset | Contents |
 |---|---|
@@ -538,7 +542,7 @@ The `TMR SEGA` header is checked at `$7FF0`, `$3FF0` and `$1FF0`, in that order 
 
 An export Master System BIOS rejects any cartridge whose region is not 4, so region-8 software will not boot on a stock export console. One ROM can still work on both (Q8, decided October 2026):
 
-- **Native mode.** The boot menu can start an export (region 4) cartridge in MasterDrive mode instead of Master System mode. It then starts as MasterDrive software does, every extension off. On the Analogue Pocket core this is the System setting MasterDrive; in the emulator, its machine-mode selector.
+- **Native mode.** The BIOS menu (§20) can start an export (region 4) cartridge in MasterDrive mode instead of Master System mode: its Machine item. It then starts as MasterDrive software does, every extension off. On the Analogue Pocket core the System setting MasterDrive makes it the menu's first offer; in the emulator, the machine selector does.
 - **Machine ID.** Port `$17` reads `$A7` in MasterDrive mode once Feature Enable A bit 7 is set (§11): the high nibble `$A` means MasterDrive, the low nibble is the machine version (7). It is read-only; a write is ignored. Before the bit is set, and on stock consoles, `$17` reads `$FF` (the controller mirror in the SG-1000, SC-3000 and SF-7000 modes).
 
 To detect the machine, software writes VDP register 15 with bit 7 set (a stock VDP ignores register 15), then reads `$17` and tests the high nibble for `$A`, rather than only for a value other than `$FF`, since some sources describe open bus at the low ports of stock consoles.
@@ -549,7 +553,7 @@ Old code started in native mode meets MasterDrive behaviour: the pad reads as a 
 
 ## 15. Enhancement Layer
 
-Optional boosts for unmodified software (the Auto-Enhancement Layer, AEL), applied by intercepting the fixed hardware interfaces rather than patching the ROM. **All but two are off at power-on**, so the machine behaves as stock hardware until the user switches one on. The exceptions are True TMS colours, which starts on so SG-1000 and SC-3000 software shows the colours it was made for (Q11), and Start = Pause, which starts on because the console's pad has no Pause button (§6). On the console they live in the boot menu, in the emulator in its AEL panel, and on the Analogue Pocket in the core settings menu.
+Optional boosts for unmodified software (the Auto-Enhancement Layer, AEL), applied by intercepting the fixed hardware interfaces rather than patching the ROM. **All but two are off at power-on**, so the machine behaves as stock hardware until the user switches one on. The exceptions are True TMS colours, which starts on so SG-1000 and SC-3000 software shows the colours it was made for (Q11), and Start = Pause, which starts on because the console's pad has no Pause button (§6). On the console they live in the BIOS menu; the emulator (its AEL panel) and the Analogue Pocket (its core settings menu) have them in their own menus too, and the last change wins (§20). "Off at power-on" means a first start: a platform keeps the boosts in effect across a Reset, and where the console keeps them is open (Q33).
 
 Explicit software intent always wins: every boost acts only on software running in the stock modes (SG-1000, SC-3000, Master System, Game Gear). MasterDrive software sets these features itself and reads C as a button of its own. Pseudo-stereo also stops as soon as software writes `$06`. The TMS-colour boost is the one exception: it also acts on MasterDrive software's TMS modes (Q11).
 
@@ -642,8 +646,17 @@ Sources: Charles MacDonald's VDP documentation (which lists NTSC 240 as 00–FF,
 | Q26 | DMA timing and reach (§9). The emulator completes a transfer as soon as `$FA` bit 7 is written and charges the CPU one T-state per byte (with the cartridge wait state on bytes read from the cartridge at 200 %), whatever the display is doing, and the bus synchroniser does not take part. How long should a transfer take, does the CPU wait for it, and may it write VRAM during the active display? The destination register reaches only `$0000`–`$3FFF`, but a transfer counts on into the upper 16 KB, even without VRAM expansion: should it wrap at `$3FFF`, follow bank 1 R3, or have a fifteenth address bit? | open |
 | Q27 | PCM and wavetable clocks and levels (§7). The PCM rates (8,000, 11,025, 16,000 and 22,050 samples a second) and the wavetable's pitch (the emulator plays a voice's waveform *f* × 3.2 times a second) are not made from the machine clock: none of the four rates is a whole fraction of 3.579545 MHz. Their level beside the PSG and FM chip is the emulator's choice: PCM at full scale peaks at 0.2 of the output's full scale, a wavetable voice at full volume at 0.12, a PSG channel at full volume at 0.16. Which clocks and levels should the machine have, and does `$F2` mute them? | open |
 | Q28 | Render bank (bank 1 R4), sprite palette base (bank 1 R5), collision result base (bank 1 R6) and per-sprite collision (Feature Enable B bit 3, which is meant to write hit bitmaps at the R6 base, §5). The documents name them, but neither implementation does anything with them, so their layouts and behaviour are not defined. What do they hold? | open |
-| Q29 | Window rows and side (§3). The tile window reads its tilemap by screen row, so a window from row 20 down starts at tilemap row 20, while the text window counts its rows from the window's top edge. R14 bit 7 picks the side of the Y split, but R13 has no side bit, so the window can lie only right of the X split. And the window reads its tilemap base, bank 1 R0, even while XRB is clear, when the bank 1 registers are otherwise without effect (§10). Which row rule should both use, should the window be able to lie left of the X split, and should its tilemap base need XRB? | open |
+| Q29 | Window rows and side (§3). The tile window reads its tilemap by screen row, so a window from row 20 down starts at tilemap row 20, while the text window counts its rows from the window's top edge. R14 bit 7 picks the side of the Y split, but R13 has no side bit, so the window can lie only right of the X split. And the window reads its tilemap base, bank 1 R0, even while XRB is clear, when the bank 1 registers are otherwise without effect (§10). Which row rule should both use, should the window be able to lie left of the X split, and should its tilemap base need XRB? The BIOS's menu relies on the text window's rule (§20): settling Q29 the other way changes the BIOS too. | open |
 | Q30 | Slot select and the `$3E` slot enables (§2, §8). `$09` maps the card into `$4000`–`$BFFF` by itself. On the stock Master System `$3E` bit 5 enables the card slot and bit 6 the cartridge slot; the emulator ignores bit 5, and ignores bit 6 whenever a card is inserted, and the Pocket core decodes `$09` and `$0B` but loads no card. How should `$09` and `$3E` bits 5–6 combine, and what does `$0000`–`$3FFF` read when `$3E` disables the cartridge? | open |
+| Q31 | Identifying a headerless cartridge on the console (§20). Without a `TMR SEGA` header the BIOS takes a cartridge of 64 KB or less as SG-1000 software, otherwise as Master System software. That needs the size, which the Pocket core and the emulator know from the file but a console cannot read from a cartridge (setting 18 reads 0), so on the console Auto plays every headerless cartridge as Master System software. How should the console tell SG-1000 and SC-3000 cartridges, and headerless Japanese Master System ones, apart? | open |
+| Q32 | How the console holds and starts its BIOS (§20). The owner's plans keep the BIOS in SPI flash, which the Z80 cannot run from, so the console's FPGA must present it as the 8 KB BIOS ROM (from block RAM, say). And a Z80 reset leaves SP at `$FFFF` on real parts, not the hand-over `$DFF0` (§1), which the emulator and the Pocket core set in their reset (the BIOS sets AF' itself). How does the console's launch reach that state: does the FPGA give the CPU a few instructions (`LD SP,$DFF0`, `JP $0000`) after the reset, or something else? | open |
+| Q33 | Where the console keeps the BIOS's choices (§20). A platform with its own settings menu keeps the boosts the BIOS sets until they change again; the console has no such menu. Where does it keep them (the plans' FRAM, per title or for all)? And the BIOS's machine choice lasts one launch: should it outlast a Reset, as the boosts do? | open |
+| Q34 | The console's region (§20). The Pocket core and the emulator have a region setting (export or Japan), which the BIOS reads (setting 20) and which port `$00` bit 6 and the TH read-back follow (§6). The documents do not say which region the console is, or whether it has a switch. | open |
+| Q35 | The BIOS ROM's size (§20). The BIOS ROM is 8 KB, as the Master System's base BIOS ROM behind `$3E` bit 3, and the menu uses about half of it. The owner's plans add a save card manager, USB import and export and a computer mode, which will not fit: should the BIOS ROM grow, be paged (and through which register), or should those tools live elsewhere? | open |
+| Q36 | `$3E` bit 3 after the launch (§2, §20). Both implementations keep the BIOS ROM reachable after the launch: in Master System, Game Gear and MasterDrive modes a `$3E` write with bit 3 clear and bit 6 set maps it over `$0000`–`$BFFF` again, and in MasterDrive mode the BIOS's ports answer too, so software could start another machine with `$A5` at `$1F`. On the stock machines the BIOS behind bit 3 is the Master System's own (the Game Gear maps only `$0000`–`$03FF`). Should the MasterDrive BIOS stay reachable after the launch, in which modes, and should its launch port then work? | open |
+| Q37 | The launch on the console (§20). The launch resets every block at the VDP's wrap to line 0, so that the first clock after it is that of a cold reset. The Pocket core does this in its own logic and the emulator at a frame boundary. On the console the VDP and PSG are inside the 315-5535: can the FPGA reset them at that moment, or must it rewrite their registers, and how does the raster's phase come out? | open |
+| Q38 | Memory the BIOS does not clear (§20). Work RAM banks 1–15, VRAM `$4000`–`$7FFF`, CRAM entries 32–255, the wavetable waveforms, SC-3000 cartridge RAM and the SF-7000's RAM keep what they held across a cold reset and the launch, so a game can find what an earlier game left; the emulator's cold reset clears VRAM, CRAM and the waveforms. Should a cold reset or the launch clear them, and should both implementations then do the same? | open |
+| Q39 | Reading past a cartridge's ROM (§8, §20). A cartridge image need not be a power of two long. Reads beyond it inside the cartridge's address range wrap into the image in both implementations (the address taken modulo the image's length), except in the emulator's SG-1000 mode, which reads `$FF` there and never mirrors; the Pocket core mirrors a power-of-two image through its size in every mode. On a real cartridge it depends on how the board decodes the address. What should a read beyond a cartridge's ROM return, in each mode? | open |
 
 Two risks from v2 remain as evidence rather than proof: six commercial titles were checked and none write VDP registers 11–15 (where Feature Enable A lives), which matters for old code run in MasterDrive mode, the only mode in which those registers act (§10): an old title that set R15 bit 7 there would also open the I/O registers (§11); and the keyboard's active-low polarity rests on a single source that contradicts itself.
 
@@ -670,7 +683,8 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | Controllers, SK-1100 keyboard | yes | yes (keyboard not yet tested on the core) |
 | Mega Drive mouse, Sports Pad trackball | yes | not yet |
 | I/O gate (Feature Enable A bit 7, `$01`–`$17`) and machine ID (`$17`) | yes | yes |
-| Native mode for an export cartridge (Q8) | the machine-mode selector | the System setting |
+| The BIOS (§20): menu, launch, `$3E` bit 3, ports `$18`, `$19`, `$1F` | yes | yes (no SF-7000 to launch) |
+| Native mode for an export cartridge (Q8) | the BIOS menu; the machine selector offers it first | the BIOS menu; the System setting offers it first |
 | Multitap detection (`$16`) | yes | yes |
 | Multitap protocols (Sega Team Player, EA 4 Way Play) | not yet | not yet |
 | Game Gear serial registers (`$01`–`$05`) | yes (they hold what is written) | yes (the same) |
@@ -690,4 +704,72 @@ Two risks from v2 remain as evidence rather than proof: six commercial titles we
 | PAL CPU clock (3.546893 MHz, §1) | yes: PAL frames come at 49.70 a second, and the PSG and FM chip run on the PAL clock | yes, the same (the Pocket's video clock stays fixed, so a PAL line reaches its scaler as 345 or 346 pixel clocks; not yet seen on a Pocket) |
 | Enhancement layer | all | all |
 
-**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a MasterDrive feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and MasterDrive modes and gets the same values on both, apart from the one difference the implementations are meant to have: no debug host is attached to the core (`$FC`/`$FD` bit 7, MasterDrive mode). An I/O gate test ROM reads MasterDrive's low ports before and after setting Feature Enable A bit 7: in MasterDrive mode they read `$FF` while the gate is closed, then the registers answer and `$17` reads `$A7`; in Master System and Game Gear modes the gate never opens. The emulator and the core agree in all three modes. A MasterDrive register test ROM multiplies and divides in the math unit (with a divide by zero) and reads `$0A`, `$08` and `$17` back: both give the values §2, §7, §9 and §14 define. A wait-state test ROM runs the same 2,000 NOPs from cartridge ROM and from work RAM at 200 % and 175 %: at 200 % the ROM run ends five lines later, at 175 % both end together, the same on both implementations, in NTSC and PAL. An FM test ROM plays a PSG tone and an FM sine and steps `$F2` through its four states: on the core each chip is heard exactly in the states that select it, at the expected pitch and at the balance above (Q20). The emulator's `$F2` states are checked by a probe; its FM sound is approximate, so the two sound different. Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Three MasterDrive test ROMs draw the TMS modes at 224 and 240 lines (Graphics II at both, Text at 240, with sprites below line 192, a sprite at Y = `$D0`, the Mode 4 wrap and line interrupts): the emulator and the core give the same pictures, and on the SG-1000 the same ROM stays at 192 lines. Two MasterDrive test ROMs draw the picture extensions of §3 and §5 (the ESAT's flips, priority, sizes, magnification, early clock and palettes; the line tables; the tile and text windows; unique-cell tiles; and the busiest line the renderer meets, 16 sprites of 64 × 64 pixels): the emulator and the core give the same pictures, as they do for four random pictures (every VRAM byte, part of CRAM and the video registers set from a seeded generator). A DMA test ROM fills VRAM, copies from the cartridge, work RAM, VRAM and the empty card slot, loads palettes into CRAM and runs a fill on past `$3FFF`: the emulator and the core give the same picture, and the CPU's time for each transfer is the same on both, instruction by instruction. A sound test ROM plays the PCM at each of its four rates and the two wavetable voices: on the core each is heard on the sides it selects, at the pitch and level the emulator gives it. Nothing has run on a Pocket yet.
+**Verification.** Batman Returns (Europe) on the Master System in PAL, frames 30, 60, 120, 200, 500, 900 and 1500, and Batman Returns (World) on the Game Gear, frames 200, 500, 900 and 1500: the emulator and the Pocket core (in simulation) both match Gearsystem; Game Gear frames match within Gearsystem's colour rounding (it expands the channel value 5 to 86, not 85). VDP test ROMs at 192, 224 and 240 lines and a MasterDrive feature ROM (register banks, native and extended CRAM, Feature Enable B height, 16 sprites, 200 % turbo with the bus synchroniser) give the same pictures on the emulator and the core. An I/O test ROM reads 18 ports in the Master System, Game Gear and MasterDrive modes and gets the same values on both, apart from the one difference the implementations are meant to have: no debug host is attached to the core (`$FC`/`$FD` bit 7, MasterDrive mode). An I/O gate test ROM reads MasterDrive's low ports before and after setting Feature Enable A bit 7: in MasterDrive mode they read `$FF` while the gate is closed, then the registers answer and `$17` reads `$A7`; in Master System and Game Gear modes the gate never opens. The emulator and the core agree in all three modes. A MasterDrive register test ROM multiplies and divides in the math unit (with a divide by zero) and reads `$0A`, `$08` and `$17` back: both give the values §2, §7, §9 and §14 define. A wait-state test ROM runs the same 2,000 NOPs from cartridge ROM and from work RAM at 200 % and 175 %: at 200 % the ROM run ends five lines later, at 175 % both end together, the same on both implementations, in NTSC and PAL. An FM test ROM plays a PSG tone and an FM sine and steps `$F2` through its four states: on the core each chip is heard exactly in the states that select it, at the expected pitch and at the balance above (Q20). The emulator's `$F2` states are checked by a probe; its FM sound is approximate, so the two sound different. Four SG-1000 test ROMs, one per TMS9918 mode (sprite priority, collisions, the fifth-sprite limit, the early clock, transparency), give the same pictures on the emulator and Gearsystem, and on the core (exactly in the Master System colours; in true TMS colours within the core's 4-bit-per-channel output). Three MasterDrive test ROMs draw the TMS modes at 224 and 240 lines (Graphics II at both, Text at 240, with sprites below line 192, a sprite at Y = `$D0`, the Mode 4 wrap and line interrupts): the emulator and the core give the same pictures, and on the SG-1000 the same ROM stays at 192 lines. Two MasterDrive test ROMs draw the picture extensions of §3 and §5 (the ESAT's flips, priority, sizes, magnification, early clock and palettes; the line tables; the tile and text windows; unique-cell tiles; and the busiest line the renderer meets, 16 sprites of 64 × 64 pixels): the emulator and the core give the same pictures, as they do for four random pictures (every VRAM byte, part of CRAM and the video registers set from a seeded generator). A DMA test ROM fills VRAM, copies from the cartridge, work RAM, VRAM and the empty card slot, loads palettes into CRAM and runs a fill on past `$3FFF`: the emulator and the core give the same picture, and the CPU's time for each transfer is the same on both, instruction by instruction. A sound test ROM plays the PCM at each of its four rates and the two wavetable voices: on the core each is heard on the sides it selects, at the pitch and level the emulator gives it. The BIOS (§20): in the emulator every test ROM started through it, NTSC and PAL, runs as the same ROM started directly, frame for frame; on the core its menu screens match the emulator's, and its first 50,000 instructions take the emulator's time, instruction for instruction. Nothing has run on a Pocket yet.
+
+---
+
+## 20. Start-up and the BIOS
+
+The **BIOS** is the machine's own start-up program: Z80 software in the 8 KB BIOS ROM that `$3E` bit 3 maps (§2). It shows a menu before every game, and holding Start while switching on skips the menu. It was written for this project (its source is `bios/` at the top of the repository, under the MIT licence) and contains no Sega code, logo or wording. The owner decided, in October 2026: a full menu before every game, the same on the console, in the emulator and on the Analogue Pocket; both the BIOS menu and a platform's own settings menu set the machine and the boosts, the last change winning; the menu waits for the player to choose PLAY.
+
+### Cold reset
+
+A **cold reset** is switching on; on the Pocket also the core starting, Reset, a new cartridge, or a change of the System or Video setting; in the emulator also Reset, loading a cartridge, or a change of machine or TV standard. Every block takes its reset value, except that the machine starts in **MasterDrive mode** with `$3E` = `$E0`: the BIOS ROM, work RAM and the controllers enabled; the cartridge, card and expansion port disabled. The CPU starts at `$0000`, in the BIOS, in the state of §1. No Pause (NMI) is raised from a cold reset until the launch below: software cannot mask an NMI, and the BIOS has no use for one.
+
+### The BIOS ROM
+
+While `$3E` bit 3 is clear and bit 6 is set, `$0000`–`$BFFF` reads the BIOS ROM, its 8 KB repeated through the range. With bits 3 and 6 both clear the cartridge answers, not the BIOS, so software that writes `$3E` = `$04` (bit 2 set, disabling the I/O chip before it reads `$F2`, §7, and the other bits clear) keeps running from its own ROM. BIOS reads, by the CPU or by a DMA transfer from source 0 (§9), take no cartridge wait state (§1), and the BIOS writes nothing below `$C000`. Both implementations keep the BIOS ROM reachable this way after the launch too; whether it should be is open (Q36).
+
+To read the cartridge's header (§14), the BIOS copies a short routine to work RAM, which switches `$3E` to `$A8` (cartridge on, BIOS off), copies the 16 bytes at `$7FF0`, `$3FF0` or `$1FF0`, and switches back to `$E0`, as the Master System BIOS does. After a cold reset every mapper has ROM offsets `$0000`–`$7FFF` at those addresses (§8).
+
+### The BIOS's ports and settings
+
+In MasterDrive mode, while the BIOS ROM is mapped, `$18`–`$1F` in the `$3E`/`$3F` mirror range belong to the BIOS, which uses three of them; otherwise they are mirrors as before (§11).
+
+| Port | Direction | Function |
+|---|---|---|
+| `$18` | write | setting index (reads `$FF`) |
+| `$19` | read/write | the setting at the index; the index then steps by one |
+| `$1F` | write | `$A5` launches the game (below); other values do nothing (reads `$FF`) |
+| `$1A`–`$1E` | | read `$FF`; writes do nothing |
+
+| Index | Setting |
+|---|---|
+| 0 | the machine to launch: 0 Master System, 1 Game Gear, 2 SG-1000, 3 SC-3000, 4 SF-7000, 5 MasterDrive. After a cold reset: the platform's choice (index 16) if the platform runs that machine (index 21), otherwise 0. A write of a machine the platform does not run (index 21), or of a larger value, is ignored |
+| 1–9 | the boosts for the next launch, in §15's order: sprite limit, stock overflow flag, Start = Pause, turbo step (0–4), VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop, True TMS colours. Index 4 ignores values above 4; the others keep bit 0 |
+| 16 | read only: the platform's machine choice, `$FF` for none (Auto) |
+| 17 | read only: bit 0 a cartridge is inserted, bit 1 a card is inserted, bit 2 the platform has USB, bit 3 PAL video, bit 4 the platform has its own settings menu |
+| 18 | read only: the cartridge's size as log2 of its byte count, rounded up (13 = 8 KB, 22 = 4 MB); 0 if unknown (Q31) |
+| 19 | read only: the platform's mapper setting (0 Sega, 1 Codemasters, 2 Korean, 3 Korean MSX), `$FF` if unknown |
+| 20 | read only: the region, 0 export, 1 Japan (Q34) |
+| 21 | read only: the machines the platform runs, bit *n* for machine *n* |
+| others | read `$FF`; writes do nothing |
+
+### The boosts: two menus, the last change wins
+
+Each boost of §15 has a **current** value, the one in effect, and a **next** value, the one for the next launch; the first cold reset after the platform starts takes the platform's own values for both. A change in a platform's own menu (the Pocket's Core Settings, the emulator's controls) sets both at once, in the BIOS menu or during a game. A write to index 1–9 sets only the next value, and the launch makes every next value current. A later cold reset keeps each current value and makes it the next value too, so a change made in the BIOS menu and not yet launched is dropped. Between cold resets, whichever changed a boost last therefore wins. The BIOS reads indices 1–9 every frame, so a platform change shows in its menu at once, and writes a boost only when the player changes it there. The machine chosen in the BIOS menu lasts one launch (Q33).
+
+### Which machine
+
+The BIOS offers first the platform's choice (index 16) if it has one, except that with a cartridge inserted a choice of the SF-7000, which does not play the cartridge, counts as none. Otherwise it reads the header's region nibble (§14): 3 or 4 Master System, 5–7 Game Gear, 8 MasterDrive, other values Master System. With no header it takes a cartridge of 64 KB or less as SG-1000 software if the size (index 18) is known, and any other as Master System software (Q31). The checksum is shown, never enforced: the BIOS refuses no cartridge.
+
+### The launch
+
+When `$A5` is written to `$1F`, the CPU runs no further instruction. At the VDP's next wrap to line 0, whichever line the write came on, every block is reset as at a cold reset, except that the machine is the one in index 0, `$3E` is `$A8` and the boosts' next values become current; the first clock after the launch is that of a cold reset, so the game's timing, turbo included, starts as after one. Memory is not touched: VRAM, CRAM, work RAM and cartridge RAM stay as the BIOS left them, and so do the CPU registers a Z80 reset does not set. The game starts at `$0000` in the state of §1. A Pause held through the launch (the Pause button, or Start with Start = Pause on) is not a press: the game gets a Pause when it is pressed again. How the console does all this with the VDP and PSG inside its 315-5535 is open (Q37).
+
+Before the launch the BIOS leaves things as a direct start would find them: it turns the display and its interrupts off, clears VRAM `$0000`–`$3FFF`, the 32 CRAM entries and work RAM bank 0, sets AF' to `$FFFF` and BC, DE, HL, IX, IY, BC', DE' and HL' to zero (the CPU reset sets AF to `$FFFF` itself). The launch waits until the button that asked for it has read released in two frames running (Start on the skip path; from the menu both Start and B, whichever launched), so the game does not start with it held. The BIOS checks this before its clears, which take about seven frames; a button pressed during them is held at the launch. Other buttons may stay held, so a game can still read a combination held at switch-on.
+
+**Memory at hand-over.** Work RAM bank 0, VRAM `$0000`–`$3FFF` and CRAM entries 0–31 are zero, cleared by the BIOS, and the palette-written flags (§4) are clear, reset by the launch. Work RAM banks 1–15, VRAM `$4000`–`$7FFF`, CRAM entries 32–255, the wavetable waveforms, SC-3000 cartridge RAM and the SF-7000's RAM are cleared neither by a cold reset nor by the launch: software must not assume them zero. (The emulator's cold reset happens to clear VRAM, CRAM and the waveforms; the Pocket core's, whose memories are block RAM, does not.) Whether they should be cleared is open (Q38).
+
+### The menu
+
+Rows 0–2 of the screen are Mode 4 tiles: the name, the BIOS version and the device row, CART, CARD, USB and SYSTEM, with the current device in yellow. Below them the text window (§3) shows the device's page in 40 columns of 6-pixel characters, from x = 8, with a status line at the bottom. A sprite arrow marks the selected item. Left and right change device, up and down move, B changes an item, C goes to the top, and Start plays from any device when a cartridge is inserted. With no cartridge, Start plays only when the platform's choice is the SF-7000 and the platform runs one (index 21): the SF-7000 starts from its own ROM and disks.
+
+- **CART:** what the header says (the kind of software, product code, version, region, the checksum as stored, the size when known; or "No header found: plays as …"), PLAY, the machine (Auto, or one the platform runs, but not the SF-7000, which does not play the cartridge) and the boosts. A boost that does not act on the machine PLAY starts (§15: the stock overflow flag on the SG-1000 and SC-3000, Start = Pause on the Game Gear, the uncrop anywhere but the Game Gear) is marked "(no effect)". For MasterDrive software only True TMS colours is listed, the one boost that also acts on it (Q11).
+- **CARD:** whether a card is inserted.
+- **USB:** "This machine has no USB port." where the platform has none.
+- **SYSTEM:** the BIOS version, the machine ID (`$17`, §14), the video standard and region, a controller test (B starts it; every button then shows while held, and no button acts until Start and A are held together), and how to skip the menu.
+
+The BIOS silences the PSG when it starts. The menu uses the stock colours only and has no animation. It draws a page into the text window's name table that is not on screen (it keeps two, at `$3000` and `$3400`) and shows it from a vertical blank, so a page change goes from one frame to the next, never half of each page. With the display on, its VDP data writes are at least 29 T-states apart, as the stock VDP needs at 100 % (§1). It relies on the text window counting its rows from its top edge (Q29).
+
+Not in this round, each waiting on an open question or on hardware the implementations lack: per-title settings, the save card manager, USB, computer mode, firmware update, the POST display, PLAY's region, video, controller and slot options, a SETTINGS page, the SYSTEM memory and video tests, FPGA configuration and card health, the offer at power-on to restore a cartridge's save, the return to the BIOS from a running game, and cassettes and disks.

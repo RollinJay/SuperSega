@@ -112,8 +112,8 @@ module mdr_pocket (
                 12'h0F0: reset_req <= 8'hFF;
                 12'h100: begin
                     set_system <= bridge_wr_data[2:0];
-                    // a change restarts the machine in the new mode (the mode is
-                    // latched only in reset, below), as a change of Video does
+                    // a change restarts the machine, so its BIOS starts again and
+                    // offers the new choice first, as a change of Video does
                     if (bridge_wr_data[2:0] != set_system) reset_req <= 8'hFF;
                 end
                 12'h104: set_region  <= bridge_wr_data[0];
@@ -148,7 +148,9 @@ module mdr_pocket (
     reg        rom_loaded  = 1'b0;
     reg        hdr_skip    = 1'b0;      // file carries a 512-byte copier header
     reg [22:0] rom_mask_74 = 23'h7FFF;
+    reg [4:0]  rom_log2_74 = 5'd0;      // the BIOS's setting 18
     reg [31:0] rom_bytes   = 32'd0;
+    reg [22:0] rom_end_74  = 23'd0;     // the image's size, at most 4 MB
     reg        save_loaded = 1'b0;
 
     // smallest power of two >= size, minus one; at most 4 MB, the largest
@@ -160,8 +162,20 @@ module mdr_pocket (
             m = (n == 32'd0) ? 32'd0 : n - 32'd1;
             m = m | (m >> 1); m = m | (m >> 2); m = m | (m >> 4);
             m = m | (m >> 8); m = m | (m >> 16);
-            if (m < 32'h3FFF) m = 32'h3FFF;          // at least 16 KB
+            if (m < 32'h1FFF) m = 32'h1FFF;          // at least 8 KB, the smallest cartridge
             pow2mask = (m > 32'h3FFFFF) ? 23'h3FFFFF : m[22:0];
+        end
+    endfunction
+
+    // log2 of the size rounded up (13 = 8 KB, 22 = 4 MB); 0 for an empty file
+    function [4:0] log2up;
+        input [31:0] n;
+        reg   [31:0] m;
+        integer      k;
+        begin
+            m = (n == 32'd0) ? 32'd0 : n - 32'd1;
+            log2up = 5'd0;
+            for (k = 0; k < 32; k = k + 1) if (m[k]) log2up = k[4:0] + 5'd1;
         end
     endfunction
 
@@ -176,6 +190,8 @@ module mdr_pocket (
                 hdr_skip    <= (dataslot_requestwrite_size[9:0] == 10'd512);
                 rom_bytes   <= rom_size_net;
                 rom_mask_74 <= pow2mask(rom_size_net);
+                rom_log2_74 <= log2up(rom_size_net);
+                rom_end_74  <= (rom_size_net > 32'h400000) ? 23'h400000 : rom_size_net[22:0];
             end
         end else if (dataslot_allcomplete) begin
             downloading <= 1'b0;
@@ -190,12 +206,14 @@ module mdr_pocket (
     // Settings and download state are quasi-static: two-flop synchronisers.
     // The machine is held in reset while anything is loading.
     // field order matters only between these two blocks
-    wire [44:0] s74 = {set_tmscol,                                                    // 1
+    wire [72:0] s74 = {rom_end_74, rom_log2_74, set_tmscol,                           // 29
                        set_system, set_region, set_pal, set_mapper, set_ggfull,     // 8
                        set_spr, set_startp, set_turbo, set_vboost, set_afire,        // 8
                        set_pstereo, set_ghost, set_scram32,                          // 3
                        rom_mask_74, downloading, rom_loaded};                        // 25
-    reg  [44:0] ss1, ss2;
+    reg  [72:0] ss1, ss2;
+    wire [22:0] s_romend  = ss2[72:50];
+    wire [4:0]  s_romlog2 = ss2[49:45];
     wire        s_tmscol  = ss2[44];
     always @(posedge clk_sys) begin ss1 <= s74; ss2 <= ss1; end
     wire [2:0]  s_system  = ss2[43:41];
@@ -249,76 +267,50 @@ module mdr_pocket (
     wire [27:0] ld_off  = hdr_skip_s2 ? ld_addr - 28'd512 : ld_addr;
     wire        ld_keep = ld_we && !(hdr_skip_s2 && ld_addr < 28'd512) && ld_off < 28'h0400000;
 
-    // header detection on the stream: "TMR SEGA" at $7FF0, $3FF0 or $1FF0
-    // (checked in that order), region nibble in the high nibble of +15
-    reg [3:0] hm7, hm3, hm1;              // per-word matches
-    reg [7:0] hr7, hr3, hr1;
-    function word_ok;                    // expected little-endian word of "TMR SEGA"
-        input [2:0]  j;
-        input [15:0] w;
-        case (j)
-            3'd0: word_ok = (w == 16'h4D54);   // "TM"
-            3'd1: word_ok = (w == 16'h2052);   // "R "
-            3'd2: word_ok = (w == 16'h4553);   // "SE"
-            3'd3: word_ok = (w == 16'h4147);   // "GA"
-            default: word_ok = 1'b0;
-        endcase
-    endfunction
-    reg s_dl_d;
-    always @(posedge clk_sys) begin
-        s_dl_d <= s_dl;
-        if (s_dl && !s_dl_d) begin
-            hm7 <= 4'd0; hm3 <= 4'd0; hm1 <= 4'd0;
-        end
-        if (ld_keep) begin
-            if (ld_off[27:4] == 24'h0007FF) begin
-                if (ld_off[3] == 1'b0) hm7[ld_off[2:1]] <= word_ok({1'b0, ld_off[2:1]}, ld_data);
-                if (ld_off[3:1] == 3'd7) hr7 <= ld_data[15:8];
-            end
-            if (ld_off[27:4] == 24'h0003FF) begin
-                if (ld_off[3] == 1'b0) hm3[ld_off[2:1]] <= word_ok({1'b0, ld_off[2:1]}, ld_data);
-                if (ld_off[3:1] == 3'd7) hr3 <= ld_data[15:8];
-            end
-            if (ld_off[27:4] == 24'h0001FF) begin
-                if (ld_off[3] == 1'b0) hm1[ld_off[2:1]] <= word_ok({1'b0, ld_off[2:1]}, ld_data);
-                if (ld_off[3:1] == 3'd7) hr1 <= ld_data[15:8];
-            end
-        end
-    end
-    wire       has_hdr = (&hm7) || (&hm3) || (&hm1);
-    wire [3:0] hdr_region = (&hm7) ? hr7[7:4] : (&hm3) ? hr3[7:4] : hr1[7:4];
-
-    // machine mode: 0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive.
-    // System = MasterDrive runs any cartridge in MasterDrive (native) mode: the
-    // boot menu's option for an export cartridge (Q8, Technical Reference §14).
-    reg [2:0] mode_sel;
+    // The machine's BIOS reads the cartridge's header itself; the platform gives
+    // it the System setting as its machine choice (Auto: none). System values:
+    // 0 Auto, 1 Master System, 2 Game Gear, 3 MasterDrive, 4 SG-1000, 5 SC-3000.
+    reg [2:0] plat_mode;
     always @* begin
         case (s_system)
-            3'd1: mode_sel = 3'd0;
-            3'd2: mode_sel = 3'd1;
-            3'd3: mode_sel = 3'd5;
-            3'd4: mode_sel = 3'd2;
-            3'd5: mode_sel = 3'd3;
-            default: begin
-                if (has_hdr) begin
-                    if (hdr_region >= 4'd5 && hdr_region <= 4'd7) mode_sel = 3'd1;
-                    else if (hdr_region == 4'd8) mode_sel = 3'd5;
-                    else mode_sel = 3'd0;
-                end else if (s_rommask <= 23'h00FFFF) mode_sel = 3'd2;   // small and headerless: SG-1000
-                else mode_sel = 3'd0;
-            end
+            3'd2: plat_mode = 3'd1;
+            3'd3: plat_mode = 3'd5;
+            3'd4: plat_mode = 3'd2;
+            3'd5: plat_mode = 3'd3;
+            default: plat_mode = 3'd0;
         endcase
     end
+    wire plat_auto = (s_system == 3'd0) || (s_system > 3'd5);
+
+    // The boosts as Core Settings has them, for the machine (mdr_io keeps the
+    // values in effect and the BIOS's): a value is taken once two samples in a
+    // row agree, so a setting whose bits cross the synchroniser in different
+    // clocks makes one change, and each change pulses the boost's BIOS index.
+    // Sprites/line is one setting for two boosts (index 1, the limit, and 2, the
+    // stock overflow flag), so it pulses both.
+    wire [10:0] bset = {s_tmscol, s_ggfull, s_pstereo, s_afire, s_vboost, s_turbo, s_startp, s_spr};
+    reg  [10:0] bset_d, b_ok, b_ok_d;
+    always @(posedge clk_sys) begin
+        bset_d <= bset;
+        if (bset == bset_d) b_ok <= bset;
+        b_ok_d <= b_ok;
+    end
+    wire [10:0] b_x = b_ok ^ b_ok_d;
+    wire [8:0]  ael_chg = {b_x[10], b_x[9], b_x[8], b_x[7], b_x[6], |b_x[5:3], b_x[2],
+                           {2{|b_x[1:0]}}};
+    wire [1:0]  b_spr = b_ok[1:0];
 
     // =====================================================================
     // the machine
     // =====================================================================
     wire        m_reset = !sys_reset_n || s_dl || !s_loaded;
-    // the TV standard and the machine mode are part of the machine: they change
-    // only in reset
+    // the TV standard is part of the machine: it changes only in reset. The machine
+    // running is the machine's own (mdr_top: MasterDrive while the BIOS runs, then
+    // the one it launches).
     reg         m_pal = 1'b0;
-    reg  [2:0]  mode = 3'd0;
-    always @(posedge clk_sys) if (m_reset) begin m_pal <= s_pal; mode <= mode_sel; end
+    always @(posedge clk_sys) if (m_reset) m_pal <= s_pal;
+    wire [2:0]  mode;
+    wire        ggwide_run;
     wire        rom_req;
     wire [23:0] rom_addr;
     reg         rom_ack;
@@ -339,13 +331,15 @@ module mdr_pocket (
 
     mdr_top u_machine (
         .clk_sys(clk_sys), .reset(m_reset),
-        .mode(mode), .mapper(s_mapper), .pal(m_pal), .jp_region(s_region),
+        .plat_mode(plat_mode), .plat_auto(plat_auto),
+        .plat_flags(8'b0001_0001 | {4'd0, m_pal, 3'd0}),   // a cartridge (the machine runs only with one), own menu, no USB
+        .rom_log2(s_romlog2), .machines(6'b101111),         // no SF-7000 on this core
+        .mapper(s_mapper), .pal(m_pal), .jp_region(s_region),
         .timing_gg(1'b1), .sc_ram32(s_scram32),
         .rom_mask(s_rommask), .card_present(1'b0), .card_mask(19'd0),
-        .gg_crop(mode == 3'd1 && !s_ggfull),
-        .ael_sprlimit(s_spr != 2'd0), .ael_ovf_stock(s_spr == 2'd2), .ael_startpause(s_startp),
-        .ael_turbo(s_turbo), .ael_vramboost(s_vboost), .ael_autofire(s_afire), .ael_pstereo(s_pstereo),
-        .ael_tmscol(s_tmscol),
+        .ael_sprlimit(b_spr != 2'd0), .ael_ovf_stock(b_spr == 2'd2), .ael_startpause(b_ok[2]),
+        .ael_turbo(b_ok[5:3]), .ael_vramboost(b_ok[6]), .ael_autofire(b_ok[7]), .ael_pstereo(b_ok[8]),
+        .ael_tmscol(b_ok[10]), .ael_ggwide(b_ok[9]), .ael_chg(ael_chg), .mode_run(mode), .ggwide_run(ggwide_run),
         .rom_req(rom_req), .rom_addr(rom_addr), .rom_ack(rom_ack), .rom_data(rom_data),
         .sv_clk(clk_sys), .sv_we(sv_we), .sv_addr(sv_addr), .sv_din(sv_din), .sv_dout(sv_dout),
         .pad1(pad1), .pad2(pad2), .pause_btn(pause_btn), .reset_btn(1'b0),
@@ -354,7 +348,7 @@ module mdr_pocket (
         .vid_frame(vid_frame),
         .audio_l(m_audio_l), .audio_r(m_audio_r), .cart_ram_we(cart_ram_we),
         .dbg_m1(), .dbg_addr(), .dbg_cycles(), .dbg_fetch(), .dbg_op(), .dbg_sp(), .dbg_a(),
-        .dbg_f(), .dbg_int_ack(), .dbg_line(), .dbg_hc());
+        .dbg_f(), .dbg_int_ack(), .dbg_line(), .dbg_hc(), .dbg_launch());
 
     // =====================================================================
     // PSRAM: downloads write, the machine reads
@@ -376,7 +370,18 @@ module mdr_pocket (
         .cram_ce1_n(cram0_ce1_n), .cram_oe_n(cram0_oe_n), .cram_we_n(cram0_we_n),
         .cram_ub_n(cram0_ub_n), .cram_lb_n(cram0_lb_n));
 
-    reg rom_req_d, rom_wait, rom_inflight, rom_lsb;
+    // A cartridge read beyond the loaded image (one that is not a power of two
+    // long, inside the mask's mirror) wraps into the image, as the emulator's
+    // address modulo the image's length does, never reaching what PSRAM still
+    // holds there from an earlier cartridge: the BIOS's header search reads
+    // $7FF0, $3FF0 and $1FF0 whatever the size. The masked address is below
+    // twice the size for an image of 4 KB or more, so one subtraction does;
+    // what is still beyond after it (a smaller image) answers $FF. Which value
+    // the machine should give is open question Q39.
+    wire [22:0] ra      = rom_addr[22:0];
+    wire        ra_out  = !rom_addr[23] && ra >= s_romend;
+    wire [22:0] ra_w    = ra_out ? ra - s_romend : ra;
+    reg rom_req_d, rom_wait, rom_inflight, rom_lsb, rom_beyond;
     always @(posedge clk_sys) begin
         ps_rd <= 1'b0; ps_wr <= 1'b0; rom_ack <= 1'b0;
         rom_req_d <= rom_req;
@@ -388,12 +393,13 @@ module mdr_pocket (
         end else begin
             if (rom_req && !rom_req_d) rom_wait <= 1'b1;
             if ((rom_wait || (rom_req && !rom_req_d)) && !rom_inflight && !ps_busy && !ps_rd) begin
-                ps_rd <= 1'b1; ps_bank <= rom_addr[23]; ps_addr <= rom_addr[22:1];
-                rom_lsb <= rom_addr[0];
+                ps_rd <= 1'b1; ps_bank <= rom_addr[23]; ps_addr <= ra_w[22:1];
+                rom_lsb <= ra_w[0];
+                rom_beyond <= ra_out && ra_w >= s_romend;
                 rom_wait <= 1'b0; rom_inflight <= 1'b1;
             end
             if (ps_avail && rom_inflight) begin
-                rom_data <= rom_lsb ? ps_dout[15:8] : ps_dout[7:0];
+                rom_data <= rom_beyond ? 8'hFF : rom_lsb ? ps_dout[15:8] : ps_dout[7:0];
                 rom_ack <= 1'b1;
                 rom_inflight <= 1'b0;
             end
@@ -595,7 +601,12 @@ module mdr_pocket (
     reg [8:0] lines, lines_last;
     reg       de_d;
     reg [2:0] slot;
-    wire      gg_window = (mode == 3'd1) && !s_ggfull;
+    // the Game Gear window: from the machine running and its uncrop boost (clk_sys)
+    reg       gg_win_sys = 1'b0;
+    reg [1:0] gg_win_v = 2'b00;
+    always @(posedge clk_sys) gg_win_sys <= (mode == 3'd1) && !ggwide_run;
+    always @(posedge clk_vid) gg_win_v <= {gg_win_v[0], gg_win_sys};
+    wire      gg_window = gg_win_v[1];
     always @(posedge clk_vid) begin
         de_d <= v_de;
         if (v_vs) begin lines_last <= lines; lines <= 9'd0; end

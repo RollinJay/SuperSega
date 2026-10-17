@@ -11,6 +11,8 @@
 //   $07-$17  MasterDrive registers, MasterDrive mode once the gate is open: PCM,
 //            slot select, work RAM bank, card bank, math unit, wavetable,
 //            multitap detection, $17 the machine ID ($A7, Q8)
+//   $18-$1F  the BIOS's ports, MasterDrive mode while the BIOS ROM is mapped ($3E
+//            bit 3 clear, bit 6 set): $18 setting index, $19 setting, $1F launch ($A5)
 //   $00-$3F  otherwise: even = memory control ($3E), odd = I/O control ($3F)
 //   $40-$7F  write: PSG; read: V counter (even) / H counter (odd)
 //   $80-$BF  VDP data (even) / control (odd)
@@ -21,7 +23,8 @@
 
 module mdr_io (
     input  wire        clk,
-    input  wire        rst,
+    input  wire        rst,              // a cold reset or the BIOS's launch
+    input  wire        cold,             // with rst: a cold reset ($3E = $E0: the BIOS is mapped)
     input  wire [2:0]  mode,
     input  wire        jp_region,
     input  wire        fm_present,
@@ -69,7 +72,26 @@ module mdr_io (
     input  wire        reset_btn,
     // SK-1100 matrix rows 0-6, 12 columns each (A0-A7, B0-B3), active high
     input  wire [83:0] kb_keys,
-    input  wire        kb_ghosting
+    input  wire        kb_ghosting,
+
+    // the BIOS's settings (Technical Reference section 20). The platform gives
+    // its machine choice and information, and the boosts as its own menu has
+    // them, with a pulse for each boost it changes; the boosts in effect (boost)
+    // and for the next launch (nxt) are kept here. Boost fields, by setting
+    // index: [0] 1 sprite limit, [1] 2 stock overflow flag, [2] 3 Start = Pause,
+    // [5:3] 4 turbo step, [6] 5 VRAM speed-up, [7] 6 auto-fire, [8] 7
+    // pseudo-stereo, [9] 8 Game Gear uncrop, [10] 9 true TMS colours.
+    input  wire [2:0]  plat_mode,        // index 16: the platform's machine choice ...
+    input  wire        plat_auto,        // ... or none ($FF)
+    input  wire [7:0]  plat_flags,       // index 17
+    input  wire [4:0]  rom_log2,         // index 18
+    input  wire [1:0]  mapper,           // index 19
+    input  wire [5:0]  machines,         // index 21: the machines the platform runs
+    input  wire [10:0] plat_boost,
+    input  wire [8:0]  plat_chg,         // the platform changed the boost of index 1-9 (bit 0-8)
+    output reg  [10:0] boost,            // in effect
+    output reg  [2:0]  boot_mode,        // index 0: the machine the launch starts
+    output wire        launch_req        // $A5 written to $1F
 );
     localparam M_SMS = 3'd0, M_GG = 3'd1, M_SG = 3'd2, M_SC = 3'd3, M_SF = 3'd4, M_SS = 3'd5;
     wire gg = (mode == M_GG);
@@ -83,6 +105,7 @@ module mdr_io (
     wire md_io = ss && vdp_fea[7];
     wire gg_lo = (gg && port <= 8'h06) || (ss && port == 8'h00) || (md_io && port <= 8'h06);
     wire md_lo = md_io && port >= 8'h07 && port <= 8'h17;
+    wire bios_lo = ss && !mem_ctl[3] && mem_ctl[6] && port[7:3] == 5'b00011;   // $18-$1F, the BIOS mapped
     localparam [7:0] MACHINE_ID = 8'hA7;   // $A = MasterDrive, 7 = machine version (Q8)
 
     // ------------------------------------------------------------ registers
@@ -198,6 +221,8 @@ module mdr_io (
             if (port == 8'h00)      rdata = {~pad1[7], ~jp_region, 6'b000000};
             else if (port == 8'h06) rdata = 8'hFF;
             else                    rdata = gg_sio[port[2:0]];
+        end else if (bios_lo) begin
+            if (port == 8'h19) rdata = setting;
         end else if (md_lo) begin
             case (port)
                 8'h08: rdata = {1'b0, pcm_fill[6] ? 3'd7 : pcm_fill[5:3], 4'b0000};   // bytes / 8, saturating (Q14)
@@ -262,7 +287,7 @@ module mdr_io (
     always @(posedge clk) if (wr && port == 8'hFB) dbg_ctl <= wdata;
     // TH latch (Gearsystem rule): a $3F write that leaves a TH pin configured as
     // an input while raising its level bit
-    wire lowport = port < 8'h40 && !gg_lo && !md_lo;
+    wire lowport = port < 8'h40 && !gg_lo && !md_lo && !bios_lo;
     assign th_latch = wr && lowport && port[0] && !legacy &&
                       ((wdata[1] && wdata[5] && !io_ctl[5]) || (wdata[3] && wdata[7] && !io_ctl[7]));
 
@@ -292,7 +317,7 @@ module mdr_io (
     integer i;
     always @(posedge clk) begin
         if (rst) begin
-            mem_ctl <= 8'hA8; io_ctl <= 8'hFF; wram_bank <= 4'd0; slot_sel <= 8'd0;
+            mem_ctl <= cold ? 8'hE0 : 8'hA8; io_ctl <= 8'hFF; wram_bank <= 4'd0; slot_sel <= 8'd0;
             card_bank <= 5'd0; turbo_step <= 3'd0; fm_ctl <= 2'd0; pcm_ctl <= 8'd0;
             gg_sio[1] <= 8'h7F; gg_sio[2] <= 8'hFF; gg_sio[3] <= 8'h00; gg_sio[4] <= 8'hFF; gg_sio[5] <= 8'h00;
             math_a <= 8'd0; math_b <= 8'd0; math_res <= 16'd0; math_div <= 1'b0;
@@ -301,6 +326,8 @@ module mdr_io (
         end else if (wr) begin
             if (gg_lo) begin
                 if (port != 8'h00 && port != 8'h06) gg_sio[port[2:0]] <= wdata;
+            end else if (bios_lo) begin
+                ;                       // the BIOS's ports: below
             end else if (md_lo) begin   // $0F, $10, $16, $17 are read-only: a write is absorbed
                 case (port)
                     8'h08: pcm_ctl <= wdata;
@@ -334,6 +361,80 @@ module mdr_io (
                     if (wdata[7]) begin ppi_ctl <= wdata; ppi_c <= 8'h00; end
                     else ppi_c[wdata[3:1]] <= wdata[0];
                 end
+            end
+        end
+    end
+
+    // ------------------------------------------------------------ the BIOS's settings
+    reg  [7:0]  b_idx;
+    reg  [10:0] nxt;                     // the boosts for the next launch
+    reg         first = 1'b1;            // the first cold reset since the FPGA was loaded
+    reg  [7:0]  setting;
+    always @* begin
+        case (b_idx)
+            8'd0:  setting = {5'd0, boot_mode};
+            8'd1:  setting = {7'd0, nxt[0]};
+            8'd2:  setting = {7'd0, nxt[1]};
+            8'd3:  setting = {7'd0, nxt[2]};
+            8'd4:  setting = {5'd0, nxt[5:3]};
+            8'd5:  setting = {7'd0, nxt[6]};
+            8'd6:  setting = {7'd0, nxt[7]};
+            8'd7:  setting = {7'd0, nxt[8]};
+            8'd8:  setting = {7'd0, nxt[9]};
+            8'd9:  setting = {7'd0, nxt[10]};
+            8'd16: setting = plat_auto ? 8'hFF : {5'd0, plat_mode};
+            8'd17: setting = plat_flags;
+            8'd18: setting = {3'd0, rom_log2};
+            8'd19: setting = {6'd0, mapper};
+            8'd20: setting = {7'd0, jp_region};
+            8'd21: setting = {2'd0, machines};
+            default: setting = 8'hFF;
+        endcase
+    end
+    wire        b_val = io_sample && bios_lo && port == 8'h19;   // a read or write of $19
+    wire        b_wr  = wr && bios_lo;
+    assign launch_req = b_wr && port == 8'h1F && wdata == 8'hA5;
+    // a BIOS write to index 1-9: index 4 (turbo) takes 0-4, the others bit 0
+    reg  [10:0] nxt_w;
+    always @* begin
+        nxt_w = nxt;
+        if (b_val && io_write) case (b_idx)
+            8'd1: nxt_w[0] = wdata[0];
+            8'd2: nxt_w[1] = wdata[0];
+            8'd3: nxt_w[2] = wdata[0];
+            8'd4: if (wdata <= 8'd4) nxt_w[5:3] = wdata[2:0];
+            8'd5: nxt_w[6] = wdata[0];
+            8'd6: nxt_w[7] = wdata[0];
+            8'd7: nxt_w[8] = wdata[0];
+            8'd8: nxt_w[9] = wdata[0];
+            8'd9: nxt_w[10] = wdata[0];
+            default: ;
+        endcase
+    end
+    // A boost the platform changes takes the new value now and for the next launch
+    // (and wins over a BIOS write in the same clock); a BIOS write sets only the
+    // next launch's; the launch makes the next values current; a cold reset keeps
+    // the current values and makes them the next ones. So the last change wins.
+    // The first cold reset takes the platform's values.
+    wire [10:0] f_chg = {plat_chg[8:4], {3{plat_chg[3]}}, plat_chg[2:0]};
+    wire [10:0] boost_p = (boost & ~f_chg) | (plat_boost & f_chg);
+    always @(posedge clk) begin
+        if (!rst) first <= 1'b0;
+        if (rst && cold) begin
+            boost <= first ? plat_boost : boost_p; nxt <= first ? plat_boost : boost_p;
+            b_idx <= 8'd0;
+            boot_mode <= (plat_auto || !machines[plat_mode]) ? 3'd0 : plat_mode;   // a machine it runs
+        end else if (rst) begin                   // the launch
+            boost <= (nxt & ~f_chg) | (plat_boost & f_chg);
+            nxt   <= (nxt & ~f_chg) | (plat_boost & f_chg);
+            b_idx <= 8'd0;
+        end else begin
+            boost <= boost_p;
+            nxt   <= (nxt_w & ~f_chg) | (plat_boost & f_chg);
+            if (b_wr && port == 8'h18) b_idx <= wdata;
+            else if (b_val) begin
+                b_idx <= b_idx + 8'd1;
+                if (io_write && b_idx == 8'd0 && wdata <= 8'd5 && machines[wdata[2:0]]) boot_mode <= wdata[2:0];
             end
         end
     end

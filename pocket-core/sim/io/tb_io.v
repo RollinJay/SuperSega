@@ -17,6 +17,17 @@
 //             until Feature Enable A bit 7 is set (Q1), then the registers,
 //             $17 reading the machine ID $A7 (Q8); Game Gear and Master System
 //             modes are unaffected by the bit.
+//   BIOS      the BIOS's ports (Technical Reference section 20): a cold reset
+//             gives $3E = $E0 and a launch $A8; $18/$19 answer only while the
+//             BIOS is mapped ($3E bit 3 clear, bit 6 set); the platform's
+//             information reads back; index 0 starts as the platform's
+//             choice if the platform runs it, and refuses a machine it does not run, index 4 a turbo step
+//             above 4; a BIOS write changes only the next launch's boost, a
+//             platform change both; $A5 at $1F asks for the launch, and the
+//             launch makes the next values current; the first cold reset takes
+//             the platform's boosts, a later one keeps those in effect (and
+//             drops a BIOS change not yet launched); a platform change wins over
+//             a BIOS write in the same clock and over the launch's.
 //
 // The CPU cannot read sooner than 16 clocks after the OUT: its next IN comes at
 // least 11 T-states (82 system clocks at 200 % turbo) later.
@@ -28,7 +39,18 @@ module tb;
     always #5 clk = ~clk;
 
     reg        rst = 1'b1;
+    reg        cold = 1'b1;                // the first reset is a cold one
     reg  [2:0] mode = 3'd3;
+    reg  [10:0] pb = 11'b101_0001_0001;  // the platform's boosts: at the first cold reset sprite limit,
+                                         // turbo step 2, pseudo-stereo and true TMS colours
+    reg  [8:0]  pc = 9'd0;               // the platform changed index 1-9
+    reg         p_auto = 1'b1;
+    reg  [2:0]  p_mode = 3'd1;           // the platform's machine choice when p_auto is clear
+    wire [10:0] boost;
+    wire [2:0]  boot_mode;
+    wire        launch_req;
+    reg         saw_launch = 1'b0;
+    always @(posedge clk) if (launch_req) saw_launch <= 1'b1;
     reg        io_sample = 1'b0, io_write = 1'b0;
     reg  [7:0] port = 8'h00, wdata = 8'h00;
     reg  [83:0] keys = 84'd0;
@@ -46,7 +68,10 @@ module tb;
         .psg_wr(), .stereo_wr(stereo_wr), .fm_wr(), .fm_addr(), .fm_ctl(), .mem_ctl(mem_ctl), .io_ctl(io_ctl),
         .wram_bank(wram_bank), .slot_sel(), .card_bank(), .turbo_step(), .pcm_ctl(), .pcm_wr(),
         .pcm_fill(fill), .pad1(p1), .pad2(p2), .reset_btn(1'b0), .kb_keys(keys),
-        .kb_ghosting(ghost));
+        .kb_ghosting(ghost), .cold(cold),
+        .plat_mode(p_mode), .plat_auto(p_auto), .plat_flags(8'h11), .rom_log2(5'd15), .mapper(2'd0),
+        .machines(6'b101111), .plat_boost(pb), .plat_chg(pc), .boost(boost), .boot_mode(boot_mode),
+        .launch_req(launch_req));
 
     task out(input [7:0] p, input [7:0] d);
         begin
@@ -95,15 +120,15 @@ module tb;
         end
     endfunction
 
-    integer n, k, bad_kb, bad_math, bad_gate, bad_reg, ghosted, a, b, op;
+    integer n, k, bad_kb, bad_math, bad_gate, bad_reg, bad_bios, ghosted, a, b, op;
     reg [2:0]  row;
     reg [7:0]  lo, hi;
     reg [11:0] want_kb;
     reg [15:0] got, want;
     initial begin
-        bad_kb = 0; bad_math = 0; bad_gate = 0; bad_reg = 0; ghosted = 0;
+        bad_kb = 0; bad_math = 0; bad_gate = 0; bad_reg = 0; bad_bios = 0; ghosted = 0;
         repeat (3) @(negedge clk);
-        rst = 1'b0;
+        rst = 1'b0; cold = 1'b0;
 
         // ---- keyboard, SC-3000 mode
         mode = 3'd3;
@@ -186,7 +211,63 @@ module tb;
         out(8'h0C, 8'h55); if (mem_ctl !== 8'h55) bad_gate = bad_gate + 1;
         $display("I/O gate and machine ID: %0d wrong", bad_gate);
 
-        if (bad_kb == 0 && bad_math == 0 && bad_gate == 0 && bad_reg == 0) $display("PASS");
+        // ---- the BIOS's ports and settings
+        mode = 3'd5; fea = 8'h00;
+        // the first cold reset (at the start) took the platform's boosts, with no change pulse
+        if (boost !== 11'b101_0001_0001) bad_bios = bad_bios + 1;
+        pb = 11'b100_0000_0100;                                  // true TMS colours and Start = Pause on,
+        cold = 1'b1; rst = 1'b1; pc = 9'h1FF; @(negedge clk);    // changed during a cold reset
+        pc = 9'd0; @(negedge clk); rst = 1'b0; cold = 1'b0;
+        @(negedge clk);
+        if (mem_ctl !== 8'hE0 || boost !== pb) bad_bios = bad_bios + 1;
+        out(8'h18, 8'd21); in(8'h19, lo); if (lo !== 8'h2F) bad_bios = bad_bios + 1;   // machines run
+        out(8'h18, 8'd16); in(8'h19, lo); if (lo !== 8'hFF) bad_bios = bad_bios + 1;   // Auto
+        out(8'h18, 8'd18); in(8'h19, lo); if (lo !== 8'd15) bad_bios = bad_bios + 1;   // 32 KB
+        out(8'h18, 8'd0); out(8'h19, 8'd4);                      // the SF-7000: not run here
+        out(8'h18, 8'd0); in(8'h19, lo); if (lo !== 8'd0) bad_bios = bad_bios + 1;
+        out(8'h18, 8'd0); out(8'h19, 8'd1); out(8'h19, 8'd3);    // Game Gear; index 1 = 3 (bit 0)
+        if (boot_mode !== 3'd1 || boost[0] !== 1'b0) bad_bios = bad_bios + 1;           // not current yet
+        out(8'h18, 8'd1); in(8'h19, lo); if (lo !== 8'd1) bad_bios = bad_bios + 1;
+        out(8'h18, 8'd4); out(8'h19, 8'd7); out(8'h18, 8'd4); in(8'h19, lo); if (lo !== 8'd0) bad_bios = bad_bios + 1;
+        out(8'h18, 8'd4); out(8'h19, 8'd3);                      // turbo step 3 for the launch
+        out(8'h18, 8'd2); out(8'h19, 8'd1);                      // the BIOS: overflow flag on ...
+        pb[2] = 1'b0; pc = 9'b0_0000_0100; @(negedge clk); pc = 9'd0; @(negedge clk);   // ... the platform: Start = Pause off
+        if (boost[2] !== 1'b0) bad_bios = bad_bios + 1;          // a platform change acts at once
+        pb[3] = 1'b1; @(negedge clk); if (boost[3] !== 1'b0) bad_bios = bad_bios + 1;  // a value with no change pulse is not taken
+        pb[3] = 1'b0;
+        pc = 9'b0_0000_0010; @(negedge clk); pc = 9'd0; @(negedge clk);   // and later the platform's overflow flag: off
+        // a BIOS write and a platform change of the same boost in one clock: the platform's wins
+        out(8'h18, 8'd7); pb[8] = 1'b1; pc = 9'b0_0100_0000; out(8'h19, 8'd0); pc = 9'd0;
+        out(8'h18, 8'd7); in(8'h19, lo); if (lo !== 8'd1 || boost[8] !== 1'b1) bad_bios = bad_bios + 1;
+        if (saw_launch) bad_bios = bad_bios + 1;
+        out(8'h1F, 8'hA4); if (saw_launch) bad_bios = bad_bios + 1;
+        out(8'h1F, 8'hA5); if (!saw_launch) bad_bios = bad_bios + 1;
+        rst = 1'b1; pb[10] = 1'b0; pc = 9'b1_0000_0000;          // the launch's reset, and in its clock
+        @(negedge clk); rst = 1'b0; pc = 9'd0; @(negedge clk);    // the platform's true TMS colours: off
+        if (mem_ctl !== 8'hA8 || boot_mode !== 3'd1) bad_bios = bad_bios + 1;
+        if (boost !== {1'b0, 1'b0, 1'b1, 1'b0, 1'b0, 3'd3, 1'b0, 1'b0, 1'b1}) bad_bios = bad_bios + 1;
+        // a later cold reset keeps the boosts in effect and offers them for the next launch; a
+        // BIOS change not yet launched is dropped
+        out(8'h3E, 8'hE0); out(8'h18, 8'd4); out(8'h19, 8'd1);    // the BIOS mapped again: turbo 1 next
+        pb = 11'd0; cold = 1'b1; rst = 1'b1; @(negedge clk); @(negedge clk); rst = 1'b0; cold = 1'b0;
+        @(negedge clk);
+        if (mem_ctl !== 8'hE0 || boost !== {1'b0, 1'b0, 1'b1, 1'b0, 1'b0, 3'd3, 1'b0, 1'b0, 1'b1})
+            bad_bios = bad_bios + 1;
+        out(8'h18, 8'd4); in(8'h19, lo); if (lo !== 8'd3) bad_bios = bad_bios + 1;
+        out(8'h18, 8'd0); in(8'h19, lo); if (lo !== 8'd0) bad_bios = bad_bios + 1;   // Auto: the Master System
+        out(8'h3E, 8'hA8);
+        out(8'h18, 8'h5A); if (mem_ctl !== 8'h5A) bad_bios = bad_bios + 1;   // bit 3 set: $18 is the $3E mirror again
+        out(8'h3E, 8'h20);                                       // bits 3 and 6 clear: the cartridge answers ...
+        out(8'h18, 8'h24); if (mem_ctl !== 8'h24) bad_bios = bad_bios + 1;   // ... and $18 is the mirror
+        // index 0 after a cold reset: the platform's choice if it runs that machine, else 0
+        p_auto = 1'b0; p_mode = 3'd1; cold = 1'b1; rst = 1'b1; @(negedge clk); rst = 1'b0; cold = 1'b0;
+        if (boot_mode !== 3'd1) bad_bios = bad_bios + 1;         // Game Gear
+        p_mode = 3'd4; cold = 1'b1; rst = 1'b1; @(negedge clk); rst = 1'b0; cold = 1'b0;
+        if (boot_mode !== 3'd0) bad_bios = bad_bios + 1;         // the SF-7000, which it does not run
+        p_auto = 1'b1;
+        $display("BIOS ports and settings: %0d wrong", bad_bios);
+
+        if (bad_kb == 0 && bad_math == 0 && bad_gate == 0 && bad_reg == 0 && bad_bios == 0) $display("PASS");
         else $display("FAIL");
         $finish;
     end

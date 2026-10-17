@@ -9,7 +9,7 @@ The source is bios/masterdrive_bios.asm (with its includes), assembled by z80asm
 which this script turns into an assembler include. The outputs, all committed:
 
   bios/masterdrive_bios.rom          the image, padded with $FF to 8 KB (the BIOS ROM's size,
-                                     Technical Reference section 2); larger is refused
+                                     Technical Reference section 20); larger is refused
   pocket-core/rtl/mdr_bios.hex       the same bytes, one per line, for $readmemh
   emulator/masterdrive-emulator.html the same bytes as base64, between the markers
                                      BIOS_BEGIN and BIOS_END

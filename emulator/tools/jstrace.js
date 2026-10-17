@@ -1,10 +1,15 @@
 'use strict';
 // JS emulator instruction trace in the same record format as pocket-core/sim/ref/gstrace.cpp.
+// The game starts directly; BIOS=1 powers the machine on and traces the BIOS from its
+// first instruction (mode is the platform's machine choice; START=1 holds Start for the
+// first two frames, the BIOS's skip path).
 const fs = require('fs');
 const { loadEmu, newMachine } = require('./emuload');
 const [,, html, rom, mode, n, out] = process.argv;
 const X = loadEmu(html, { quiet: true });
-const m = newMachine(X, mode, fs.readFileSync(rom));
+const bios = process.env.BIOS === '1';
+const m = bios ? new X.Machine() : newMachine(X, mode, fs.readFileSync(rom));
+if (bios) { m.cart = new Uint8Array(fs.readFileSync(rom)); m.platformMode = mode; m.powerOn(); }
 if (process.env.PAL === '1') m.pal = true;
 if (process.env.PHASE) m.lineCarry = -(+process.env.PHASE);
 const N = +n; const buf = Buffer.alloc(N * 12); let k = 0;
@@ -18,6 +23,7 @@ function rec() {
 }
 C.step = function () { rec(); const c = origStep(); cyc += c; return c; };
 C.irq = function () { const c = origIrq(); cyc += c; return c; };
-while (k < N) m.runFrame();
+let f = 0;
+while (k < N) { if (bios) m.btn.start = (process.env.START === '1' && f < 2) ? 1 : 0; m.runFrame(); f++; }
 fs.writeFileSync(out, buf.subarray(0, N * 12));
 console.log('traced', N);

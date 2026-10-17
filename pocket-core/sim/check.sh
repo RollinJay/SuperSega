@@ -9,7 +9,17 @@
 #      take several clocks in the core, match reference models, $0A and $08
 #      read back, and the MasterDrive I/O gate and machine ID answer as Q1 and
 #      Q8 decide
-#   4. sim/sys: the machine draws the same frames as the emulator's machine model
+#   4. sim/sys: every case starts the machine through its BIOS (the platform's
+#      machine choice set to the case's mode, Start held for two frames: the
+#      BIOS's skip path) and counts frames from the BIOS's launch, as a game the
+#      emulator's tools start directly; the BIOS's own screens (the cartridge,
+#      card, USB and system pages and the controller test, with scripted input;
+#      a headerless SG-1000 cartridge; MasterDrive software) are the emulator's,
+#      and its first 50,000 instructions take the emulator's time, instruction
+#      for instruction (later ones poll the V counter and wait for interrupts,
+#      which the emulator times at line boundaries: Reconciliation section 5),
+#      and a Start held through its launch raises no Pause until pressed again;
+#      the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and MasterDrive feature test
 #      ROMs, for the I/O test ROM in Master System and Game Gear modes, for the
 #      I/O gate ROM (mdports.sms) in MasterDrive, Master System and Game Gear
@@ -37,9 +47,14 @@
 #      System and MasterDrive modes) and has no FM in Game Gear mode, and a
 #      tightly timed FM driver still plays at 200 % turbo; in PAL, frames come at
 #      49.70 Hz and the FM and PSG pitch follow the PAL clock; and the clock
-#      enables keep their spacing (a check inside mdr_top)
-#   5. sim/pocket: through the Pocket platform layer the frames match the machine
-#      simulation, NTSC and PAL (a headerless TMS ROM is detected as SG-1000 and
+#      enables keep their spacing, the first clock after any reset or launch
+#      being a base cycle with the turbo accumulator at 0 (a check inside mdr_top)
+#   5. sim/pocket: through the Pocket platform layer, with the BIOS's skip path
+#      (Start held after every cold reset), each launch starts the expected
+#      machine (also an 8 KB and a 24 KB image over PSRAM that holds an earlier
+#      cartridge's headers, and again after a Video change), and
+#      the frames match the machine simulation, NTSC and PAL (a headerless TMS
+#      ROM is identified as SG-1000 by the BIOS and
 #      drawn in true TMS colours, the default; a TMS mode at 240 lines in
 #      MasterDrive mode, the same; and mdrtext.sms); the video timing the scaler sees
 #      is regular (PAL lines 345 or 346 pixel clocks), also across a switch from
@@ -47,7 +62,8 @@
 #      MasterDrive and in Master System mode with Auto (mdports.sms); Pocket A
 #      and B read as buttons 1 and 2 in Master System mode
 #      and B as button 1 in MasterDrive mode; and the save slot reads back the
-#      loaded file with only the bytes the ROM writes changed
+#      loaded file with only the bytes the ROM writes changed, and unchanged
+#      when the same ROM runs as SC-3000, whose cartridge RAM is its own
 #
 # usage: sim/check.sh [workdir]     (workdir defaults to a new temporary directory)
 # Needs what README.md lists for the simulations: Verilator 5, iverilog,
@@ -124,6 +140,9 @@ SYS_CASES=(
     "gfxfuzz25|gfxfuzz25.sms|ss|71|70||"
     "gfxfuzz38|gfxfuzz38.sms|ss|71|70||"
     "dma|dma.sms|ss|11|10||"
+    "biosmenu|vdp224.sms|sms|55|12 24 30 36 42 46 52|-bios -press 12:2 -press 20:16 -press 26:8 -press 32:8 -press 38:8 -press 44:16 -press 50:65:4|BIOS=1 PRESS=12:2,20:16,26:8,32:8,38:8,44:16,50:65:4"
+    "biossg|tms_g1.sg|auto|13|12|-bios|BIOS=1"
+    "biosmd|mdrfeat.sms|ss|13|12|-bios|BIOS=1"
 )
 run_sys_case() {
     local name rom mode n dumps topt jenv tol
@@ -228,6 +247,26 @@ if (cd "$PC/sim/sys" && ./obj/tb_mdr ../../roms/dma.sms ss 2 "$W/sys/dmatime" -l
    node "$PC/../emulator/tools/jstrace.js" "$PAGE" "$PC/roms/dma.sms" ss 4000 "$W/js/dmatime_js.bin" >> "$W/sys/dmatime.log" 2>&1; then
     python3 tools/cmp_cycles.py "$W/sys/dmatime_rt.bin" "$W/js/dmatime_js.bin" roms/dma.sms || fail=1
 else echo "FAILED:"; cat "$W/sys/dmatime.log"; fail=1; fi
+# the BIOS, instruction by instruction: its first 50,000 instructions on the
+# core and on the emulator (the menu path: start-up, the cartridge's header read
+# through $3E, the video set-up and the first drawing)
+printf '%-9s BIOS, first 50,000 instructions: ' biostrace
+if (cd "$PC/sim/sys" && ./obj/tb_mdr ../../roms/vdp224.sms sms 9 "$W/sys/biostrace" -bios -trace 50000 "$W/sys/biostrace_rt.bin") \
+       > "$W/sys/biostrace.log" 2>&1 &&
+   BIOS=1 node "$PC/../emulator/tools/jstrace.js" "$PAGE" "$PC/roms/vdp224.sms" sms 50000 "$W/js/biostrace_js.bin" >> "$W/sys/biostrace.log" 2>&1; then
+    python3 tools/cmp_cycles.py "$W/sys/biostrace_rt.bin" "$W/js/biostrace_js.bin" ../bios/masterdrive_bios.rom --no-dma --count 50000 || fail=1
+else echo "FAILED:"; cat "$W/sys/biostrace.log"; fail=1; fi
+# Start = Pause, Start pressed again during the BIOS's last clears and held
+# through the launch: no Pause until it is released and pressed again
+printf '%-9s Start held through the launch: ' biospause
+if (cd "$PC/sim/sys" &&
+    ./obj/tb_mdr ../../roms/vdp224.sms sms 30 "$W/sys/biospause" -bios -press 0:128:2 -press 6:128:60 > "$W/sys/biospause.log" 2>&1 &&
+    ./obj/tb_mdr ../../roms/vdp224.sms sms 30 "$W/sys/biospause2" -bios -press 0:128:2 -press 6:128:10 -press 20:128:3 \
+        > "$W/sys/biospause2.log" 2>&1) &&
+   grep -q '^launch in frame' "$W/sys/biospause.log" && grep -qx 'NMIs after the launch: 0' "$W/sys/biospause.log" &&
+   grep -q '^launch in frame' "$W/sys/biospause2.log" && grep -qx 'NMIs after the launch: 1' "$W/sys/biospause2.log"; then
+    echo "no Pause while held, one on the next press"
+else echo "FAILED:"; cat "$W/sys/biospause.log" "$W/sys/biospause2.log"; fail=1; fi
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"
@@ -235,8 +274,11 @@ build pocket
 # name | ROM | frames to run | options and frames to dump | video timing to expect
 #   ntsc: every line 342 pixel clocks, every frame 89604; pal: lines of 345 or
 #   346 (machine time is held, the pixel clock is not), frames 108031-108032,
-#   313 lines; toggle: PAL switched to NTSC mid-frame restarts the machine:
-#   lines of both kinds appear, and every frame has 262 to 313 lines
+#   313 lines; toggle: PAL switched to NTSC mid-frame restarts the machine
+#   (its BIOS runs again and launches the game again): lines of both kinds
+#   appear, and every frame has 262 to 313 lines. pstale8/pstale24: an 8 KB and
+#   a 24 KB headerless image loaded over PSRAM that holds an earlier cartridge's
+#   headers (+stale); the BIOS must not read them (below)
 POCKET_CASES=(
     "p224|vdp224.sms|40|37|ntsc"
     "pss|mdrfeat.sms|12|10 11|ntsc"
@@ -247,16 +289,19 @@ POCKET_CASES=(
     "pbtn1|ports.sms|11|-system 1 -hold 4 10|ntsc"
     "pbtn2|ports.sms|11|-system 1 -hold 5 10|ntsc"
     "psave|save.sms|10|-save ../../roms/save_in.sav|ntsc"
+    "pscsave|save.sms|10|-system 5 -save ../../roms/save_in.sav|ntsc"
     "ptms|tms_g2.sg|47|46|ntsc"
     "ptms240|tms_g2_240.sms|61|60|ntsc"
     "pgfx|mdrtext.sms|21|20|ntsc"
     "p224pal|vdp224.sms|40|-set 108 1 37|pal"
-    "ptoggle|vdp224.sms|30|-set 108 1 -setat 20 200000 108 0|toggle"
+    "ptoggle|vdp224.sms|45|-set 108 1 -setat 20 200000 108 0|toggle"
+    "pstale8|tms_g1.sg|2|-trunc 8192 +stale|ntsc"
+    "pstale24|tms_g1.sg|2|-trunc 24576 +stale|ntsc"
 )
 run_pocket_case() {
     local name rom n args tim tline x extra=() need=()
     IFS='|' read -r name rom n args tim <<< "$1"
-    if [ "$name" = psave ]; then extra=(-readsave "$W/pocket/back.sav"); fi
+    case "$name" in psave|pscsave) extra=(-readsave "$W/pocket/$name.sav") ;; esac
     # shellcheck disable=SC2086
     (cd "$PC/sim/pocket" && ./obj/tb_pocket "../../roms/$rom" "$n" "$W/pocket/$name" $args ${extra[@]+"${extra[@]}"}) \
         > "$W/pocket/$name.log" 2>&1 || { echo "tb_pocket $name failed:"; cat "$W/pocket/$name.log"; return 1; }
@@ -266,9 +311,9 @@ run_pocket_case() {
         || { echo "tb_pocket $name: clock enable check failed:"; grep 'enable check' "$W/pocket/$name.log"; return 1; }
     tline=$(grep '^timing:' "$W/pocket/$name.log")
     case "$tim" in
-        ntsc) need=('HS period 342-342' 'VS period 89604-89604') ;;
-        pal)  need=('HS period 345-346' 'VS period 108031-108032' 'HS per frame 313-313') ;;
-        toggle) need=('[345 x' '[342 x' 'HS per frame 262-313;') ;;
+        ntsc) need=('HS period 342-342' 'VS period 89604-89604' 'frames across a reset or launch 1') ;;
+        pal)  need=('HS period 345-346' 'VS period 108031-108032' 'HS per frame 313-313' 'frames across a reset or launch 1') ;;
+        toggle) need=('[345 x' '[342 x' 'HS per frame 262-313;' 'frames across a reset or launch 3') ;;
     esac
     need+=('wide HS/VS 0;' 'skip 0')
     for x in "${need[@]}"; do
@@ -277,6 +322,22 @@ run_pocket_case() {
 }
 export -f run_pocket_case
 printf '%s\0' "${POCKET_CASES[@]}" | xargs -0 -n 1 -P "$JOBS" bash -c 'run_pocket_case "$1"' _
+# the machine each launch starts (0 SMS, 1 GG, 2 SG-1000, 3 SC-3000, 5 MasterDrive): the
+# System setting's choice, or the BIOS's from the header with System = Auto
+for c in 'p224|0|1|Auto, a Master System header' 'pggports|1|1|System = Game Gear' \
+         'pmdports|5|1|System = MasterDrive' 'ptms|2|1|Auto, no header, 32 KB' \
+         'pscsave|3|1|System = SC-3000' \
+         'pstale8|2|1|Auto, no header, 8 KB over stale PSRAM' \
+         'pstale24|2|1|Auto, no header, 24 KB over stale PSRAM' \
+         'ptoggle|0|2|Auto, launched again after the Video change'; do
+    IFS='|' read -r name want times what <<< "$c"
+    printf '%-12s launch: ' "$name"
+    got=$(grep -c "^launch: machine $want\$" "$W/pocket/$name.log" || true)
+    all=$(grep -c '^launch: ' "$W/pocket/$name.log" || true)
+    [ "$got" = "$times" ] && [ "$all" = "$times" ] \
+        || { echo "expected $times launch(es) of machine $want ($what):"; grep '^launch: ' "$W/pocket/$name.log"; exit 1; }
+    echo "machine $want x$times ($what)"
+done
 fail=0
 for pair in "p224_37 v224_37" "pss_10 mdrfeat_10" "pss_11 mdrfeat_11" "pggports_10 ggports_10" "ptms_46 tmstrue_46" \
             "ptms240_60 tmstrue240_60" "pgfx_20 mdrtext_20" "p224pal_37 v224pal_37" "pmdports_10 mdports_10" "pmdauto_10 smsmdports_10"; do
@@ -298,7 +359,7 @@ for c in 'pbutton|MasterDrive mode, Pocket B held|$EF|button 1' \
     echo "port \$DC reads $want ($btn)"
 done
 printf 'psave        '
-python3 - "$PC/roms/save_in.sav" "$W/pocket/back.sav" <<'EOF'
+python3 - "$PC/roms/save_in.sav" "$W/pocket/psave.sav" <<'EOF'
 import sys
 loaded = open(sys.argv[1], 'rb').read()
 back = open(sys.argv[2], 'rb').read()
@@ -310,5 +371,13 @@ bad = sum(1 for i in range(min(len(back), len(want))) if back[i] != want[i])
 print(f'save slot read back: {len(back)} bytes, {bad} differ from the expected')
 sys.exit(0 if len(back) == len(want) and bad == 0 else 1)
 EOF
+# the same game run as SC-3000: its RAM at $8000-$BFFF is the SC-3000's own,
+# so the save comes back as it was loaded
+printf 'pscsave      '
+if cmp -s "$PC/roms/save_in.sav" "$W/pocket/pscsave.sav"; then
+    echo 'run as SC-3000: the save slot reads back as loaded'
+else
+    echo 'run as SC-3000: the save slot changed'; exit 1
+fi
 
 printf '\nAll Pocket core checks passed.\n'

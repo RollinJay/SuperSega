@@ -6,8 +6,9 @@ Design, status and verification: `docs/MasterDrive_Pocket_Core_Design.md`. The m
 rtl/                  the machine (platform-independent)
   mdr_top.v            clocks enables, CPU, memory, I/O, VDP, PSG, FM and the sound mix, bus synchroniser, enhancement layer
   mdr_z80.v            tv80 wrapper: clock enables, exact I/O sample point
-  mdr_mem.v            memory map, mappers, work RAM, cartridge RAM
-  mdr_io.v             port decode, Game Gear and MasterDrive registers, pads, SK-1100 PPI
+  mdr_mem.v            memory map, mappers, work RAM, cartridge RAM, the BIOS ROM
+  mdr_bios.hex         the BIOS image, written by ../bios/make_bios.py (never edit by hand)
+  mdr_io.v             port decode, Game Gear and MasterDrive registers, the BIOS's ports and settings, pads, SK-1100 PPI
   mdr_vdp.v            VDP: Mode 4 and the TMS9918 modes, with the MasterDrive register file
   mdr_psg.v            SN76489 (Sega) with stereo panning
   mdr_dma.v            DMA engine
@@ -17,7 +18,7 @@ rtl/                  the machine (platform-independent)
   third_party/ikaopll/ YM2413 FM core (BSD 2-Clause), unchanged; upstream commit in VERSION
 pocket/               Analogue Pocket platform layer
   core_top.v          APF top level (port list from the APF template)
-  mdr_pocket.v         settings, ROM loading, system detection, PSRAM, saves, controls, video, audio
+  mdr_pocket.v         settings, ROM loading, the BIOS's platform information, PSRAM, saves, controls, video, audio
   mdr_save_unload.v    save-slot read-out for the bridge
   mdr_pll.v            53.693175 / 5.369318 / 5.369318+90 MHz
   core_constraints.sdc, mdr_core.qip
@@ -25,7 +26,7 @@ pocket/               Analogue Pocket platform layer
   dist/               SD-card files (core JSON, platform JSON)
   setup.sh            fetches the APF framework and assembles a Quartus project
   build_core.sh       setup.sh, Quartus compile, SD-card files and zip
-  tools/reverse_rbf.py
+  tools/reverse_rbf.py, tools/check_bios_mif.py (the build's BIOS ROM holds the image)
 sim/
   check.sh            the regression checks run on every push (see below)
   z80/                Z80 wrapper timing test (iverilog)
@@ -42,7 +43,7 @@ roms/                 the generated test ROMs (homebrew, made by tools/mk_testro
 
 Requires Verilator 5, iverilog, Node.js 18 or later (the Z80 test and `sim/check.sh` run the emulator in `../emulator/`), Python 3 with numpy and Pillow, and Yosys 0.33 for the resource estimate.
 
-`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, MasterDrive mode, Game Gear, the four TMS9918 modes), the FM test ROM must sound as its `$F2` settings say (`tools/check_fm_wav.py`), the PCM and wavetable ROM at the emulator's pitch and levels (`tools/check_pcm_wav.py`), the CPU's time for each DMA transfer in the DMA test ROM the same as the emulator's (`tools/cmp_cycles.py`), the PAL frame rate and pitch must follow the PAL clock, and the Pocket platform simulation must draw the same frames as the machine simulation (NTSC and PAL) with regular video timing, read the Pocket's A and B as buttons 1 and 2 in Master System mode and B as button 1 in MasterDrive mode, and read the save slot back byte-exact. It takes about eleven minutes on four cores.
+`sim/check.sh` runs the checks GitHub runs on every push (`../.github/workflows/checks.yml`) and stops at the first failure: `input.json` and `interact.json` must stay within the platform's limits and match what the core reads (`tools/check_core_json.py`), the test ROMs must regenerate byte for byte, the Z80 wrapper timing must match the emulator's Z80, the SC-3000 keyboard's ghosting and the math unit's divide must match reference models, the machine simulation must draw the same frames as the emulator for the test ROMs (NTSC and PAL, stock and boosted sprite limits, MasterDrive mode, Game Gear, the four TMS9918 modes), the FM test ROM must sound as its `$F2` settings say (`tools/check_fm_wav.py`), the PCM and wavetable ROM at the emulator's pitch and levels (`tools/check_pcm_wav.py`), the CPU's time for each DMA transfer in the DMA test ROM the same as the emulator's (`tools/cmp_cycles.py`), the PAL frame rate and pitch must follow the PAL clock, and the Pocket platform simulation must draw the same frames as the machine simulation (NTSC and PAL) with regular video timing, read the Pocket's A and B as buttons 1 and 2 in Master System mode and B as button 1 in MasterDrive mode, and read the save slot back byte-exact. Every case starts through the BIOS (Start held for its skip path, again after every cold reset): its menu screens and first 50,000 instructions must be the emulator's, each launch must start the expected machine (also for an 8 KB and a 24 KB image loaded over PSRAM that still holds an earlier cartridge's headers), a Start held through the launch must not pause the game, and a game with a save run as SC-3000 must leave the save as it was. It takes about eleven minutes on four cores.
 
 ```sh
 python3 tools/mk_testrom.py roms/            # vdp192/224/240, spr12, save, tone, fm, fm_tight, mdrfeat, ports, mdports, mdrregs, romwait, mdrgfx, mdrtext, gfxfuzz*, dma, pcm, tms_* (SG-1000 and taller) test ROMs
@@ -69,19 +70,21 @@ cd ../pocket && ./build.sh && mkdir -p out
 ./obj/tb_pocket ../../roms/save.sms 10 out/s -save ../../roms/save_in.sav -readsave out/back.sav
 ./obj/tb_pocket ../../roms/ports.sms 11 out/k -system 3 -hold 5 10   # MasterDrive mode, Pocket B held
 ./obj/tb_pocket ../../roms/vdp224.sms 40 out/pal -set 108 1 37         # PAL (interact $108 = 1); prints the video timing
-./obj/tb_pocket ../../roms/vdp224.sms 30 out/t -set 108 1 -setat 20 200000 108 0   # switch to NTSC in frame 20
+./obj/tb_pocket ../../roms/vdp224.sms 45 out/t -set 108 1 -setat 20 200000 108 0   # switch to NTSC in frame 20 (the BIOS runs again)
+./obj/tb_pocket ../../roms/tms_g1.sg 2 out/st -trunc 8192 +stale    # an 8 KB image over PSRAM holding old headers
+#   every launch prints the machine it starts ("launch: machine N")
 python3 ../../tools/ppmdiff.py a.ppm b.ppm [side_by_side.png] [--tol 2]
 ```
 
 ## Building for the Pocket
 
-The easy way is to let GitHub build it: every push that changes `pocket-core/` runs the "Pocket core build" workflow (`../.github/workflows/pocket-build.yml`), and its run page has the SD-card files under Artifacts. To build locally:
+The easy way is to let GitHub build it: every push that changes `pocket-core/` runs the "Pocket core build" workflow (`../.github/workflows/pocket-build.yml`), and its run page has the SD-card files under Artifacts. The nightly build (`../.github/workflows/nightly.yml`) puts the latest zip from `main` on the repository's Releases page, as the pre-release tagged `nightly`, once every check has passed. To build locally:
 
 ```sh
 pocket/build_core.sh                 # about 15 minutes; needs network access and Docker or Quartus
 ```
 
-`build_core.sh` runs `setup.sh` (which fetches Analogue's framework from github.com/open-fpga/core-template and assembles a Quartus project in `pocket/build/`), compiles it with Quartus Prime Lite 18.1 (`quartus_sh` if it is on the PATH, otherwise the `raetro/quartus:pocket` Docker image), turns the bitstream into the form the Pocket loads (`tools/reverse_rbf.py`), and puts everything for the SD card, test ROMs and the third-party licence notices (IKAOPLL, tv80, T80, agg23) included, in `pocket/build/sdcard/` and `pocket/build/MasterDrive-pocket.zip`. `TESTING.md` explains how to install it and what to expect.
+`build_core.sh` runs `setup.sh` (which fetches Analogue's framework from github.com/open-fpga/core-template and assembles a Quartus project in `pocket/build/`), compiles it with Quartus Prime Lite 18.1 (`quartus_sh` if it is on the PATH, otherwise the `raetro/quartus:pocket` Docker image), checks that the build's BIOS ROM holds `rtl/mdr_bios.hex` (`tools/check_bios_mif.py`), turns the bitstream into the form the Pocket loads (`tools/reverse_rbf.py`), and puts everything for the SD card, test ROMs and the third-party licence notices (IKAOPLL, tv80, T80, agg23) included, in `pocket/build/sdcard/` and `pocket/build/MasterDrive-pocket.zip`. `TESTING.md` explains how to install it and what to expect.
 
 ## Licences
 

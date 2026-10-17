@@ -4,6 +4,6 @@
 # 5CEBA4F23C8 (18,480 ALMs, 308 M10K) with margin.
 read_verilog -DSYNTHESIS -I../rtl -I../rtl/third_party/tv80 ../rtl/third_party/tv80/tv80_core.v ../rtl/third_party/tv80/tv80_alu.v ../rtl/third_party/tv80/tv80_mcode.v ../rtl/third_party/tv80/tv80_reg.v
 read_verilog -DSYNTHESIS ../rtl/third_party/ikaopll/IKAOPLL.v ../rtl/third_party/ikaopll/IKAOPLL_dac.v ../rtl/third_party/ikaopll/IKAOPLL_eg.v ../rtl/third_party/ikaopll/IKAOPLL_lfo.v ../rtl/third_party/ikaopll/IKAOPLL_op.v ../rtl/third_party/ikaopll/IKAOPLL_pg.v ../rtl/third_party/ikaopll/IKAOPLL_primitives.v ../rtl/third_party/ikaopll/IKAOPLL_reg.v ../rtl/third_party/ikaopll/IKAOPLL_timinggen.v
-read_verilog -DSYNTHESIS -I../rtl ../rtl/mdr_dpram.v ../rtl/mdr_z80.v ../rtl/mdr_mem.v ../rtl/mdr_io.v ../rtl/mdr_vdp.v ../rtl/mdr_psg.v ../rtl/mdr_dma.v ../rtl/mdr_pcm.v ../rtl/mdr_top.v
+read_verilog -DSYNTHESIS -DMDR_BIOS_FILE="../rtl/mdr_bios.hex" -I../rtl ../rtl/mdr_dpram.v ../rtl/mdr_z80.v ../rtl/mdr_mem.v ../rtl/mdr_io.v ../rtl/mdr_vdp.v ../rtl/mdr_psg.v ../rtl/mdr_dma.v ../rtl/mdr_pcm.v ../rtl/mdr_top.v
 synth_intel_alm -family cyclonev -top mdr_top
 stat

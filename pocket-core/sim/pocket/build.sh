@@ -5,7 +5,7 @@ R=../../rtl
 P=../../pocket
 verilator --cc --exe --build -j 2 -O3 --x-assign fast --x-initial fast --noassert \
   -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-COMBDLY \
-  --top-module tb_pocket_top -Mdir obj -o tb_pocket \
+  '+define+MDR_BIOS_FILE="../../rtl/mdr_bios.hex"' --top-module tb_pocket_top -Mdir obj -o tb_pocket \
   -I$R -I$R/third_party/tv80 -I$R/third_party/ikaopll -I$P -I$P/third_party/agg23 \
   tb_pocket_top.v psram_model.v dcfifo_model.v \
   $P/mdr_pocket.v $P/mdr_save_unload.v $P/third_party/agg23/data_loader.sv \

@@ -4,6 +4,9 @@
 // stores DQ when WE# rises (or CE# rises) with the byte enables. Each die is
 // modelled at DEPTH words (enough for the test ROMs); higher addresses wrap.
 // No timing checks: the controller's timing comes from its own parameters.
+// +stale: die 0 starts as an earlier cartridge would leave it, with a Master
+// System header ("TMR SEGA", region 4) at $1FF0, $3FF0 and $7FF0, so a test can
+// show that a smaller cartridge loaded over it never reads it.
 `timescale 1ns/1ps
 module psram_model #(parameter AW = 20) (
     input  wire [21:16] a,
@@ -24,7 +27,16 @@ module psram_model #(parameter AW = 20) (
     reg [21:0] addr;
     reg        sel1;
     integer i;
-    initial for (i = 0; i < (1<<AW); i = i + 1) begin die0[i] = 16'h0000; die1[i] = 16'h0000; end
+    initial begin
+        for (i = 0; i < (1<<AW); i = i + 1) begin die0[i] = 16'h0000; die1[i] = 16'h0000; end
+        if ($test$plusargs("stale")) for (i = 0; i < 3; i = i + 1) begin
+            die0[((24'h2000 << i) - 24'h10) / 2 + 0] = 16'h4D54;    // "TM" (little-endian words)
+            die0[((24'h2000 << i) - 24'h10) / 2 + 1] = 16'h2052;    // "R "
+            die0[((24'h2000 << i) - 24'h10) / 2 + 2] = 16'h4553;    // "SE"
+            die0[((24'h2000 << i) - 24'h10) / 2 + 3] = 16'h4147;    // "GA"
+            die0[((24'h2000 << i) - 24'h10) / 2 + 7] = 16'h4C00;    // +15: region 4, size C
+        end
+    end
 
     wire ce = !ce0_n || !ce1_n;
     always @* if (ce && !adv_n) begin addr = {a, dq}; sel1 = !ce1_n; end

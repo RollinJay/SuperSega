@@ -2,7 +2,7 @@
 
 Covers Golden Axe Warrior (SMS) and Ax Battler: A Legend of Golden Axe (Game Gear), retargeted from stock hardware to the MasterDrive profile.
 
-Feature references follow the MasterDrive machine profile v7 (`../machine/masterdrive_machine_v7.json`) and Technical Reference v3 (`../machine/MasterDrive_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q30).
+Feature references follow the MasterDrive machine profile v7 (`../machine/masterdrive_machine_v7.json`) and Technical Reference v3 (`../machine/MasterDrive_Technical_Reference_v3.md`). The plan was first written against the v5 machine block; the October 2026 check against v7 changed the points marked **v7** and settled the one value the plan had marked **confirm**, the ROM size ceiling (§4). Machine values that are still open are named where they matter, with their open-question numbers from the profile (Q1–Q39).
 
 Related: the ROM hack maker framework specification (`masterdrive-rom-hack-maker.md`), which covers how mods for these and the other roster titles are made, tested and distributed.
 
@@ -102,7 +102,7 @@ Rationale: GAW requires no viewport work and no reverting of a third-party patch
 
 ## 6. Machine questions and v7's answers
 
-The plan listed these as open against the v5 document. Machine profile v7 answers them as follows (the profile's open questions are numbered Q1–Q30):
+The plan listed these as open against the v5 document. Machine profile v7 answers them as follows (the profile's open questions are numbered Q1–Q39):
 
 - **Maximum ROM size and mapper register layout for expanded images.** 4 MB, the stock Sega mapper registers' reach, is the largest cartridge the machine takes (Q2, decided October 2026).
 - **ESAT entry format, and whether H-flip is per-sprite or per-tile.** 2 bytes per sprite, with H-flip and V-flip per sprite (Q4, resolved in v6). Feature Enable C bit 4, which once selected the 2-byte layout, is retired, so a conversion need not set it (Q13, decided October 2026).

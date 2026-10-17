@@ -17,13 +17,24 @@
 //    address).
 //  - $FFFC bit 3 maps cartridge RAM over $8000-$BFFF; bit 2 picks one of two
 //    8 KB banks, mirrored in the 16 KB window (profile open question Q3).
-//  - $3E bit 6 disables the cartridge, bit 4 work RAM: reads see $FF.
+//  - $3E bit 6 disables the cartridge, bit 4 work RAM: reads see $FF. Bit 3
+//    clear with bit 6 set maps the 8 KB BIOS ROM over $0000-$BFFF (repeated);
+//    with both enabled the cartridge answers (Technical Reference section 20). Its image is
+//    pocket-core/rtl/mdr_bios.hex, written by bios/make_bios.py; the file name
+//    is MDR_BIOS_FILE (the Quartus project's path by default; the simulations
+//    give their own).
 //  - MasterDrive: port $0A selects one of 16 work RAM banks of 8 KB; port $09
 //    routes slot 1 / slot 2 to the card, bank from port $0B.
 //  - SG-1000: linear ROM, 1 KB RAM mirrored from $C000. SC-3000: ROM $0000-$7FFF
 //    (mirrored), cart RAM $8000-$BFFF (16 KB) or $8000-$FFFF (32 KB, no work
-//    RAM), 2 KB work RAM mirrored.
+//    RAM), 2 KB work RAM mirrored. The SC-3000's cart RAM is work RAM banks 4-7,
+//    which no other stock mode uses, not the battery-saved cartridge RAM: a
+//    cartridge with a save run as SC-3000 (the BIOS's machine choice, or System)
+//    leaves its save alone.
 `default_nettype none
+`ifndef MDR_BIOS_FILE
+`define MDR_BIOS_FILE "core/rtl/mdr_bios.hex"
+`endif
 
 module mdr_mem (
     input  wire        clk,
@@ -80,7 +91,7 @@ module mdr_mem (
     wire ss    = (mode == M_SS);
 
     // ------------------------------------------------------------ decode
-    localparam T_ROM = 3'd0, T_CARD = 3'd1, T_WRAM = 3'd2, T_CRAM = 3'd3, T_OPEN = 3'd4;
+    localparam T_ROM = 3'd0, T_CARD = 3'd1, T_WRAM = 3'd2, T_CRAM = 3'd3, T_OPEN = 3'd4, T_BIOS = 3'd5;
     reg [2:0]  tgt;
     reg [22:0] roff;                  // ROM byte offset
     reg [16:0] woff;                  // work RAM offset (128 KB)
@@ -106,8 +117,8 @@ module mdr_mem (
         end
         M_SC: begin
             if (a < 16'h8000) begin tgt = T_ROM; roff = {7'd0, a}; end
-            else if (sc_ram32) begin tgt = T_CRAM; coff = a[14:0]; end
-            else if (a < 16'hC000) begin tgt = T_CRAM; coff = {1'b0, a[13:0]}; end
+            else if (sc_ram32) begin tgt = T_WRAM; woff = {2'b01, a[14:0]}; end
+            else if (a < 16'hC000) begin tgt = T_WRAM; woff = {3'b010, a[13:0]}; end
             else begin tgt = T_WRAM; woff = {6'd0, a[10:0]}; end
         end
         M_SMS, M_GG, M_SS: begin
@@ -150,9 +161,10 @@ module mdr_mem (
                 end
                 endcase
             end
-            // $3E enables: disabled regions read open bus
+            // $3E enables: disabled regions read open bus; the BIOS ROM where the cartridge is off
             if (a >= 16'hC000 && mem_ctl[4]) tgt = T_OPEN;
             if (a <  16'hC000 && mem_ctl[6] && !card_present) tgt = T_OPEN;
+            if (a <  16'hC000 && !mem_ctl[3] && mem_ctl[6]) tgt = T_BIOS;
         end
         default: tgt = T_OPEN;
         endcase
@@ -179,6 +191,13 @@ module mdr_mem (
     mdr_dpram #(.AW(15), .DW(8)) u_cartram (
         .clk_a(clk), .we_a(c_we), .addr_a(c_addr), .din_a(c_din), .dout_a(c_dout),
         .clk_b(sv_clk), .we_b(sv_we), .addr_b(sv_addr), .din_b(sv_din), .dout_b(sv_dout));
+
+    // the BIOS ROM: 8 KB, read like the RAMs (one clock)
+    reg  [7:0]  bios [0:8191];
+    reg  [12:0] b_addr;
+    reg  [7:0]  b_dout;
+    initial $readmemh(`MDR_BIOS_FILE, bios);
+    always @(posedge clk) b_dout <= bios[b_addr];
 
     // ------------------------------------------------------------ read path
     reg [2:0]  rd_tgt;
@@ -210,6 +229,7 @@ module mdr_mem (
                 T_CARD: begin rom_req <= 1'b1; rom_addr <= {1'b1, 4'd0, roff[18:0] & card_mask}; end
                 T_WRAM: begin w_addr <= woff; rd_pipe <= 2'b01; end
                 T_CRAM: begin c_addr <= coff; rd_pipe <= 2'b01; end
+                T_BIOS: begin b_addr <= a[12:0]; rd_pipe <= 2'b01; end
                 default: begin rdata <= 8'hFF; rd_busy <= 1'b0; end
                 endcase
             end
@@ -219,7 +239,7 @@ module mdr_mem (
                 rd_busy <= 1'b0;
             end
             if (rd_pipe[1]) begin
-                rdata <= (rd_tgt == T_WRAM) ? w_dout : c_dout;
+                rdata <= (rd_tgt == T_WRAM) ? w_dout : (rd_tgt == T_BIOS) ? b_dout : c_dout;
                 rd_busy <= 1'b0;
             end
 
@@ -230,8 +250,8 @@ module mdr_mem (
                 M_SG: if (a >= 16'hC000) begin w_we <= 1'b1; w_addr <= {7'd0, a[9:0]}; w_din <= dout; end
                 M_SC: begin
                     if (a >= 16'h8000) begin
-                        if (sc_ram32) begin c_we <= 1'b1; c_addr <= a[14:0]; c_din <= dout; end
-                        else if (a < 16'hC000) begin c_we <= 1'b1; c_addr <= {1'b0, a[13:0]}; c_din <= dout; end
+                        if (sc_ram32) begin w_we <= 1'b1; w_addr <= {2'b01, a[14:0]}; w_din <= dout; end
+                        else if (a < 16'hC000) begin w_we <= 1'b1; w_addr <= {3'b010, a[13:0]}; w_din <= dout; end
                         else begin w_we <= 1'b1; w_addr <= {6'd0, a[10:0]}; w_din <= dout; end
                     end
                 end

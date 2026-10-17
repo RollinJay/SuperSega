@@ -1,0 +1,82 @@
+name: Nightly
+
+# Every night, if main has changed since the last nightly: the checks (checks.yml)
+# and the Quartus build (pocket-build.yml), then, if both pass, a pre-release
+# tagged "nightly" with the Pocket core's SD-card files as a zip and the emulator
+# page, in place of the one before. Started by hand from the Actions tab
+# ("Run workflow"), it builds even if nothing has changed.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'     # 06:17 UTC every day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  changed:
+    name: Anything new since the last nightly?
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.cmp.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # history and tags, for the last nightly's commit
+      - id: cmp
+        run: |
+          last=$(git rev-list -n 1 nightly 2>/dev/null || true)
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$last" != "$GITHUB_SHA" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "The last nightly was built from $GITHUB_SHA: nothing new."
+          fi
+
+  checks:
+    needs: changed
+    if: needs.changed.outputs.build == 'true'
+    uses: ./.github/workflows/checks.yml
+
+  build:
+    needs: changed
+    if: needs.changed.outputs.build == 'true'
+    uses: ./.github/workflows/pocket-build.yml
+
+  publish:
+    name: Replace the nightly release
+    needs: [checks, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: MasterDrive-pocket
+          path: sdcard
+      - name: Zip, then replace the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          stamp="$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)"
+          zipf="MasterDrive-pocket-nightly-$stamp.zip"
+          page="masterdrive-emulator-nightly-$stamp.html"
+          (cd sdcard && zip -qr "../$zipf" .)
+          cp emulator/masterdrive-emulator.html "$page"
+          cat > notes.md <<NOTES
+          Built automatically from main at $(git rev-parse HEAD) on $(date -u +'%d %B %Y'), after every check in the repository passed (the emulator's probes and self-tests, the BIOS's build and hand-over test, and the Pocket core's simulations).
+
+          - \`$zipf\`: the Analogue Pocket core. Unzip it onto the root of the Pocket's SD card; \`pocket-core/TESTING.md\` (also in the zip, under Cores) says what to try.
+          - \`$page\`: the emulator, one HTML file to open in a browser.
+
+          Nightlies are untested on a Pocket. Each replaces the one before.
+          NOTES
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly $stamp" --notes-file notes.md "$zipf" "$page"

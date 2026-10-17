@@ -1671,6 +1671,7 @@ class Machine{
     this.chUse={psg:[0,0,0,0],fm:new Array(9).fill(0)};
     this.sramDirty=0; this.card=this.card||null;
     this.kb=this.kb||makeKeyboard();
+    if(this.sf) this.sf.reset();                   // the SF-7000's 8255 and floppy controller
     this.dram=this.dram||new Uint8Array(0x8000);   // SC-3000 cart RAM at $8000, up to 32 KB
     if(this.scRam===undefined) this.scRam=16;      // 16 = DRAM $8000-$BFFF + 2K work RAM
                                                    // 32 = DRAM $8000-$FFFF, work RAM disabled
@@ -1693,9 +1694,9 @@ class Machine{
     this.reset(); }
   loadCard(buf){ let d=new Uint8Array(buf);
     if(d.length%1024===512) d=d.slice(512);
-    this.card=d; log('card loaded: '+d.length+' bytes'); }
+    this.card=d; this.cardIn=true; log('card loaded: '+d.length+' bytes'); }
 
-  /* ---- the MasterDrive BIOS (Technical Reference section 2) ----
+  /* ---- the MasterDrive BIOS (Technical Reference section 20) ----
      powerOn() is a cold reset: the machine starts in MasterDrive mode with $3E = $E0,
      so the 8 KB BIOS ROM is at $0000-$BFFF and its ports $18, $19 and $1F answer. The
      BIOS launches the game with $A5 at $1F: the CPU is held, and at the frame wrap
@@ -1703,20 +1704,37 @@ class Machine{
      is that reset, and the direct start the tools use. Cartridge RAM has a battery:
      neither clears it. */
   powerOn(){
-    const keep=this.ram.slice(0x2000,0xA000), choice=this.platformChoice();
-    this.mode='ss'; this.reset(); this.ram.set(keep,0x2000); this.memCtl=0xE0;
-    const b=this.boot={idx:0,set:new Uint8Array(10),launch:false};
-    b.set[0]=(choice===0xFF)?0:choice;
+    const keep=this.ram.slice(0x2000,0xA000), dirty=this.sramDirty, btn=this.btn, choice=this.platformChoice();
+    this.mode='ss'; this.reset(); this.ram.set(keep,0x2000); this.sramDirty=dirty; this.btn=btn; this.memCtl=0xE0;
+    const b=this.boot={idx:0,set:new Uint8Array(10),launch:false,running:true};
+    b.set[0]=(choice===0xFF||!((this.machinesRun()>>choice)&1))?0:choice;   // a machine it runs
     for(let k=1;k<=9;k++) b.set[k]=this.boostGet(k);
   }
+  /* The launch resets the machine's registers (the BIOS's setting index included). It
+     leaves the memories as the BIOS left them (VRAM, CRAM, work RAM, cartridge RAM and
+     which of its pages were written, the wavetable's waveforms) and
+     the registers a Z80 reset does not set (BC, DE, HL, IX, IY, BC', DE', HL'), as the
+     Pocket core's do; the palette-written flags are registers and clear. The pad is
+     outside the machine: buttons held stay held. */
   launch(){
-    const b=this.boot, keep=this.ram.slice(0x2000,0xA000);
+    const b=this.boot, keep=this.ram.slice(0x2000,0xA000), dirty=this.sramDirty, btn=this.btn;
+    const vram=this.vdp.vram, cram=this.vdp.cram, R=this.cpu.R.slice(), S=this.cpu.S.slice();
+    const waves=this.wave.map(w=>w.ram);
     for(let k=1;k<=9;k++) this.boostSet(k,b.set[k]);    // the next values become current
-    this.mode=MCODE[b.set[0]]; b.launch=false;
-    this.reset(); this.ram.set(keep,0x2000);
+    this.mode=MCODE[b.set[0]]; b.launch=false; b.running=false; b.idx=0;
+    this.reset(); this.ram.set(keep,0x2000); this.sramDirty=dirty; this.btn=btn;
+    this.prevStart=btn.start;                           // a Start held through the launch is no press
+    this.vdp.vram=vram; this.vdp.cram=cram;
+    this.wave.forEach((w,i)=>{ w.ram=waves[i]; });      // the waveforms are memory: kept
+    for(const i of [0,1,2,3,4,5,8,9,10,11]) this.cpu.R[i]=R[i];
+    for(let i=0;i<6;i++) this.cpu.S[i]=S[i];
+    if(this.fpga) this.fpga.did('bios');
     if(this.onLaunch) this.onLaunch();
   }
-  biosOn(){ return !(this.memCtl&8)&&(this.mode==='sms'||this.mode==='gg'||this.mode==='ss'); }
+  /* The BIOS ROM answers while $3E enables it (bit 3 clear) and disables the cartridge
+     (bit 6 set); with both enabled the cartridge answers (Japanese software writes $3E
+     with both bits clear before it reads $F2). */
+  biosOn(){ return !(this.memCtl&8)&&!!(this.memCtl&0x40)&&(this.mode==='sms'||this.mode==='gg'||this.mode==='ss'); }
   platformChoice(){ const i=MCODE.indexOf(this.platformMode); return i<0?0xFF:i; }
   machinesRun(){ return 0x2F|((this.sf&&this.sf.rom)?0x10:0); }   // the SF-7000 needs its IPL
   boostGet(k){ const a=this.ael, key=BOOSTKEY[k];
@@ -1727,13 +1745,14 @@ class Machine{
      value for the next launch: the last change wins (Technical Reference section 15). */
   boostChanged(key){ const k=BOOSTKEY.indexOf(key); if(k>0) this.boot.set[k]=this.boostGet(k); }
   bootIn(p){
+    if(this.fpga) this.fpga.did('bios');
     if(p!==0x19) return 0xFF;
     const b=this.boot, i=b.idx; b.idx=(b.idx+1)&0xFF;
     if(i<=9) return b.set[i];
     const c=this.cart&&this.cart.length?this.cart.length:0;
     switch(i){
       case 16: return this.platformChoice();
-      case 17: return (c?1:0)|(this.card?2:0)|(this.pal?8:0)|0x10;   // no USB; the page has its own menu
+      case 17: return (c?1:0)|(this.cardIn?2:0)|(this.pal?8:0)|0x10;   // a card file inserted; no USB; the page's own menu
       case 18: return c?Math.ceil(Math.log2(c)):0;
       case 19: return {sega:0,codemasters:1,korean:2,msx:3}[this.mapper]??0xFF;
       case 20: return this.jpRegion?1:0;
@@ -1742,6 +1761,7 @@ class Machine{
     return 0xFF;
   }
   bootOut(p,v){
+    if(this.fpga) this.fpga.did('bios');
     const b=this.boot;
     if(p===0x18){ b.idx=v; return; }
     if(p===0x19){ const i=b.idx; b.idx=(b.idx+1)&0xFF;
@@ -1751,8 +1771,9 @@ class Machine{
       return; }
     if(p===0x1F&&v===0xA5) b.launch=true;
   }
-  /* Pause (NMI): not while the CPU is held for a launch, nor on the Game Gear */
-  pause(){ if(this.mode!=='gg'&&!this.boot.launch) this.cpu.nmi(); }
+  /* Pause (NMI): none while the BIOS runs, from a cold reset to its launch (software
+     cannot mask an NMI, and the BIOS has no use for one); none on the Game Gear */
+  pause(){ if(this.mode!=='gg'&&!this.boot.running) this.cpu.nmi(); }
 
   romByte8(rom,bank,off){ if(!rom||!rom.length) return 0xFF;
     return rom[(bank*0x2000+off)%rom.length]; }
@@ -1764,8 +1785,8 @@ class Machine{
     return (this.slotSel>>(frame-1))&1;              // frames 1,2
   }
   rd(a){
-    /* $3E bit 3 clear: the BIOS ROM, its 8 KB repeated through $0000-$BFFF, before the
-       cartridge and the card; it is not a cartridge, so it takes no wait state */
+    /* $3E bit 3 clear and bit 6 set: the BIOS ROM, its 8 KB repeated through $0000-$BFFF;
+       it is not a cartridge, so it takes no wait state */
     if(a<0xC000&&this.biosOn()) return MD_BIOS[a&0x1FFF];
     /* the cartridge and card slots: one wait state per read at 200 % (Q12); in
        SF-7000 mode $0000-$BFFF is the disk system's RAM and IPL, not a cartridge */
@@ -2502,7 +2523,7 @@ class Machine{
     this.aelStats.extraSpr=0; this.aelStats.ovfHidden=0;
     this.trackPlayer();
     if((this.frameNo&15)===0) this.collectGallery();
-    if(typeof HACK!=='undefined'&&HACK.rs.freeze.length)
+    if(!this.boot.running&&typeof HACK!=='undefined'&&HACK.rs.freeze.length)   /* not in the BIOS's RAM */
       for(const f of HACK.rs.freeze) this.wram[this.wramBank*0x2000+f.i]=f.v;
     /* Start = Pause: Master System, SG-1000 and SC-3000 (with the SF-7000) only. The
        Game Gear has a Start of its own, and boosts (bar True TMS colours) never act on MasterDrive software. */
@@ -2681,7 +2702,7 @@ function saveState(m){
     ggReg:Array.from(m.ggReg), dma:Array.from(m.dma), mathRes:m.mathRes,
     wram:b64(m.wram), eiPend:C.eiPend, lineCarry:m.lineCarry||0,
     hsLatch:V.hsLatch, vsLatch:V.vsLatch,
-    boot:{idx:m.boot.idx,set:Array.from(m.boot.set),launch:m.boot.launch}};
+    boot:{idx:m.boot.idx,set:Array.from(m.boot.set),launch:m.boot.launch,running:!!m.boot.running}};
 }
 function loadState(m,st){
   if(!st||st.v!==1) throw new Error('bad state');
@@ -2712,8 +2733,8 @@ function loadState(m,st){
   if(st.hsLatch!==undefined){ V.hsLatch=st.hsLatch; V.vsLatch=st.vsLatch; }
   else { V.hsLatch=V.reg[8]; V.vsLatch=V.reg[9]; }
   /* the BIOS's settings; states saved before the BIOS have none (and $3E = $A8: it is off) */
-  m.boot=st.boot?{idx:st.boot.idx,set:Uint8Array.from(st.boot.set),launch:!!st.boot.launch}
-                :{idx:0,set:new Uint8Array(10),launch:false};
+  m.boot=st.boot?{idx:st.boot.idx,set:Uint8Array.from(st.boot.set),launch:!!st.boot.launch,running:!!st.boot.running}
+                :{idx:0,set:new Uint8Array(10),launch:false,running:false};
 }
 
 
@@ -3213,6 +3234,7 @@ const FPGA_JOBS=[
  {id:'math',      side:'fpga', name:'Math unit',                   owns:'8x8 multiply, 8/8 divide with remainder'},
  {id:'pcm',       side:'fpga', name:'PCM FIFO and wavetable',      owns:'sample playback and two wavetable voices'},
  {id:'mapper',    side:'fpga', name:'Mapper and slot arbitration', owns:'Sega mapper, dual-slot routing, card banking'},
+ {id:'bios',      side:'fpga', name:'BIOS ROM and launch',         owns:'the BIOS ROM behind $3E bit 3, its ports $18-$1F, the reset into the chosen machine at the frame wrap'},
  {id:'keyboard',  side:'fpga', name:'SK-1100 keyboard via PPI',    owns:'row select and matrix read'},
  {id:'pointer',   side:'fpga', name:'Mouse and trackball',         owns:'TH-clocked nibble sequencer'},
  {id:'composite', side:'fpga', name:'Video compositing and output',owns:'layer merge, scaling, filters, HDMI and S-Video'},
@@ -3491,9 +3513,10 @@ function makeDebugUnit(){
     D.post=[];
     const add=(code,ok,detail)=>D.post.push({code,name:POST_CODES[code],ok,detail});
     let bad=0;
-    for(let b=0;b<16;b++){ const off=b*0x2000;
+    for(let b=0;b<16;b++){ const off=b*0x2000, s0=m.wram[off], s1=m.wram[off+1];
       m.wram[off]=0x5A; m.wram[off+1]=0xA5;
-      if(m.wram[off]!==0x5A||m.wram[off+1]!==0xA5) bad++; }
+      if(m.wram[off]!==0x5A||m.wram[off+1]!==0xA5) bad++;
+      m.wram[off]=s0; m.wram[off+1]=s1; }                   /* leave the running program's RAM as it was */
     add(0x01,bad===0,(m.wram.length>>10)+' KB over 16 banks, '+bad+' faults');
     let vbad=0;
     for(let i=0;i<m.vdp.vram.length;i+=0x400){ const s=m.vdp.vram[i];
@@ -3502,8 +3525,8 @@ function makeDebugUnit(){
     add(0x03,m.vdp.cram.length>=64,(m.vdp.cram.length>>1)+' entries');
     add(0x04,!!m.psg,m.psg?'present':'missing');
     add(0x05,!!m.fm,m.fm?'present':'not fitted');
-    add(0x06,!!(m.cart&&m.cart.length)||!!m.card,
-      (m.cart&&m.cart.length)?((m.cart.length>>10)+' KB cartridge'):'no media');
+    /* no media is not a fault: the BIOS then shows its menu (Technical Reference section 20) */
+    add(0x06,true,(m.cart&&m.cart.length)?((m.cart.length>>10)+' KB cartridge'):(m.card?'a card':'no media: the BIOS shows its menu'));
     if(m.card) add(0x07,true,'card present');
     if(typeof cartNeedsRecovery==='function'&&cartNeedsRecovery(m))
       add(0x09,false,'a snapshot was taken but never restored');
@@ -3593,6 +3616,10 @@ function dbgOverlayDraw(fb,lines,W,H){
 function makeSF7000(){
   const S={ram:new Uint8Array(0x10000), rom:null, romSel:0, portC:0, ctrl:0x92,
             fdcReads:0, romMaps:0, ramMaps:0, fdc:makeFDC()};
+  /* a reset (cold or the BIOS's launch): the 8255 and the floppy controller start again,
+     so the IPL is mapped; its RAM, the IPL and the disk in the drive stay */
+  S.reset=()=>{ S.romSel=0; S.portC=0; S.ctrl=0x92;
+    Object.assign(S.fdc,{phase:'idle', cmd:null, buf:[], res:[], resIdx:0, exec:null, execIdx:0}); };
   S.loadIPL=d=>{ S.rom=new Uint8Array(0x2000); S.rom.set(d.subarray(0,Math.min(d.length,0x2000))); };
   /* 8255 control port: mode set when bit 7 is high, else bit set/reset on port C */
   S.control=v=>{
@@ -4773,60 +4800,60 @@ function labLiveEngineMatch(mA,mB){
 
 /* ================= MasterDrive BIOS =================
    The console's own start-up program: the 8 KB BIOS ROM that $3E bit 3 maps
-   (Technical Reference section 2). Its source is bios/ at the top of the
+   (Technical Reference section 20). Its source is bios/ at the top of the
    repository; bios/make_bios.py assembles it and writes the image between the
    two markers below (CI checks that it matches the source). */
 /* BIOS_BEGIN: generated by bios/make_bios.py from bios/; do not edit */
 const MD_BIOS_B64=
-'8+1Ww5MA///////////////////////////////////////////////////////////////////12786AMA8MgDA8fvtTf//////////////////////////'+
-'////////////////7UX///////////////////////////////9NQVNURVJEUklWRQBCSU9TIDEAMfDfIQDAEQHAAf8ANgDtsM0aAs3yAjICwPXNWQLxy38o'+
-'CDoKwMtHwg8DzdIDzcEHPmAGgc2VA/t2zUsCIUDAERDABgkaviAGIxMQ+BgSIUDAERDAAQkA7bA6BMC3zBwJzfICMgHARzoCwKgoCDoEwP4DzPcJOgHARzoC'+
-'wC+gMgPAeDICwDobwLcoEnjmwP7AwssArzIbwM0cCcPLADoDwLfKywDLfygKOgrAy0fCEwMYhstXKAg6BMA95gMYCstfKBM6BMA85gMyBMCvMgXAzcEHw8sA'+
-'OgTAt8yNAToEwP4DwssAOgPAy2fKywA+ATIbwCFoD808CcPLADoDwMtHKAg6BcC3yD0YDstPKBA6DcBHOgXAPLjQMgXAw9ALy28oA68Y88tnyDoKwMtHyDoF'+
-'wLfKEwM9IAbN/gHDHAk9R83oAv4FeCACPghfFgAhEMAZBgH+AyACBgR+PLg4AygBr3d7PNMYftMZwxwJOgjAPP4GMA5HTzoOwAQPEP15MO8YAj7/MgjAyT4Q'+
-'0xjbGTIJwDIIwNsZMgrA2xkyC8DbGdsZMgzA2xkyDsDNSwIhQMAREMABCQDtsMk+AdMYIUDABgkOGe2yyT4AMgfAOgrAy0fIIdcCEQDBAREA7bAhtAIGA8Ve'+
-'I1Yj5c3CAuHBKBAQ8ToLwLfI/hHQPgIyB8DJPgEyBsA6L8APDw8P5g8GAf4FOAj+CDgGBgUoAgYAeDIHwMnwf/A/8B9UTVIgU0VHQfPrzQDBISDAEboCBgga'+
-'vsAjExD5yT6o0z4RIMABEADtsD7g0z7JOgjA/v/AOgfAyT790z/b3C/mP0c+3dM/29wv5jAHB7BHPv/TP3jJPoAYAj6Q8zIawM2FA83yAiEawKYg9M2FA83y'+
-'AiEawKYg6M3oAkev0xh40xmv078+gdO/zagD86/Tvz7A078GIK/NkgMQ+90hAAD9IQAA2QEAABEAACEAANkhAMARAcAB/x82AO2wIQAAIu7fEQAAPqXTH3YY'+
-'/dt+/sAg+tt+/sAo+snTvsnz079407/7yfN907989kDTv/vJIQAAzZ0DDr6vFggGAO15AO15AO15AO15AO15AO15AO15AO15EOcVIOLJIUMEBiYOv+2zzagD'+
-'IQAEzZ0DIckEEfgCfs2SA6/NkgPNkgPNkgMjG3qzIOwhIADNnQMhiQQGQA6+7bMhACnNnQMhyQQR+AJ+zZIDIxt6syD2IQA/zZ0DPtDNkgPNkgM+ANO/PsDT'+
-'vyFpBAYgDr7ts8kEgACB/4L/g/+E/4X7hgCHAIgAif+KII8wkCiYAZkElwGNA44kjxA/Kg8AAAAAAAAAAAAAAAAQDz8AAAAAAAAAAAAAAAAAAAAAAGAAAAB4'+
-'AAAAfgAAAHgAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAgICAAIABQUFAAAAAAAFBQ+FD4UFAAIHig'+
-'cCjwIADAyBAgQJgYAGCQoECokGgAICBAAAAAAAAQIEBAQCAQAEAgEBAQIEAAACCocKggAAAAICD4ICAAAAAAAAAAICBAAAAA+AAAAAAAAAAAAGBgAAAIECBA'+
-'gAAAcIiYqMiIcAAgYCAgICBwAHCICBAgQPgA+BAgEAiIcAAQMFCQ+BAQAPiA8AgIiHAAMECA8IiIcAD4CBAgQEBAAHCIiHCIiHAAcIiIeAgQYAAAYGAAYGAA'+
-'AABgYABgYEAAECBAgEAgEAAAAPgA+AAAAEAgEAgQIEAAcIgIECAAIABwiAhoqKhwAHCIiPiIiIgA8IiI8IiI8ABwiICAgIhwAOCQiIiIkOAA+ICA8ICA+AD4'+
-'gIDwgICAAHCIgLiIiHgAiIiI+IiIiABwICAgICBwADgQEBAQkGAAiJCgwKCQiACAgICAgID4AIjYqKiIiIgAiIjIqJiIiABwiIiIiIhwAPCIiPCAgIAAcIiI'+
-'iKiQaADwiIjwoJCIAHiAgHAICPAA+CAgICAgIACIiIiIiIhwAIiIiIiIUCAAiIiIqKioUACIiFAgUIiIAIiIUCAgICAA+AgQIECA+ABwQEBAQEBwAACAQCAQ'+
-'CAAAcBAQEBAQcAAgUIgAAAAAAAAAAAAAAPgAQCAQAAAAAAAAAHAIeIh4AICAsMiIiPAAAABwgICIcAAICGiYiIh4AAAAcIj4gHAAMEhA4EBAQAAAAHiIiHgI'+
-'cICAsMiIiIgAIABgICAgcAAQADAQEBCQYICAkKDAoJAAYCAgICAgcAAAANCoqIiIAAAAsMiIiIgAAABwiIiIcAAAAPCIiPCAgAAAeIiIeAgIAACwyICAgAAA'+
-'AHiAcAjwAEBA4EBASDAAAACIiIiYaAAAAIiIiFAgAAAAiIioqFAAAACIUCBQiAAAAIiIiHgIcAAA+BAgQPgAECAgQCAgEAAgICAgICAgAEAgIBAgIEAAAABA'+
-'qBAAAADNxwfDHAkhADjNnQM+IM1XCCGAAA4AzV8IBg0+IMXNVwjBEPchjAAOAM1fCD4gzVcIIUA4zZ0DBgAhOgjFPiAOAM1XCDoEwLgOACACDgjNXwjBBHj+'+
-'BCDkBgM+IMUOAM1XCMEQ9SGAOM2dAwYgPgLNkgOvzZIDEPXJW0NBUlRdAFtDQVJEXQBbVVNCXQBbU1lTVEVNXQDNkgN5zZIDyX4jt8jNVwgY9+VqJgApKSlE'+
-'TSkpCUsGAAkBADAJzZ0D4cl+I7fIzZIDGPfNaAjDgQghADDNnQMBSAM+IM2SAwt4sSD2yfUPDw8Pza0I8eYPxjD+OjgCxgfNkgPJBmQOAM0ECQYKzQQJxjDN'+
-'kgPJDgARECfN7ggR6APN7ggRZADN7ggRCgDN7gh9xjDNkgPJPi88t+1SMPoZ/jAgA8tByM2SAw4ByRYvFJAw/IBfev4wIATLQSgFzZIDDgF7yc2QCCEAP82d'+
-'Az7QzZIDOgTAt8pFCj3KRAk9yl0Jw3YJFhQeAc2KCMk6CsDLTyHoDSADIc4NEQEBzYoIISEPwzwJOgrAy1chIg4gAyEEDhEBAc2KCCEyD8M8CREBASE8Ds2K'+
-'CD6kBo/NlQPbF/U+JAaPzZUDEQECIU8OzYoIPiTNkgPxzaQIEQEDIVsOzYoIOgrAy18hYg4oAyFuDs2BCBEBBCF5Ds2KCDoMwLchgQ4oAyGIDs2BCBEBBiGO'+
-'Ds2KCBEBCSGnDs2KCBEBCiHODs2KCM33CSFCD8M8CREDB81oCDoBwE8hJgoGCMV55gEgDH4jtygKPiDNkgMY9M2BCD4gzZIDwcs5EOHJVVAARE9XTgBMRUZU'+
-'AFJJR0hUAEIAQwBBAFNUQVJUADoKwMtHIBMRAQEhwA3NigivMg3AIQgPwzwJEQEBzWgIOgbAtyARIRMNzYEIOgfAzQIMzYEIGGU6B8DNAgzNgQghCQ3NgQgR'+
-'AQIhLg3Nigg6LsAPDw8P5g8oA82tCDotwM2kCDoswM2kCCE3Dc2BCDouwOYPza0IIUINzYEIOi/ADw8PD82tCBEBAyFMDc2KCDorwM2kCDoqwM2kCDoLwLco'+
-'NhEBBCFXDc2KCDoLwNYKOCZHIQEAKAMpEP18/gQ4D8s/yz/NuwghYQ3NgQgYCc3NCCFdDc2BCBECBiFlDc2KCBECByFqDc2KCDoIwP7/IAghfw3NgQgYBs0C'+
-'DM2BCM3oAv4FIBsRAgohhA3NiggRAgshow3Nigg+AzINwD4IGAY+CzINwK8yGcBfFgDdIRDA3RkhTAzNBQwWCNUeAs2KCOU6GcD+AyAV3X4AXxYAIcsLGX7N'+
-'uwg+Jc2SAxgP3X4AtyG8DSgDIbkNzYEI4dHdIxQ6GcA8MhnA/gkgviHmDs08CcPQC2R9lq/IOgTAt8A6DcC3yCEAP82dAzoFwMYJh4eHPc2SAz7QzZIDIYA/'+
-'zZ0DPgzNkgM+Ac2SA8khEAy3yEd+I7cg+xD5yU1hc3RlciBTeXN0ZW0AR2FtZSBHZWFyAFNHLTEwMDAAU0MtMzAwMABTRi03MDAwAE1hc3RlckRyaXZlAFNw'+
-'cml0ZSBsaW1pdCAxNiAgICAgAFN0b2NrIG92ZXJmbG93IGZsYWcgAFN0YXJ0ID0gUGF1c2UgICAgICAgAFR1cmJvICAgICAgICAgICAgICAgAFZSQU0gc3Bl'+
-'ZWQtdXAgICAgICAgAEF1dG8tZmlyZSAgICAgICAgICAgAFBzZXVkby1zdGVyZW8gICAgICAgAEdhbWUgR2VhciB1bmNyb3AgICAgAFRydWUgVE1TIGNvbG91'+
-'cnMgICAgACBzb2Z0d2FyZQBObyBoZWFkZXIgZm91bmQ6IHBsYXlzIGFzIABQcm9kdWN0IAAgIHZlcnNpb24gACAgcmVnaW9uIABDaGVja3N1bSAkAFNpemUg'+
-'ACBLQgAgTUIAUExBWQBNYWNoaW5lICAgICAgICAgICAgIABBdXRvAFRoZSBvdGhlciBib29zdHMgZG8gbm90IGFjdCBvbgBNYXN0ZXJEcml2ZSBzb2Z0d2Fy'+
-'ZS4AT24AT2ZmAE5vIGNhcnRyaWRnZS4ATm8gY2FyZCBpbiB0aGUgY2FyZCBzbG90LgBBIGNhcmQgaXMgaW4gdGhlIGNhcmQgc2xvdC4AVGhpcyBtYWNoaW5l'+
-'IGhhcyBubyBVU0IgcG9ydC4AVVNCOiBub3RoaW5nIHRvIHNob3cgeWV0LgBNYXN0ZXJEcml2ZSBCSU9TIDEATWFjaGluZSBJRCAAVmlkZW8gAE5UU0MsIDYw'+
-'IEh6AFBBTCwgNTAgSHoAUmVnaW9uIABleHBvcnQASmFwYW4AQ29udHJvbGxlciB0ZXN0OiBwcmVzcyBCAEhvbGQgU3RhcnQgd2hpbGUgc3dpdGNoaW5nIG9u'+
-'IHRvIHN0YXJ0AHRoZSBnYW1lIHN0cmFpZ2h0IGF3YXkuAENBUlQgIFNUQVJUIHBsYXkgIEIgY2hhbmdlICBDIHRvcABDQVJUICBpbnNlcnQgYSBjYXJ0cmlk'+
-'Z2UAQ0FSRCAgPD4gZGV2aWNlcwBVU0IgIDw+IGRldmljZXMAU1lTVEVNICBCIGNvbnRyb2xsZXIgdGVzdCAgPD4gZGV2aWNlcwBURVNUICBldmVyeSBidXR0'+
-'b24gc2hvd3M7IFN0YXJ0K0E6IGVuZAD/////////////////////////////////////////////////////////////////////////////////////////'+
-'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
-'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
-'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
-'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'8+1Ww5cA///////////////////////////////////////////////////////////////////12786AMA8MgDA8fvtTf//////////////////////////'+
+'////////////////7UX///////////////////////////////+fv9//TUFTVEVSRFJJVkUAQklPUyAxADHw3yGAAAF/BO2zIQDAEQHAAf8ANgDtsD7/Mh7A'+
+'zTYCzTcDMgLA9c2FAvHLfygGzR4DwlQDzSoEzRkIPmAGgc3tA/t2zXcCIUDAERDABgkaviAGIxMQ+BgSIUDAERDAAQkA7bA6BMC3zP0JzTcDMgHARzoCwKgo'+
+'DToEwP4DIAbN1grNAgk6AcBHOgLAL6AyA8B4MgLAOhvAtygSeObA/sDC2gCvMhvAzf0Jw9oAOgPAt8raAMt/KAjNHgPCWAMYg8tXKAg6BMA95gMYCstfKBY6'+
+'BMA85gMyBMCvMgXAzf0JzWMIw9oAOgTAt8ylAToEwP4DwtoAOgPAy2fK2gA+ATIbwCHFEM0bCs0CCcPaADoDwMtHKAg6BcC3yD0YDstPKBA6DcBHOgXAPLjQ'+
+'MgXAw+IMy28oA68Y88tnyDoKwMtHyDoFwLfKWAM9IAbNFgLD/Qk9R80UA/4FeCACPghfFgAhEMAZBgH+AyACBgR+PLg4AygBr3d7PNMYftMZw/0JOgjAPP4E'+
+'KPv+BjAOR086DsAEDxD9eTDrGAI+/zIIwMk+ENMY2xkyCcAyCMDbGTIKwMtHKAw6CMD+BCAFPv8yCMDbGTILwNsZ2xkyDMDbGTIOwM13AiFAwBEQwAEJAO2w'+
+'yT4B0xghQMAGCQ4Z7bLJPgAyB8A6CsDLR8ghAwMRAMEBEQDtsCHgAgYDxV4jViPlze4C4cEoEBDxOgvAt8j+EdA+AjIHwMk+ATIGwDovwA8PDw/mDwYB/gU4'+
+'CP4IOAYGBSgCBgB4MgfAyfB/8D/wH1RNUiBTRUdB8+vNAMEhIMAR5gIGCBq+wCMTEPnJPqjTPhEgwAEQAO2wPuDTPsk6CMD+/8A6B8DJOgrAy0fAzSgDyc0U'+
+'A/4EIAY6DsDmEMmvyT790z/b3C/mP0c+3dM/29wv5jAHB7BHPv/TP3jJPoAYAj6Q8zHw3zIawM3fA803AyEawKYg9M3fA803AyEawKYg6M0UA0ev0xh40xmv'+
+'078+gdO/PgTTvz6A07/NAATzr9O/PsDTvwYgr83qAxD7If//5fEI3SEAAP0hAADZAQAAEQAAIQAA2SEAwBEBwAH/HzYA7bAhAAARAAA+pdMfdhj9237+wCD6'+
+'ydt+tyD72363KPvJ077J89O/eNO/+8nzfdO/fPZA07/7ySEAAM31Aw6+rxYIBgDteQDteQDteQDteQDteQDteQDteQDteRDnFSDiySGbBAYmDr/ts80ABCEA'+
+'BM31AyEhBRH4An7N6gOvzeoDzeoDzeoDIxt6syDsISAAzfUDIeEEBkAOvu2zIQApzfUDISEFEfgCfs3qAyMberMg9iEAP831Az7QzeoDzeoDPgDTvz7A078h'+
+'wQQGIA6+7bPJBIAAgf+C/4P/hP+F+4YAhwCIAIn/iiCPMJAomAGZBJcBjQOOJI8QPyoPAAAAAAAAAAAAAAAAEA8/AAAAAAAAAAAAAAAAAAAAAABgAAAAeAAA'+
+'AH4AAAB4AAAAYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAgICAgACAAUFBQAAAAAABQUPhQ+FBQACB4oHAo'+
+'8CAAwMgQIECYGABgkKBAqJBoACAgQAAAAAAAECBAQEAgEABAIBAQECBAAAAgqHCoIAAAACAg+CAgAAAAAAAAACAgQAAAAPgAAAAAAAAAAABgYAAACBAgQIAA'+
+'AHCImKjIiHAAIGAgICAgcABwiAgQIED4APgQIBAIiHAAEDBQkPgQEAD4gPAICIhwADBAgPCIiHAA+AgQIEBAQABwiIhwiIhwAHCIiHgIEGAAAGBgAGBgAAAA'+
+'YGAAYGBAABAgQIBAIBAAAAD4APgAAABAIBAIECBAAHCICBAgACAAcIgIaKiocABwiIj4iIiIAPCIiPCIiPAAcIiAgICIcADgkIiIiJDgAPiAgPCAgPgA+ICA'+
+'8ICAgABwiIC4iIh4AIiIiPiIiIgAcCAgICAgcAA4EBAQEJBgAIiQoMCgkIgAgICAgICA+ACI2KioiIiIAIiIyKiYiIgAcIiIiIiIcADwiIjwgICAAHCIiIio'+
+'kGgA8IiI8KCQiAB4gIBwCAjwAPggICAgICAAiIiIiIiIcACIiIiIiFAgAIiIiKioqFAAiIhQIFCIiACIiFAgICAgAPgIECBAgPgAcEBAQEBAcAAAgEAgEAgA'+
+'AHAQEBAQEHAAIFCIAAAAAAAAAAAAAAD4AEAgEAAAAAAAAABwCHiIeACAgLDIiIjwAAAAcICAiHAACAhomIiIeAAAAHCI+IBwADBIQOBAQEAAAAB4iIh4CHCA'+
+'gLDIiIiIACAAYCAgIHAAEAAwEBAQkGCAgJCgwKCQAGAgICAgIHAAAADQqKiIiAAAALDIiIiIAAAAcIiIiHAAAADwiIjwgIAAAHiIiHgICAAAsMiAgIAAAAB4'+
+'gHAI8ABAQOBAQEgwAAAAiIiImGgAAACIiIhQIAAAAIiIqKhQAAAAiFAgUIgAAACIiIh4CHAAAPgQIED4ABAgIEAgIBAAICAgICAgIABAICAQICBAAAAAQKgQ'+
+'AAAAzSIIzWMIw/0JIQA4zfUDDgA+IM21CCGEAA4Azb0IBg0+IMXNtQjBEPchkAAOAM29CD4gzbUIIYA4zfUDBiA+As3qA6/N6gMQ9ckhQDjN9QMGACGYCMU+'+
+'IA4AzbUIOgTAuA4AIAIOCM29CMEEeP4EIOQGAz4gxQ4AzbUIwRD1yVtDQVJUXQBbQ0FSRF0AW1VTQl0AW1NZU1RFTV0AzeoDec3qA8l+I7fIzbUIGPflOh7A'+
+'ujgEejIewDofwLowBHoyH8DN6whLBgAJAQDCCSIcwOHJaiYAKSkpRE0pKQnJ5SocwHcjIhzA4ck6H8BfOh7AuygB0FcOALcgB3v+FCACDgR7kjxfxc3rCMHl'+
+'Og/AqcYwhGfN9QPhxQEAwgkGKH4jzeoDEPkdIPTBPv8yHsCvMh/AscjN2AM6D8DuBDIPwMYwBpDD7QN+I7fIzfcIGPfNxgjDXwkhAMIRAcIBRwM2IO2wrzIe'+
+'wD4UMh/AyfUPDw8PzY4J8eYPxjD+OjgCxgfN9wjJBmQOAM3lCQYKzeUJxjDN9wjJDgARECfNzwkR6APNzwkRZADNzwkRCgDNzwl9xjDN9wjJPi88t+1SMPoZ'+
+'/jAgA8tByM33CA4ByRYvFJAw/IBfev4wIATLQSgFzfcIDgF7yc1uCc0JCs0CCcPiDDoEwLfKJAs9yiMKPco8CsNVChYUHgHNaAnJOgrAy08hDg8gAyH0DhEB'+
+'Ac1oCSF+EMMbCjoKwMtXIUgPIAMhKg8RAQHNaAkhjxDDGwoRAQEhYg/NaAk+pAaPze0D2xf1PiQGj83tAxEBAiF1D81oCT4kzfcI8c2FCREBAyGBD81oCToK'+
+'wMtfIYgPKAMhlA/NXwkRAQQhnw/NaAk6DMC3IacPKAMhrg/NXwkRAQYhtA/NaAkRAQkhzQ/NaAkRAQoh9A/NaAnN1gohnxDDGwoRAwfNxgg6AcBPIQULBgjF'+
+'eeYBIAx+I7coCj4gzfcIGPTNXwk+IM33CMHLORDhyVVQAERPV04ATEVGVABSSUdIVABCAEMAQQBTVEFSVAA6CsDLRyAlEQEBIeYOzWgJrzINwM0oAyEuEMob'+
+'ChEBAiFHEM1oCSFqEMMbChEBAc3GCDoGwLcgESE5Ds1fCc0UA80bDc1fCRhlOgfAzRsNzV8JIS8OzV8JEQECIVQOzWgJOi7ADw8PD+YPKAPNjgk6LcDNhQk6'+
+'LMDNhQkhXQ7NXwk6LsDmD82OCSFoDs1fCTovwA8PDw/NjgkRAQMhcg7NaAk6K8DNhQk6KsDNhQk6C8C3KDYRAQQhfQ7NaAk6C8DWCjgmRyEBACgDKRD9fP4E'+
+'OA/LP8s/zZwJIYcOzV8JGAnNrgkhgw7NXwkRAgYhiw7NaAkRAgchkA7NaAk6CMD+/yAIIaUOzV8JGAbNGw3NXwnNFAP+BSAbEQIKIaoOzWgJEQILIckOzWgJ'+
+'PgMyDcA+CBgGPgsyDcCvMhnAXxYA3SEQwN0ZIWUNzR4NFgjVHgLNaAnlOhnA/gMgFd1+AF8WACHUDBl+zZwJPiXN9wgYD91+ALch4g4oAyHfDs1fCToZwF8W'+
+'ACHZDBnNFANHBH4PEP04BiEiDs1fCeHR3SMUOhnAPDIZwP4JIKMhDBDDGwpkfZavyB8DHR8fHx8CPyEAP831AzoEwLcgBjoNwLcgBT7Qw+oDOgXAxgmHh4c9'+
+'zeoDPtDN6gMhgD/N9QM+DM3qAz4BzeoDySEpDbfIR34jtyD7EPnJTWFzdGVyIFN5c3RlbQBHYW1lIEdlYXIAU0ctMTAwMABTQy0zMDAwAFNGLTcwMDAATWFz'+
+'dGVyRHJpdmUAU3ByaXRlIGxpbWl0IDE2ICAgICAAU3RvY2sgb3ZlcmZsb3cgZmxhZyAAU3RhcnQgPSBQYXVzZSAgICAgICAAVHVyYm8gICAgICAgICAgICAg'+
+'ICAAVlJBTSBzcGVlZC11cCAgICAgICAAQXV0by1maXJlICAgICAgICAgICAAUHNldWRvLXN0ZXJlbyAgICAgICAAR2FtZSBHZWFyIHVuY3JvcCAgICAAVHJ1'+
+'ZSBUTVMgY29sb3VycyAgICAAIChubyBlZmZlY3QpACBzb2Z0d2FyZQBObyBoZWFkZXIgZm91bmQ6IHBsYXlzIGFzIABQcm9kdWN0IAAgIHZlcnNpb24gACAg'+
+'cmVnaW9uIABDaGVja3N1bSAkAFNpemUgACBLQgAgTUIAUExBWQBNYWNoaW5lICAgICAgICAgICAgIABBdXRvAFRoZSBvdGhlciBib29zdHMgZG8gbm90IGFj'+
+'dCBvbgBNYXN0ZXJEcml2ZSBzb2Z0d2FyZS4AT24AT2ZmAE5vIGNhcnRyaWRnZS4ATm8gY2FyZCBpbiB0aGUgY2FyZCBzbG90LgBBIGNhcmQgaXMgaW4gdGhl'+
+'IGNhcmQgc2xvdC4AVGhpcyBtYWNoaW5lIGhhcyBubyBVU0IgcG9ydC4AVVNCOiBub3RoaW5nIHRvIHNob3cgeWV0LgBNYXN0ZXJEcml2ZSBCSU9TIDEATWFj'+
+'aGluZSBJRCAAVmlkZW8gAE5UU0MsIDYwIEh6AFBBTCwgNTAgSHoAUmVnaW9uIABleHBvcnQASmFwYW4AQ29udHJvbGxlciB0ZXN0OiBwcmVzcyBCAEhvbGQg'+
+'U3RhcnQgd2hpbGUgc3dpdGNoaW5nIG9uIHRvIHN0YXJ0AHRoZSBnYW1lIHN0cmFpZ2h0IGF3YXkuAENBUlQgIFNUQVJUIHBsYXkgIEIgY2hhbmdlICBDIHRv'+
+'cABDQVJUICBpbnNlcnQgYSBjYXJ0cmlkZ2UAVGhlIFNGLTcwMDAgc3RhcnRzIGZyb20gaXRzIGRpc2tzLgBDQVJUICBTVEFSVCBTRi03MDAwAENBUkQgIDw+'+
+'IGRldmljZXMAVVNCICA8PiBkZXZpY2VzAFNZU1RFTSAgQiBjb250cm9sbGVyIHRlc3QgIDw+IGRldmljZXMAVEVTVCAgZXZlcnkgYnV0dG9uIHNob3dzOyBT'+
+'dGFydCtBOiBlbmQA////////////////////////////////////////////////////////////////////////////////////////////////////////'+
 '////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
 '////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
 '////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
@@ -4979,30 +5006,35 @@ function start(){ if(running)return; running=true; fpsT=performance.now(); frame
 function stop(){ running=false; cancelAnimationFrame(raf); document.getElementById('run').textContent='Run'; }
 
 document.getElementById('run').onclick=()=>{
-  if(!m.cart&&!running&&!m.biosOn()){ m.powerOn(); log('no cartridge: the BIOS menu starts'); }
+  if(!m.cart&&!running&&!m.biosOn()&&m.mode!=='msx'){ m.powerOn(); showMachine(); log('no cartridge: the BIOS menu starts'); }
   running?stop():start(); };
-document.getElementById('reset').onclick=()=>{ m.powerOn(); draw(); refresh(); log('reset: the BIOS starts'); };
+document.getElementById('reset').onclick=()=>{ if(m.mode==='msx') m.reset(); else m.powerOn(); showMachine(); draw(); refresh(); log(m.mode==='msx'?'reset':'reset: the BIOS starts'); };
 document.getElementById('snd').onclick=()=>{ initAudio(m); };
 document.getElementById('mode').onchange=e=>{ const v=e.target.value;
   if(v==='msx'){ m.mode='msx'; m.reset(); }          /* the MSX2 analysis machine: no BIOS */
   else { m.platformMode=v; m.powerOn(); }
-  document.getElementById('modetag').textContent=MODEN[m.mode];
+  showMachine();
   draw(); refresh(); };
-/* the BIOS has started the game: show the machine it chose */
-m.onLaunch=()=>{ document.getElementById('modetag').textContent=MODEN[m.mode]+(m.romName?' · '+m.romName:''); };
+/* the BIOS has started the game: show the machine it chose and the turbo step in effect */
+function showMachine(){ document.getElementById('modetag').textContent=(m.boot.running&&m.mode==='ss'?'BIOS':MODEN[m.mode])+(m.romName?' · '+m.romName:'');
+  document.getElementById('turbo').value=String(m.ael.turbo||1); }
+m.onLaunch=()=>{ showMachine(); refresh(); };
 document.getElementById('turbo').onchange=e=>{ const was=m.cpuMult(); m.ael.turbo=parseFloat(e.target.value); m.boostChanged('turbo'); m.rebaseSync(was);
   document.getElementById('bt').textContent=Math.round(m.cpuMult()*100)+'%'; };
 document.getElementById('scale').onchange=e=>{ cv.style.maxWidth=(256*parseInt(e.target.value))+'px'; };
 cv.style.maxWidth='768px';
 
 document.getElementById('cart').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
-  /* The file's extension gives the machine the BIOS offers first; a .sms file is left
-     to the BIOS, which reads the header (region 8 is MasterDrive software). */
+  /* The file's extension gives the machine the BIOS offers first. A .sms file with a
+     TMR SEGA header is left to the BIOS, which reads it (region 8 is MasterDrive
+     software); a headerless one, as many Japanese Master System games are, is offered
+     as Master System, where the BIOS's size rule would take it for SG-1000 (Q31). */
   const ext=(f.name.split('.').pop()||'').toLowerCase();
-  const auto={sg:'sg',sc:'sg',gg:'gg',sms:'auto'}[ext];
-  if(auto && auto!==m.platformMode){ m.platformMode=auto; document.getElementById('mode').value=auto;
-    if(auto!=='auto') log(MODEN[auto]+' offered first, from .'+ext); }
   f.arrayBuffer().then(b=>{ m.loadCart(b); m.romName=f.name;
+    let auto={sg:'sg',sc:'sg',gg:'gg',sms:'auto'}[ext];
+    if(auto==='auto'&&!parseSegaHeader(m.cart).found) auto='sms';
+    if(auto && auto!==m.platformMode){ m.platformMode=auto; document.getElementById('mode').value=auto;
+      if(auto!=='auto') log(MODEN[auto]+' offered first, from .'+ext+(ext==='sms'?' with no header':'')); }
     const r=romLoaded(m);
     m.powerOn();
     if(r.moved) log(r.moved+' stored item'+(r.moved>1?'s':'')+' carried over from the old ROM id '+m.romIdSampled);
@@ -5027,7 +5059,7 @@ addEventListener('keydown',e=>{
   if(bindWait){ BIND[bindWait]=e.key; bindWait=null; rebuildRev();
     store.set('binds',JSON.stringify(BIND)); refresh(); e.preventDefault(); return; }
   const k=REV[e.key]||REV[e.key.toLowerCase()];
-  if(k==='pause'){ m.pause(); e.preventDefault(); return; }   // (not on the Game Gear: it has no Pause button)
+  if(k==='pause'){ if(!e.repeat) m.pause(); e.preventDefault(); return; }   // a press, not the key's auto-repeat   // (not on the Game Gear: it has no Pause button)
   if(k){ KEYS[k]=1; mergeInput(); e.preventDefault(); }
 });
 addEventListener('keyup',e=>{ const k=REV[e.key]||REV[e.key.toLowerCase()];
@@ -5280,14 +5312,14 @@ $('sv').onclick=()=>{ if(!m.cart){log('no ROM');return;}
     log('state saved to slot '+(slotIdx()+1)); refresh(); }catch(e){ log('save failed: '+e.message); } };
 $('ld').onclick=()=>{ const st=STATES[slotIdx()];
   if(!st){log('slot '+(slotIdx()+1)+' empty');return;}
-  try{ loadState(m,st.d); $('mode').value=m.mode; setTv(m.pal); draw(); refresh(); log('state loaded'); }
+  try{ loadState(m,st.d); $('mode').value=m.mode==='msx'?'msx':m.platformMode; showMachine(); setTv(m.pal); draw(); refresh(); log('state loaded'); }
   catch(e){ log('load failed: '+e.message); } };
 $('expst').onclick=()=>{ const st=STATES[slotIdx()]; if(!st){log('slot empty');return;}
   const blob=new Blob([JSON.stringify(st.d)],{type:'application/json'});
   const a=document.createElement('a'); a.download=(m.romName||'state')+'.sss';
   a.href=URL.createObjectURL(blob); a.click(); };
 $('impst').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
-  f.text().then(txt=>{ try{ loadState(m,JSON.parse(txt)); $('mode').value=m.mode; setTv(m.pal);
+  f.text().then(txt=>{ try{ loadState(m,JSON.parse(txt)); $('mode').value=m.mode==='msx'?'msx':m.platformMode; showMachine(); setTv(m.pal);
     draw(); refresh(); log('state imported'); }catch(err){ log('import failed: '+err.message); } }); };
 
 $('vol').oninput=e=>{ if(window.__gain) window.__gain.gain.value=e.target.value/100; };
@@ -6044,7 +6076,7 @@ $('romns').onchange=e=>{ m.romNs=+e.target.value; store.set('romns',String(m.rom
    line count and the clock change together. */
 function setTv(pal){ m.pal=!!pal; $('tv').value=m.pal?'pal':'ntsc'; }
 $('tv').onchange=e=>{ const was=m.pal; setTv(e.target.value==='pal'); store.set('tv',e.target.value);
-  if(m.pal!==was){ m.powerOn(); pace.acc=0; pace.t=null; draw(); refresh(); romNote();
+  if(m.pal!==was){ if(m.mode==='msx') m.reset(); else m.powerOn(); pace.acc=0; pace.t=null; showMachine(); draw(); refresh(); romNote();
     log((m.pal?'PAL 50 Hz':'NTSC 60 Hz')+': machine restarted'); } };
 (function(){ const v=store.get('tv'); if(v) setTv(v==='pal'); })();
 

@@ -10,6 +10,7 @@ on:
       - 'pocket-core/**'
       - '.github/workflows/pocket-build.yml'
   workflow_dispatch:
+  workflow_call:        # the nightly build (nightly.yml)
 
 permissions:
   contents: read

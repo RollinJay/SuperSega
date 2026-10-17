@@ -245,8 +245,9 @@ change('VRAM expansion control corrected: v6 gave "bank1 R3 bit 0" in memory.vra
        '"bank1 R2 bit 4" in video.unique_cell_mode. R2 bit 4 enables, R3 bit 0 selects.')
 
 put_after(p['memory']['port_3E_memory_enables'], 'bit_7', 'reset_value', (
-    '0xA8: the state of a machine whose BIOS has handed over to a cartridge - cartridge, RAM and controllers '
-    'enabled; BIOS, card and external port disabled'))
+    '0xE0 at a cold reset: the BIOS ROM, RAM and controllers enabled; cartridge, card and external port disabled '
+    '(bios.cold_reset). 0xA8 when the BIOS launches a game: the state of a machine whose BIOS has handed over to a '
+    'cartridge - cartridge, RAM and controllers enabled; BIOS, card and external port disabled (bios.launch)'))
 p['input']['port_3F']['reset_state'] = '0xFF: every pin an input (bits 3-0 set), level bits 7-4 set'
 change(LATER + 'Reset values written down: $3E resets to $A8 (the BIOS has handed over to the cartridge), as '
        'the Technical Reference already said, and $3F to $FF (every pin an input, level bits set), where v6 '
@@ -424,8 +425,11 @@ change(LATER + 'PAL CPU clock defined: 3.546893 MHz, as on a PAL Master System, 
        'only the NTSC clock. Both implementations now run PAL on it (they ran it at the NTSC clock, 50.16 Hz). '
        'The turbo frequencies are stated for the NTSC clock; PAL ones are open question Q22.')
 put_after(cpu, 'clock_standards', 'reset_state', (
-    'At hand-over to software: PC $0000, SP $DFF0 (where the Master System BIOS leaves it), interrupts disabled '
-    '(IFF1 = IFF2 = 0) and interrupt mode 0, as after a Z80 reset; software selects IM 1 itself.'))
+    'After a cold reset the CPU starts in the BIOS (bios.cold_reset); software gets it from the BIOS\'s launch '
+    '(bios.launch). At hand-over to software: PC $0000, SP $DFF0 (where the Master System BIOS leaves it), '
+    'interrupts disabled (IFF1 = IFF2 = 0), interrupt mode 0, and AF and AF\' $FFFF, as after a Z80 reset; '
+    'software selects IM 1 itself. BC, DE, HL, IX, IY, BC\', DE\' and HL\' are 0: a Z80 reset leaves them, and the '
+    'BIOS clears them before its launch.'))
 change(LATER + 'CPU state at hand-over to software defined (cpu.reset_state): PC $0000, SP $DFF0, interrupts '
        'disabled, interrupt mode 0. $DFF0 is where the Master System BIOS leaves SP and where the emulator and '
        'Gearsystem start; the Pocket core\'s CPU reset SP to $FFFF and is changed to match.')
@@ -1065,7 +1069,8 @@ p['open_questions'] += [
                 'the Y split, but R13 has no side bit, so the window can only lie right of the X split. And the window '
                 'reads its tilemap base, bank 1 R0, even while XRB is clear, when the bank 1 registers are otherwise '
                 'without effect. Which row rule should both use, should the window be able to lie left of the X split, '
-                'and should its tilemap base need XRB?')},
+                'and should its tilemap base need XRB? The BIOS\'s menu relies on the text window\'s rule (bios.menu): '
+                'settling it the other way changes the BIOS too.')},
     {'id': 'Q30', 'topic': 'Slot select and the $3E slot enables', 'status': 'open',
      'detail': ('$09 maps the card into $4000-$BFFF by itself (media.dual_slot). On the stock Master System, $3E bit 5 '
                 'enables the card slot and bit 6 the cartridge slot. The emulator ignores bit 5, and ignores bit 6 '
@@ -1087,6 +1092,239 @@ change(LATER + 'stock_behaviour.vdp.v_scroll gives R0 bit 7\'s rule: it exempts 
        'vertical scroll, by screen position whatever the horizontal scroll (Gearsystem). The emulator locked map '
        'columns 24-31, which differ from the screen\'s once the background scrolls horizontally; the Pocket core already '
        'locked by screen position.')
+
+# ------------------------------------------------------------------ the BIOS
+# The machine's own BIOS (decided by the owner, 16 October 2026): the base 8 KB BIOS ROM
+# that $3E bit 3 maps, with a menu before every game. Technical Reference section 20.
+put_after(p, 'memory', 'bios', {
+    'what': ('The machine\'s own start-up program: Z80 software in the 8 KB BIOS ROM, written for this project (bios/ '
+             'in the repository, MIT licence; no Sega code, logo or wording). It shows a menu before every game; '
+             'holding Start while switching on skips the menu. Decided by the owner, 16 October 2026: a full menu '
+             'before every game, the same on the console, the emulator and the Analogue Pocket core; both the BIOS '
+             'menu and a platform\'s own settings menu set the machine and the boosts, the last change winning; the '
+             'menu waits for PLAY.'),
+    'cold_reset': ('Switching on; on the platforms also Reset, a new cartridge, and a change of the machine or video '
+                   'setting. Every block takes its reset value, except that the machine starts in MasterDrive mode '
+                   'with $3E = 0xE0 (BIOS ROM, work RAM and controllers enabled; cartridge, card and external port '
+                   'disabled). The CPU starts at $0000, in the BIOS (cpu.reset_state).'),
+    'rom': ('8 KB, at $0000-$BFFF (repeated every 8 KB) while $3E bit 3 is clear and bit 6 set. With bits 3 and 6 '
+            'both clear the cartridge answers, so software that writes $3E = 0x04 (bit 2 set, disabling the I/O chip '
+            'before it reads $F2, audio.fm.audio_control.detection, and the other bits clear) keeps running from its '
+            'own ROM. BIOS reads, the CPU\'s or a DMA transfer\'s from source 0, take no '
+            'cartridge wait state (cpu.turbo.cartridge_wait). The BIOS writes nothing below $C000. What $3E bit 3 does '
+            'after the launch is open question Q36.'),
+    'header_read': ('The BIOS copies a short routine to work RAM, which sets $3E to 0xA8 (cartridge on, BIOS off), '
+                    'copies the 16 bytes at $7FF0, $3FF0 or $1FF0 (machine.detection) and sets $3E back to 0xE0, as '
+                    'the Master System BIOS does. After a cold reset every mapper has ROM offsets $0000-$7FFF at '
+                    'those addresses.'),
+    'ports': {
+        'scope': ('MasterDrive mode, while the BIOS ROM is mapped ($3E bit 3 clear, bit 6 set). Otherwise $18-$1F are '
+                  'the $3E/$3F mirrors (port_map.mirror_scheme).'),
+        '0x18': 'write: setting index; reads 0xFF',
+        '0x19': 'read/write: the setting at the index; the index then steps by one',
+        '0x1F': 'write 0xA5: launch the game (bios.launch); other values do nothing; reads 0xFF',
+        '0x1A-0x1E': 'read 0xFF; writes do nothing'},
+    'settings': {
+        '0': ('the machine to launch: 0 Master System, 1 Game Gear, 2 SG-1000, 3 SC-3000, 4 SF-7000, 5 MasterDrive. '
+              'After a cold reset the platform\'s choice (16) if the platform runs that machine (21), otherwise 0. A write of a machine the '
+              'platform does not run (21), or of a larger value, is ignored'),
+        '1-9': ('the boosts for the next launch, in enhancement_layer.boosts\'s order: sprite limit, stock overflow '
+                'flag, Start = Pause, turbo step (0-4), VRAM speed-up, auto-fire, pseudo-stereo, Game Gear uncrop, '
+                'True TMS colours. Index 4 ignores values above 4; the others keep bit 0'),
+        '16': 'read only: the platform\'s machine choice, 0xFF for none (Auto)',
+        '17': ('read only: bit 0 a cartridge is inserted, bit 1 a card is inserted, bit 2 the platform has USB, '
+               'bit 3 PAL video, bit 4 the platform has its own settings menu'),
+        '18': ('read only: the cartridge\'s size as log2 of its byte count, rounded up (13 = 8 KB, 22 = 4 MB); 0 if '
+               'unknown (Q31)'),
+        '19': 'read only: the platform\'s mapper setting (0 Sega, 1 Codemasters, 2 Korean, 3 Korean MSX), 0xFF if unknown',
+        '20': 'read only: the region, 0 export, 1 Japan (Q34)',
+        '21': 'read only: the machines the platform runs, bit n for machine n',
+        'others': 'read 0xFF; writes do nothing'},
+    'boosts': ('Each boost has a current value, the one in effect, and a next value, for the next launch; the first '
+               'cold reset after the platform starts takes the platform\'s own values for both. A change in a '
+               'platform\'s own menu sets both at once, during the menu or in a game; a write to setting 1-9 sets only '
+               'the next value; the launch makes the next values current. A later cold reset keeps each current value '
+               'and makes it the next value too, so a change made in the BIOS menu and not yet launched is dropped. '
+               'Between cold resets, whichever changed a boost last wins. The BIOS reads settings 1-9 every frame, '
+               'so a platform change shows in its menu at once, and writes a boost only when the player changes it '
+               'there. The machine choice lasts one launch (Q33).'),
+    'identification': ('Default machine: the platform\'s choice (16) when it has one (with a cartridge inserted, a choice '
+                       'of the SF-7000, which does not play the cartridge, counts as none); else the header\'s region nibble '
+                       '(3 or 4 Master System, 5-7 Game Gear, 8 MasterDrive, other values Master System); else, with '
+                       'no header, SG-1000 if the size (18) is known and 64 KB or less, otherwise Master System (Q31). '
+                       'The checksum is shown, never enforced: the BIOS refuses no cartridge.'),
+    'launch': ('When 0xA5 is written to $1F the CPU runs no further instruction. At the VDP\'s next wrap to line 0 every '
+               'block is reset as at a cold reset, except that the machine is the one in setting 0, $3E is 0xA8 and '
+               'the boosts\' next values become current. Memory is not touched: VRAM, CRAM, work RAM and cartridge RAM '
+               'stay as the BIOS left them, and so do the CPU registers a Z80 reset does not set. Before the launch '
+               'the BIOS turns the display and its interrupts off, clears VRAM $0000-$3FFF, the 32 CRAM entries and '
+               'work RAM bank 0, sets AF\' to 0xFFFF and clears BC, DE, HL, IX, IY, BC\', DE\' and HL\' '
+               '(bios.hand_over_memory says what it leaves). So the game finds what a direct start gives. The launch '
+               'waits until the button that asked for it (Start on the skip path; from the menu both Start and B, '
+               'whichever launched) has read released in two frames running, so the game does not start with it held; '
+               'other buttons may stay held. The BIOS checks this before its clears, which take about seven frames: a '
+               'button pressed during them is held at the launch (a Pause held so is no press, bios.pause). The launch '
+               'happens at the frame wrap whichever line the $A5 write came on, and the first clock after it is that '
+               'of a cold reset. How the console does this with its 315-5535 is open question Q37.'),
+    'hand_over_memory': ('At hand-over work RAM bank 0, VRAM $0000-$3FFF and CRAM entries 0-31 are zero (the BIOS '
+                         'clears them) and the palette-written flags are clear (the launch resets them). Work RAM banks '
+                         '1-15, VRAM $4000-$7FFF, CRAM entries 32-255, the wavetable waveforms, SC-3000 cartridge RAM '
+                         'and the SF-7000\'s RAM are cleared neither by a cold reset nor by the launch: software must not '
+                         'assume them zero. (The emulator\'s cold reset clears VRAM, CRAM and the waveforms; the Pocket '
+                         'core\'s, whose memories are block RAM, does not.) Whether they should be cleared is open '
+                         'question Q38.'),
+    'pause': ('No Pause (NMI) from a cold reset until the launch: software cannot mask an NMI, and one during the header '
+              'read would run the cartridge\'s handler. A Pause held through the launch (the Pause button, or Start '
+              'with Start = Pause on) is no press: the game gets a Pause when it is pressed again.'),
+    'menu': ('Rows 0-2 are Mode 4 tiles (the name, the BIOS version and the device row CART, CARD, USB, SYSTEM, the '
+             'current one in palette 1); rows 3-23 are the text window, 40 columns of 6-pixel characters at x 8-247, '
+             'with a status line at the bottom. A sprite arrow marks the selected item. Left and right change device, '
+             'up and down move, B changes an item, C goes to the top, Start plays from any device when a cartridge is '
+             'inserted, or with none when the platform\'s choice is the SF-7000 and it runs one (setting 21), which '
+             'starts from its own ROM and disks. CART: what the header says, PLAY, the machine (Auto or one the '
+             'platform runs, not the SF-7000, which does not play the cartridge), the boosts (for MasterDrive software '
+             'only True TMS colours, which also acts on it, Q11; a boost that does not act on the machine PLAY starts is '
+             'marked "(no effect)", enhancement_layer.boosts). CARD: whether a card is '
+             'inserted. USB: none on a platform without USB. SYSTEM: the BIOS version, the machine ID ($17), the '
+             'video standard and region, a controller test (B starts it; every button then shows while held and none '
+             'acts until Start and A are held together). The BIOS silences the PSG at start. Stock colours only, no '
+             'animation; a page is drawn into the text name table not on screen and shown from a vertical blank, so '
+             'a page change goes from one frame to the next. With the display on its VDP data writes are at least '
+             '29 T-states apart (cpu.bus_synchroniser). It relies on the text window counting its rows from its top edge '
+             '(Q29). Not in this round, each waiting on an open question or on hardware the implementations lack: '
+             'per-title settings, the save card manager, USB, computer mode, firmware update, the POST display, '
+             'PLAY\'s region, video, controller and slot options, the SETTINGS page, the SYSTEM memory and video '
+             'tests, FPGA configuration and card health, the save-restore offer at power-on, the return to the BIOS '
+             'from a running game, cassettes and disks.'),
+})
+p['memory']['port_3E_memory_enables']['bit_3'] = '0 enable the base 8 KB BIOS ROM, the machine\'s own (bios.rom)'
+cpu['reset_state'] = (
+    'After a cold reset the CPU starts in the BIOS (bios.cold_reset); software gets it from the BIOS\'s launch '
+    '(bios.launch). At hand-over to software: PC $0000, SP $DFF0 (where the Master System BIOS leaves it), '
+    'interrupts disabled (IFF1 = IFF2 = 0), interrupt mode 0, I and R 0 (as a Z80 reset sets them), AF $FFFF (as '
+    'real Z80s come out of reset, though Zilog does not document it) and AF\' $FFFF (a Z80 reset leaves it; the '
+    'BIOS sets it); software selects IM 1 itself. BC, DE, HL, IX, IY, BC\', DE\' and HL\' are 0: a Z80 reset '
+    'leaves them, and the BIOS clears them before its launch. The emulator and the Pocket core also set SP and AF\' '
+    'in their CPU reset; how the console reaches SP $DFF0 is open question Q32.')
+p['media']['sc3000_carts']['rom'] = ('0x0000-0x7FFF; a smaller ROM repeats through the range (both implementations take '
+                                     'the address modulo its length; Q39)')
+p['cpu']['turbo']['cartridge_wait'] = p['cpu']['turbo']['cartridge_wait'].replace(
+    "($0000-$BFFF; not the SF-7000's RAM and IPL)", "($0000-$BFFF; not the SF-7000's RAM and IPL, nor the BIOS ROM, bios.rom)")
+p['dma']['register_layout']['0xF6'] = p['dma']['register_layout']['0xF6'].replace(
+    '0 the CPU address space ($0000-$FFFF as the CPU reads it)',
+    '0 the CPU address space ($0000-$FFFF as the CPU reads it: the BIOS ROM while it is mapped, with no wait state on '
+    'its bytes, bios.rom)')
+p['media']['dual_slot']['source_select'] = p['media']['dual_slot']['source_select'].replace(
+    '$0000-$3FFF is always the cartridge.', '$0000-$3FFF is always the cartridge, except while the BIOS ROM is mapped (bios.rom).')
+p['media']['sg1000_carts']['note'] = (
+    'SG-1000 and SC-3000 cartridges run natively. The BIOS starts a headerless cartridge of 64 KB or less as SG-1000 '
+    'software where the platform knows its size (bios.identification, Q31); SC-3000 software is chosen in the BIOS\'s '
+    'Machine item or the platform\'s machine setting.')
+p['compatibility']['reset_state'] = (
+    'At hand-over to software (the BIOS\'s launch): all features disabled, turbo at 100%, legacy modes authentic; '
+    'behaviour identical to stock hardware in every mode. A cold reset starts the machine\'s BIOS in MasterDrive mode '
+    'instead (bios.cold_reset).')
+p['software_detection']['boot_menu'] = (
+    'The BIOS\'s Machine item (bios.menu) can start an export (region 4) cartridge in MasterDrive mode instead of Master '
+    'System mode. It then starts as MasterDrive software does: every extension off, and the I/O registers waiting for '
+    'Feature Enable A bit 7 (port_map.native_gate). The Analogue Pocket core\'s System setting and the emulator\'s '
+    'machine selector choose the machine the BIOS offers first (bios.settings 16; changing it restarts the machine).')
+p['enhancement_layer']['default'] = p['enhancement_layer']['default'].replace(
+    'Each one is switched independently: on the console from the boot menu, in the emulator from its AEL panel, on the '
+    'Analogue Pocket core from the core settings (Interact) menu.',
+    'Each one is switched independently, in the BIOS menu on every platform, and also in the emulator\'s AEL panel and '
+    'the Analogue Pocket core\'s settings (Interact) menu: the last change wins (bios.boosts). Off at power-on means a '
+    'first start: a platform keeps the boosts in effect across a Reset, and where the console keeps them is Q33.')
+if 'BIOS ROM and launch' not in jobs:
+    jobs.insert(jobs.index('mapper and slot arbitration') + 1, 'BIOS ROM and launch')
+p['video']['window_layer']['text_mode']['layout'] += ('; each pattern byte is one row of a character: bits 7-2 are its '
+                                                      'six pixels, bit 7 leftmost, and bits 1-0 are not drawn')
+p['color_system']['power_on_state']['cold_reset'] = (
+    'not defined: a cold reset need not clear CRAM (the Pocket core\'s does not, the emulator\'s does); the BIOS clears '
+    'entries 0-31 before its launch (bios.hand_over_memory)')
+p['vdp_registers']['power_on_values']['others'] = (
+    'At a cold reset and at the launch (bios.launch) bank 0 R11-R15 and every bank 1-3 register are 0, as are $09, '
+    '$0B, the math unit ($0C-$10) and the DMA registers ($F4-$FA); R0-R10 take the values above')
+put_after(p['color_system']['power_on_state'], 'cold_reset', 'launch',
+          'entries kept as the BIOS left them; the palette-written flags cleared')
+put_after(p['port_map']['registers'], '0x17', '0x18-0x1F', (
+    'The BIOS\'s ports, MasterDrive mode while the BIOS ROM is mapped (bios.ports); otherwise the $3E/$3F mirrors'))
+put_after(p['machine']['detection'], 'offset_note', 'bios_rule', (
+    'The machine\'s BIOS reads the header and picks the machine to launch (bios.identification).'))
+put_after(p['enhancement_layer'], 'precedence', 'settings', (
+    'Each boost has a current value and a value for the next launch, which the BIOS menu sets; a platform\'s own '
+    'menu sets both (bios.boosts).'))
+p['open_questions'] += [
+    {'id': 'Q31', 'topic': 'Identifying a headerless cartridge on the console', 'status': 'open',
+     'detail': ('Without a TMR SEGA header the BIOS takes a cartridge of 64 KB or less as SG-1000 software, otherwise as '
+                'Master System software (bios.identification). That needs the size, which the Pocket core and the '
+                'emulator know from the file but a console cannot read from a cartridge (setting 18 reads 0), so on '
+                'the console Auto plays every headerless cartridge as Master System software. How should the console '
+                'tell SG-1000 and SC-3000 cartridges, and headerless Japanese Master System ones, apart?')},
+    {'id': 'Q32', 'topic': 'How the console holds and starts its BIOS', 'status': 'open',
+     'detail': ('The owner\'s plans keep the BIOS in SPI flash, which the Z80 cannot run from, so the console\'s FPGA '
+                'must present it as the 8 KB BIOS ROM (from block RAM, say). And a Z80 reset leaves SP at $FFFF on real '
+                'parts, not the hand-over $DFF0 (cpu.reset_state), which the emulator and the Pocket core set in their '
+                'reset (the BIOS sets AF\' itself). '
+                'How does the console\'s launch reach that state: does the FPGA give the CPU a few instructions '
+                '(LD SP,$DFF0; JP $0000) after the reset, or something else?')},
+    {'id': 'Q33', 'topic': 'Where the console keeps the BIOS\'s choices', 'status': 'open',
+     'detail': ('A platform with its own settings menu keeps the boosts the BIOS sets until they change again '
+                '(bios.boosts); the console has no such menu. Where does it keep them (the plans\' FRAM, per title or '
+                'for all)? And the BIOS\'s machine choice lasts one launch: should it outlast a Reset, as the boosts '
+                'do?')},
+    {'id': 'Q34', 'topic': 'The console\'s region', 'status': 'open',
+     'detail': ('The Pocket core and the emulator have a region setting (export or Japan), which the BIOS reads '
+                '(setting 20) and which port $00 bit 6 and the TH read-back follow. The documents do not say which '
+                'region the console is, or whether it has a switch.')},
+    {'id': 'Q35', 'topic': 'The BIOS ROM\'s size', 'status': 'open',
+     'detail': ('The BIOS ROM is 8 KB, as the Master System\'s base BIOS ROM behind $3E bit 3, and the menu uses about '
+                'half of it. The owner\'s plans add a save card manager, USB import and export and a computer mode, '
+                'which will not fit: should the BIOS ROM grow, be paged (and through which register), or should those '
+                'tools live elsewhere?')},
+    {'id': 'Q36', 'topic': '$3E bit 3 after the launch', 'status': 'open',
+     'detail': ('Both implementations keep the BIOS ROM reachable after the launch: in Master System, Game Gear and '
+                'MasterDrive modes, a $3E write with bit 3 clear and bit 6 set maps it over $0000-$BFFF again, and in '
+                'MasterDrive mode the BIOS\'s ports answer too, so software could start another machine with $A5 at $1F. '
+                'On the stock machines the BIOS behind bit 3 is the Master System\'s own (the Game Gear maps only '
+                '$0000-$03FF). Should the MasterDrive BIOS stay reachable after the launch, in which modes, and should '
+                'its launch port then work?')},
+    {'id': 'Q37', 'topic': 'The launch on the console', 'status': 'open',
+     'detail': ('The launch resets every block at the VDP\'s wrap to line 0, so that the first clock after it is that '
+                'of a cold reset (bios.launch). The Pocket core does this in its own logic and the emulator at a frame '
+                'boundary. On the console the VDP and PSG are inside the 315-5535: can the FPGA reset them at that '
+                'moment, or must it rewrite their registers, and how does the raster\'s phase come out?')},
+    {'id': 'Q38', 'topic': 'Memory the BIOS does not clear', 'status': 'open',
+     'detail': ('Work RAM banks 1-15, VRAM $4000-$7FFF, CRAM entries 32-255, the wavetable waveforms, SC-3000 cartridge '
+                'RAM and the SF-7000\'s RAM keep what they held across a cold reset and the launch, so a game can find '
+                'what an earlier game left (bios.hand_over_memory); the emulator\'s cold reset clears VRAM, CRAM and '
+                'the waveforms. Should a cold reset or the launch clear them, and should both implementations then do '
+                'the same?')},
+    {'id': 'Q39', 'topic': 'Reading past a cartridge\'s ROM', 'status': 'open',
+     'detail': ('A cartridge image need not be a power of two long. Reads beyond it inside the cartridge\'s address '
+                'range wrap into the image in both implementations (the address taken modulo the image\'s length), '
+                'except in the emulator\'s SG-1000 mode, which reads 0xFF there and never mirrors; the Pocket core '
+                'mirrors a power-of-two image through its size in every mode. On a real cartridge it depends on how '
+                'the board decodes the address. What should a read beyond a cartridge\'s ROM return, in each mode?')},
+]
+change(LATER + 'The machine\'s own BIOS (bios, Technical Reference section 20), decided by the owner: a menu before '
+       'every game, project-written. A cold reset now starts MasterDrive mode with $3E = $E0, the BIOS ROM mapped '
+       '($A8, the value the documents gave for reset, is now the value at the launch, as they described it: the '
+       'state after a BIOS has handed over). The BIOS ROM answers while $3E bit 3 is clear and bit 6 set. In '
+       'MasterDrive mode, while it is mapped, ports $18, $19 and $1F are the BIOS\'s settings and launch '
+       '(port_map). The launch resets the registers into the machine the BIOS chose. Each boost has a current '
+       'value and one for the next launch (enhancement_layer.settings). No Pause while the BIOS runs. The hand-over '
+       'state now gives every register: AF\' is $FFFF, as the Pocket core already reset it (the emulator reset it to '
+       '0), and BC to HL\', IX and IY are 0, cleared by the BIOS. Open questions Q31 (headerless cartridges on the '
+       'console), Q32 (how the console holds and starts its BIOS), Q33 (where it keeps the BIOS\'s choices), Q34 '
+       '(the console\'s region), Q35 (the BIOS ROM\'s size), Q36 ($3E bit 3 after the launch), Q37 (the launch on '
+       'the console), Q38 (memory the BIOS does not clear) and Q39 (reading past a cartridge\'s ROM) added; Q29 notes that the menu relies on the text '
+       'window\'s row rule. color_system.power_on_state said a cold reset clears CRAM; it does not on the Pocket core, '
+       'whose CRAM is block RAM, so a cold reset now leaves CRAM undefined (bios.hand_over_memory). The FPGA has a '
+       '28th job, the BIOS ROM and launch. The text window\'s pattern bytes are written down (bits 7-2 the six '
+       'pixels), and the reset values the launch relies on: bank 0 R11-R15, banks 1-3, $09, $0B, $0C-$10 and $F4-$FA '
+       'are 0, as both implementations already reset them. The hand-over state says which registers a Z80 reset '
+       'sets and which the BIOS sets: it now sets AF\' itself, which a real Z80 reset leaves alone.')
 
 p['v7_changes'] = changes
 # key order: identification first, then scope, then the v7 summary, then the body

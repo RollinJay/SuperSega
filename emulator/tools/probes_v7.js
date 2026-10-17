@@ -841,7 +841,7 @@ function bootSkip(rom, platform) {
   for (; f < 60 && m.mode === 'ss' && m.memCtl !== 0xA8; f++) { m.btn.start = f < 2 ? 1 : 0; m.runFrame(); }
   return { m, f };
 }
-probe('M72', 'A cold reset starts the machine in MasterDrive mode with $3E = $E0: the 8 KB BIOS ROM at $0000-$BFFF (repeated) before the cartridge, its ports $18/$19 answering; $3E bit 3 set maps the cartridge and returns $18-$1F to the $3E/$3F mirrors (Technical Reference §2)', () => {
+probe('M72', 'A cold reset starts the machine in MasterDrive mode with $3E = $E0: the 8 KB BIOS ROM at $0000-$BFFF (repeated) before the cartridge, its ports $18/$19 answering; $3E bit 3 set maps the cartridge and returns $18-$1F to the $3E/$3F mirrors (Technical Reference section 20)', () => {
   const m = new X.Machine(); m.cart = biosRom(0x8000); m.powerOn();
   const b0 = m.rd(0x0000), b8 = m.rd(0x2000), bB = m.rd(0xBFFF);
   m.out(0x18, 21); const mask = m.inp(0x19);
@@ -849,7 +849,7 @@ probe('M72', 'A cold reset starts the machine in MasterDrive mode with $3E = $E0
   const ok = m.mode === 'ss' && b0 === X.MD_BIOS[0] && b8 === X.MD_BIOS[0] && bB === X.MD_BIOS[0x1FFF] && mask === 0x2F && c0 === 0x18 && mir === 0xFF;
   return { ok, note: `mode ${m.mode}, $0000 $${b0.toString(16)}, $2000 $${b8.toString(16)}, index 21 $${mask.toString(16)}; cartridge on: $0000 $${c0.toString(16)}, $19 $${mir.toString(16)}` };
 });
-probe('M73', 'The BIOS\'s settings: index 0 takes only a machine the platform runs, index 4 (turbo) only 0-4, indices 1-9 otherwise bit 0, the read-only ones nothing; the index steps after each access (Technical Reference §2)', () => {
+probe('M73', 'The BIOS\'s settings: index 0 takes only a machine the platform runs, index 4 (turbo) only 0-4, indices 1-9 otherwise bit 0, the read-only ones nothing; the index steps after each access (Technical Reference section 20)', () => {
   const m = new X.Machine(); m.cart = biosRom(0x8000); m.powerOn();
   m.out(0x18, 0); m.out(0x19, 4);                          // the SF-7000: this platform does not run it
   m.out(0x18, 0); const sf = m.inp(0x19);
@@ -861,7 +861,7 @@ probe('M73', 'The BIOS\'s settings: index 0 takes only a machine the platform ru
   const ok = sf === 0 && t7 === m.boostGet(4) && ro === 0xFF && got[0] === 5 && got[1] === 1 && got[4] === 3;
   return { ok, note: `SF-7000 refused (index 0 = ${sf}), turbo 7 refused, index 16 stays $${ro.toString(16)}; indices 0-4 read ${got.join(',')}` };
 });
-probe('M74', 'The launch ($A5 to $1F): the CPU runs no further instruction; at the frame wrap every block resets into the machine in index 0 with $3E = $A8 and the boosts\' next values current, cartridge RAM kept (Technical Reference §2)', () => {
+probe('M74', 'The launch ($A5 to $1F): the CPU runs no further instruction; at the frame wrap every block resets into the machine in index 0 with $3E = $A8 and the boosts\' next values current, cartridge RAM kept (Technical Reference section 20)', () => {
   const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.powerOn();
   m.ram[0x2000] = 0x5A;                                     // battery-backed cartridge RAM
   m.out(0x18, 0); m.out(0x19, 1); m.out(0x18, 4); m.out(0x19, 2);   // Game Gear, turbo step 2
@@ -873,7 +873,7 @@ probe('M74', 'The launch ($A5 to $1F): the CPU runs no further instruction; at t
   const ok = held && at && at.mode === 'gg' && at.mem === 0xA8 && at.PC === 0 && at.SP === 0xDFF0 && at.AF === 0xFFFF && m.ael.turbo === 1.5 && m.ram[0x2000] === 0x5A;
   return { ok, note: `held ${held}; at the wrap ${at ? at.mode + ', $3E $' + at.mem.toString(16) + ', PC ' + at.PC + ', SP $' + at.SP.toString(16) : 'no launch'}; turbo ${m.ael.turbo * 100} %; cartridge RAM $${m.ram[0x2000].toString(16)}` };
 });
-probe('M75', 'The boosts: a change in the platform\'s menu sets the current and the next value at once; a BIOS write sets only the next; the launch makes the next current, so the last change wins (Technical Reference §15)', () => {
+probe('M75', 'The boosts: a change in the platform\'s menu sets the current and the next value at once; a BIOS write sets only the next; the launch makes the next current, so the last change wins (Technical Reference section 20)', () => {
   const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.ael.sprlimit = false; m.ael.ovf = false; m.powerOn();
   m.ael.sprlimit = true; m.boostChanged('sprlimit');       // the platform: sprite limit on
   m.out(0x18, 1); const seen = m.inp(0x19);
@@ -885,7 +885,7 @@ probe('M75', 'The boosts: a change in the platform\'s menu sets the current and 
   const ok = seen === 1 && before === true && m.ael.sprlimit === false && m.ael.ovf === false;
   return { ok, note: `index 1 read ${seen} after the platform's change; current kept ${before} until the launch; after it sprite limit ${m.ael.sprlimit}, overflow flag ${m.ael.ovf} (want false, false)` };
 });
-probe('M76', 'The BIOS identifies the cartridge: TMR SEGA at $7FF0, $3FF0 then $1FF0; region 3/4 Master System, 5-7 Game Gear, 8 MasterDrive, others Master System; no header: SG-1000 if 64 KB or less (size rounded up to a power of two), else Master System; the platform\'s own choice first (Technical Reference §14)', () => {
+probe('M76', 'The BIOS identifies the cartridge: TMR SEGA at $7FF0, $3FF0 then $1FF0; region 3/4 Master System, 5-7 Game Gear, 8 MasterDrive, others Master System; no header: SG-1000 if 64 KB or less (size rounded up to a power of two), else Master System; the platform\'s own choice first (Technical Reference sections 14 and 20)', () => {
   const cases = [
     ['header $7FF0 region 4', biosRom(0x8000, { 0x7FF0: 4 }), 'auto', 'sms'],
     ['region 3', biosRom(0x8000, { 0x7FF0: 3 }), 'auto', 'sms'],
@@ -904,6 +904,145 @@ probe('M76', 'The BIOS identifies the cartridge: TMR SEGA at $7FF0, $3FF0 then $
   const bad = [];
   for (const [name, rom, plat, want] of cases) { const { m } = bootSkip(rom, plat); if (m.mode !== want) bad.push(`${name}: ${m.mode}`); }
   return { ok: bad.length === 0, note: bad.length ? bad.join('; ') : `${cases.length} cartridges, each launched as expected` };
+});
+
+probe('M77', 'No Pause (NMI) while the BIOS runs, from a cold reset to its launch: software cannot mask an NMI, and one during the header read would run the cartridge\'s own handler; after the launch Pause works (Technical Reference section 20)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.powerOn();
+  let n = 0; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
+  let k = 0, inBios = -1;
+  for (; k < 60 && m.mode === 'ss'; k++) { m.btn.start = k < 2 ? 1 : 0; m.runFrame(); if (k === 3) { m.pause(); inBios = n; } }
+  m.pause(); const after = n - inBios;
+  return { ok: inBios === 0 && after === 1 && m.mode === 'sms', note: `NMIs in the BIOS ${inBios} (want 0), after the launch ${after} (want 1)` };
+});
+probe('M78', 'The launch waits until Start has read released in two frames running, in NTSC and in PAL (in PAL the V counter shows a value above $B9 twice a frame, so the BIOS waits for line 0) (Technical Reference section 20)', () => {
+  const res = [];
+  for (const pal of [false, true]) {
+    const m = new X.Machine(); m.pal = pal; m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.powerOn();
+    const frames = new Set(); let f = 0;
+    const inp = m.inp.bind(m); m.inp = p => { if ((p & 0xFF) === 0xDC && f >= 3 && !m.boot.launch) frames.add(f); return inp(p); };
+    m.cpu.bus = m;
+    for (; f < 60 && !m.boot.launch; f++) { m.btn.start = f < 3 ? 1 : 0; m.runFrame(); }
+    res.push({ pal, n: frames.size, launched: m.boot.launch });
+  }
+  return { ok: res.every(r => r.launched && r.n >= 2), note: res.map(r => `${r.pal ? 'PAL' : 'NTSC'}: released Start read in ${r.n} frame(s)`).join('; ') };
+});
+
+probe('M79', 'The BIOS ROM answers only while $3E enables it and disables the cartridge (bit 3 clear, bit 6 set); with both enabled the cartridge answers, so Japanese software that writes $3E = $04 before it reads $F2 keeps running from its own ROM (Technical Reference section 20)', () => {
+  const m = sms('sms'); m.cart = biosRom(0x8000);
+  m.out(0x3E, 0x04); const both = m.rd(0x0000);                 // bits 3 and 6 clear
+  m.out(0x3E, 0xE0); const bios = m.rd(0x0000);                 // the cold reset's value
+  const ss = sms('ss'); ss.cart = biosRom(0x8000); ss.out(0x3E, 0x04); ss.out(0x18, 21); const port = ss.inp(0x19);
+  return { ok: both === 0x18 && bios === X.MD_BIOS[0] && port === 0xFF, note: `$3E $04: $0000 reads $${both.toString(16)} (the cartridge's $18), $19 reads $${port.toString(16)}; $3E $E0: $${bios.toString(16)} (the BIOS)` };
+});
+probe('M80', 'The launch resets the registers and keeps the rest as the BIOS left it, as the Pocket core does: VRAM, CRAM, the wavetable\'s waveforms, BC/DE/HL/IX/IY and BC\'/DE\'/HL\', cartridge RAM and the record of its written pages; buttons held stay held; the BIOS\'s setting index returns to 0 (Technical Reference section 20)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 8 }); m.powerOn();
+  m.ram[0x2000 + 5 * 256] = 0xA5; m.sramDirty = 0x20;
+  m.vdp.vram[0x4000] = 0x77; m.vdp.cram[100] = 0x55; m.cpu.IX = 0x1234; m.cpu.S[0] = 0x56; m.wave[1].ram[3] = 0x0B;
+  m.out(0x18, 3);                                            // the BIOS left its index at 3
+  m.btn.a = 1; m.boot.set[0] = 5; m.boot.launch = true; m.runFrame();
+  m.out(0x3E, 0xE0); m.out(0x3E, 0xE0); const idx0 = m.inp(0x19);   // the BIOS mapped again (Q36): $19 reads index 0
+  const ok = m.mode === 'ss' && m.vdp.vram[0x4000] === 0x77 && m.vdp.cram[100] === 0x55 && m.cpu.S[0] === 0x56 &&
+             m.ram[0x2000 + 5 * 256] === 0xA5 && m.sramDirty === 0x20 && m.btn.a === 1 && m.vdp.pw[0] === 0 &&
+             m.wave[1].ram[3] === 0x0B && idx0 === 5;
+  return { ok, note: `VRAM $${m.vdp.vram[0x4000].toString(16)}, CRAM $${m.vdp.cram[100].toString(16)}, waveform $${m.wave[1].ram[3].toString(16)}, B' $${m.cpu.S[0].toString(16)}, cartridge RAM $${m.ram[0x2000 + 5 * 256].toString(16)} dirty $${m.sramDirty.toString(16)}, button 1 ${m.btn.a}, $19 after the launch ${idx0} (index 0: 5)` };
+});
+probe('M81', 'A Pause held through the launch is not a press: with Start = Pause on, a Start pressed again during the BIOS\'s last clears and held through the launch raises no Pause; released and pressed again, it does, as in the Pocket core (Technical Reference section 20)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.ael.startpause = true; m.powerOn();
+  let n = 0; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
+  let k = 0;
+  for (; k < 60 && m.mode === 'ss'; k++) { m.btn.start = (k < 2 || k >= 6) ? 1 : 0; m.runFrame(); }
+  const launchedAt = k, mode = m.mode;
+  m.runFrame(); m.runFrame(); const held = n;                   // Start still held
+  m.btn.start = 0; m.runFrame(); m.btn.start = 1; m.runFrame(); const pressed = n - held;
+  // Start first pressed after the launch write, in the frame before the launch, and held
+  const m2 = new X.Machine(); m2.cart = biosRom(0x8000, { 0x7FF0: 4 }); m2.ael.startpause = true; m2.powerOn();
+  let n2 = 0; const f2 = m2.cpu.nmi.bind(m2.cpu); m2.cpu.nmi = () => { n2++; f2(); };
+  for (let k = 0; k < 60 && !m2.boot.launch; k++) { m2.btn.start = k < 2 ? 1 : 0; m2.runFrame(); }
+  m2.btn.start = 1; m2.runFrame(); m2.runFrame(); const late = n2;
+  return { ok: mode === 'sms' && launchedAt > 6 && held === 0 && pressed === 1 && m2.mode === 'sms' && late === 0,
+           note: `launched as ${mode} in frame ${launchedAt} with Start held; NMIs while held ${held} (want 0), on the next press ${pressed} (want 1); Start pressed after the launch write and held: ${late} (want 0)` };
+});
+// dirty what the BIOS promises to clear (VRAM $0000-$3FFF, CRAM entries 0-31, work RAM
+// bank 0) and say whether it is all zero
+function dirtyBios(m) { m.vdp.vram.fill(0x5A, 0, 0x4000); m.vdp.cram.fill(0x15, 0, 64); m.wram.fill(0xA5, 0, 0x2000); }
+function clearOf(m) {
+  const nz = (a, n) => { let k = 0; for (let i = 0; i < n; i++) if (a[i]) k++; return k; };
+  return { vram: nz(m.vdp.vram, 0x4000), cram: nz(m.vdp.cram, 64), wram: nz(m.wram, 0x2000) };
+}
+probe('M82', 'Launched from the menu, with Start or with B on PLAY, as from the skip path, the BIOS leaves VRAM $0000-$3FFF, the 32 colours and work RAM bank 0 zero, whatever they held (Technical Reference section 20)', () => {
+  const res = [];
+  for (const [name, btn, at] of [['skip', 'start', 0], ['menu Start', 'start', 14], ['B on PLAY', 'b', 14]]) {
+    const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.powerOn(); dirtyBios(m);
+    let seen = null; m.onLaunch = () => { seen = clearOf(m); };
+    for (let f = 0; f < 60 && !seen; f++) { m.btn[btn] = (f >= at && f < at + 2) ? 1 : 0; m.runFrame(); }
+    res.push({ name, seen, mode: m.mode });
+  }
+  const ok = res.every(r => r.seen && r.mode === 'sms' && !r.seen.vram && !r.seen.cram && !r.seen.wram);
+  return { ok, note: res.map(r => `${r.name}: ` + (r.seen ? `${r.seen.vram}/${r.seen.cram}/${r.seen.wram} bytes left` : 'no launch')).join('; ') + ' (VRAM/CRAM/work RAM)' };
+});
+probe('M83', 'The BIOS menu keeps its VDP data writes at least 29 T-states apart while the display is on, as the stock VDP needs at 100 % (Technical Reference sections 1 and 20): a scripted session through every device page, a boost change and the controller test', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.powerOn();
+  let last = -1, lastF = -1, n = 0, close = 0, min = 1e9;
+  const out = m.out.bind(m); m.out = (p, v) => {
+    if ((p & 0xC1) === 0x80 && (m.vdp.reg[1] & 0x40)) {
+      if (lastF === m.frameNo && last >= 0) { const g = m.cpu.tc - last; if (g < min) min = g; if (g < 29) close++; }
+      last = m.cpu.tc; lastF = m.frameNo; n++;
+    }
+    return out(p, v); };
+  m.cpu.bus = m;
+  const script = { 14: 'right', 20: 'right', 26: 'right', 32: 'b', 38: 'up', 44: 'right', 50: 'down', 53: 'down', 56: 'b', 62: 'left' };
+  const boostsBefore = Array.from(m.boot.set.slice(1, 10)).join();
+  for (let f = 0; f < 70 && m.mode === 'ss'; f++) {
+    for (const k of ['up', 'down', 'left', 'right', 'a', 'b', 'c', 'start']) m.btn[k] = 0;
+    const k = script[f] || script[f - 1]; if (k) m.btn[k] = 1;
+    if (f >= 38 && f < 40) { m.btn.start = 1; m.btn.a = 1; }       // Start + A ends the controller test
+    m.runFrame();
+  }
+  const changed = Array.from(m.boot.set.slice(1, 10)).join() !== boostsBefore;
+  return { ok: n > 1000 && close === 0 && m.mode === 'ss' && changed, note: `${n} data writes with the display on, ${close} closer than 29 T-states (closest ${min}); a boost changed: ${changed}` };
+});
+probe('M84', 'A save state taken in the BIOS menu, or between the launch write ($A5) and the frame wrap, loads and runs on as the machine would have: the same frames, the same launch (Technical Reference section 20)', () => {
+  const save = X.evalInPage('saveState'), load = X.evalInPage('loadState');
+  const rom = biosRom(0x8000, { 0x7FF0: 4 });
+  const press = f => (f >= 20 && f < 22) ? 1 : 0;           // Start in the menu: the launch
+  const hash = fb => { let h = 0; for (let i = 0; i < fb.length; i += 7) h = (h * 31 + fb[i]) >>> 0; return h; };
+  const A = new X.Machine(); A.cart = rom; A.powerOn();
+  const ref = []; let pend = -1;
+  for (let f = 0; f < 40; f++) { A.btn.start = press(f); ref.push(hash(A.runFrame())); if (pend < 0 && A.boot.launch) pend = f; }
+  const res = [];
+  for (const at of [15, pend]) {
+    const B = new X.Machine(); B.cart = rom; B.powerOn();
+    for (let f = 0; f <= at; f++) { B.btn.start = press(f); B.runFrame(); }
+    const st = JSON.parse(JSON.stringify(save(B)));
+    const C = new X.Machine(); C.cart = rom; C.powerOn(); load(C, st);
+    let d = 0; for (let f = at + 1; f < 40; f++) { C.btn.start = press(f); if (hash(C.runFrame()) !== ref[f]) d++; }
+    res.push({ at, d, mode: C.mode, pendAt: at === pend ? st.boot.launch : null });
+  }
+  const ok = pend > 15 && res.every(r => r.d === 0 && r.mode === 'sms') && res[1].pendAt === true;
+  return { ok, note: res.map(r => `state after frame ${r.at}${r.pendAt ? ' (launch pending)' : ''}: ${r.d} frames differ, runs as ${r.mode}`).join('; ') };
+});
+probe('M85', 'The SF-7000 from the BIOS: with no cartridge, Start starts it when it is the platform\'s choice and the platform runs one (its IPL loaded), and does nothing without the IPL; with a cartridge the Machine list never offers it and a platform choice of it is Auto, as it starts from its own ROM and disks, not the cartridge; started again, it starts in its IPL, its 8255 reset (Technical Reference section 20)', () => {
+  const run = ipl => { const m = new X.Machine(); m.platformMode = 'sf'; if (ipl) m.sf.loadIPL(new Uint8Array([0x18, 0xFE])); m.powerOn();
+    for (let f = 0; f < 40 && m.mode === 'ss'; f++) { m.btn.start = f < 2 ? 1 : 0; m.runFrame(); } return m.mode; };
+  const withIpl = run(true), without = run(false);
+  // with a cartridge a platform choice of the SF-7000 is Auto: the cartridge plays
+  const mc = new X.Machine(); mc.platformMode = 'sf'; mc.sf.loadIPL(new Uint8Array([0x18, 0xFE])); mc.cart = biosRom(0x8000, { 0x7FF0: 4 }); mc.powerOn();
+  for (let f = 0; f < 40 && mc.mode === 'ss'; f++) { mc.btn.start = f < 2 ? 1 : 0; mc.runFrame(); }
+  // the SF-7000 started again after it mapped its RAM: its IPL is at $0000 again
+  const ms = new X.Machine(); ms.platformMode = 'sf'; ms.sf.loadIPL(new Uint8Array([0x3E, 0x0D, 0xD3, 0xE7, 0x18, 0xFE])); ms.powerOn();
+  for (let f = 0; f < 40 && ms.mode === 'ss'; f++) { ms.btn.start = f < 2 ? 1 : 0; ms.runFrame(); }
+  ms.runFrame(); const mapped = ms.sf.romSel; ms.powerOn();
+  let ipl = -1; ms.onLaunch = () => { ipl = ms.rd(0x0000); };    // at the launch, before the IPL runs
+  for (let f = 0; f < 40 && ms.mode === 'ss'; f++) { ms.btn.start = f < 2 ? 1 : 0; ms.runFrame(); }
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.sf.loadIPL(new Uint8Array([0x18, 0xFE])); m.powerOn();
+  const offered = new Set(); let f = 0;
+  const step = k => { for (let i = 0; i < 2; i++) { m.btn[k] = 1; m.runFrame(); f++; } m.btn[k] = 0; for (let i = 0; i < 3; i++) { m.runFrame(); f++; } };
+  for (let i = 0; i < 12; i++) m.runFrame();
+  step('down');                                               // item 1: Machine
+  for (let i = 0; i < 8; i++) { step('b'); offered.add(m.wram[0x08]); }
+  const ok = withIpl === 'sf' && without === 'ss' && !offered.has(4) && offered.has(0xFF) && offered.has(5) &&
+             mc.mode === 'sms' && mapped === 1 && ms.mode === 'sf' && ipl === 0x3E;
+  return { ok, note: `no cartridge: ${withIpl} with the IPL, ${without} without (still the BIOS); Machine offers ${[...offered].map(v => v === 0xFF ? 'Auto' : X.MCODE[v]).join(', ')}; SF-7000 chosen with a cartridge: ${mc.mode}; restarted after mapping its RAM: $0000 reads $${ipl.toString(16)} (the IPL's $3e)` };
 });
 
 let pass = 0;
