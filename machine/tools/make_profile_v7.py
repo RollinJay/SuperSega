@@ -1162,8 +1162,9 @@ put_after(p, 'memory', 'bios', {
                '(bios.hand_over_memory says what it leaves). So the game finds what a direct start gives. The launch '
                'waits until the button that asked for it (Start on the skip path; from the menu both Start and B, '
                'whichever launched) has read released in two frames running, so the game does not start with it held; '
-               'other buttons may stay held. The BIOS checks this before its clears, which take about seven frames: a '
-               'button pressed during them is held at the launch (a Pause held so is no press, bios.pause). The launch '
+               'other buttons may stay held. The BIOS checks this after its clears, which take about seven frames, so a '
+               'button pressed during them also holds the launch back until it is released; only one pressed after the '
+               'check, in the last frame, is held at the launch (a Pause held so is no press, bios.pause). The launch '
                'happens at the frame wrap whichever line the $A5 write came on, and the first clock after it is that '
                'of a cold reset. How the console does this with its 315-5535 is open question Q37.'),
     'hand_over_memory': ('At hand-over work RAM bank 0, VRAM $0000-$3FFF and CRAM entries 0-31 are zero (the BIOS '

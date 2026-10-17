@@ -18,7 +18,9 @@
 #      and its first 50,000 instructions take the emulator's time, instruction
 #      for instruction (later ones poll the V counter and wait for interrupts,
 #      which the emulator times at line boundaries: Reconciliation section 5),
-#      and a Start held through its launch raises no Pause until pressed again;
+#      and its launch waits for Start to read released after its clears, and a
+#      Start pressed after that and held through the launch raises no Pause until
+#      pressed again;
 #      the machine draws the same frames as the emulator's machine model
 #      for the VDP-height (NTSC and PAL), sprite-limit and MasterDrive feature test
 #      ROMs, for the I/O test ROM in Master System and Game Gear modes, for the
@@ -256,17 +258,26 @@ if (cd "$PC/sim/sys" && ./obj/tb_mdr ../../roms/vdp224.sms sms 9 "$W/sys/biostra
    BIOS=1 node "$PC/../emulator/tools/jstrace.js" "$PAGE" "$PC/roms/vdp224.sms" sms 50000 "$W/js/biostrace_js.bin" >> "$W/sys/biostrace.log" 2>&1; then
     python3 tools/cmp_cycles.py "$W/sys/biostrace_rt.bin" "$W/js/biostrace_js.bin" ../bios/masterdrive_bios.rom --no-dma --count 50000 || fail=1
 else echo "FAILED:"; cat "$W/sys/biostrace.log"; fail=1; fi
-# Start = Pause, Start pressed again during the BIOS's last clears and held
-# through the launch: no Pause until it is released and pressed again
-printf '%-9s Start held through the launch: ' biospause
-if (cd "$PC/sim/sys" &&
-    ./obj/tb_mdr ../../roms/vdp224.sms sms 30 "$W/sys/biospause" -bios -press 0:128:2 -press 6:128:60 > "$W/sys/biospause.log" 2>&1 &&
-    ./obj/tb_mdr ../../roms/vdp224.sms sms 30 "$W/sys/biospause2" -bios -press 0:128:2 -press 6:128:10 -press 20:128:3 \
-        > "$W/sys/biospause2.log" 2>&1) &&
-   grep -q '^launch in frame' "$W/sys/biospause.log" && grep -qx 'NMIs after the launch: 0' "$W/sys/biospause.log" &&
-   grep -q '^launch in frame' "$W/sys/biospause2.log" && grep -qx 'NMIs after the launch: 1' "$W/sys/biospause2.log"; then
-    echo "no Pause while held, one on the next press"
-else echo "FAILED:"; cat "$W/sys/biospause.log" "$W/sys/biospause2.log"; fail=1; fi
+# Start = Pause. The BIOS launches once Start reads released after its clears:
+#   biospause   Start held from power-on for two frames: the launch frame L
+#   biospause2  Start pressed in frame L, after the BIOS's last pad read, and held
+#               through the launch: no Pause; pressed again in L+8: one
+#   biospause3  Start pressed again during the clears (frame 6) and held to frame
+#               25: the launch waits for its release, and no Pause follows
+printf '%-9s Start at the launch: ' biospause
+L=$(cd "$PC/sim/sys" && ./obj/tb_mdr ../../roms/vdp224.sms sms 40 "$W/sys/biospause" -bios -press 0:128:2 \
+        > "$W/sys/biospause.log" 2>&1 && sed -n 's/^launch in frame //p' "$W/sys/biospause.log")
+if [ -n "$L" ] &&
+   (cd "$PC/sim/sys" &&
+    ./obj/tb_mdr ../../roms/vdp224.sms sms 40 "$W/sys/biospause2" -bios -press 0:128:2 -press "$L:128:3" -press "$((L + 8)):128:3" \
+        > "$W/sys/biospause2.log" 2>&1 &&
+    ./obj/tb_mdr ../../roms/vdp224.sms sms 40 "$W/sys/biospause3" -bios -press 0:128:2 -press 6:128:20 \
+        > "$W/sys/biospause3.log" 2>&1) &&
+   grep -qx "launch in frame $L" "$W/sys/biospause2.log" && grep -qx 'NMIs after the launch: 1' "$W/sys/biospause2.log" &&
+   L3=$(sed -n 's/^launch in frame //p' "$W/sys/biospause3.log") && [ -n "$L3" ] && [ "$L3" -gt 26 ] &&
+   grep -qx 'NMIs after the launch: 0' "$W/sys/biospause3.log"; then
+    echo "launch in frame $L; Start held through it no Pause, pressed again one; held from the clears: launch in frame $L3, after its release"
+else echo "FAILED:"; cat "$W/sys/biospause.log" "$W/sys/biospause2.log" "$W/sys/biospause3.log"; fail=1; fi
 [ "$fail" = 0 ]
 
 step "5. Pocket platform simulation (sim/pocket)"

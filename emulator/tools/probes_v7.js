@@ -946,21 +946,21 @@ probe('M80', 'The launch resets the registers and keeps the rest as the BIOS lef
              m.wave[1].ram[3] === 0x0B && idx0 === 5;
   return { ok, note: `VRAM $${m.vdp.vram[0x4000].toString(16)}, CRAM $${m.vdp.cram[100].toString(16)}, waveform $${m.wave[1].ram[3].toString(16)}, B' $${m.cpu.S[0].toString(16)}, cartridge RAM $${m.ram[0x2000 + 5 * 256].toString(16)} dirty $${m.sramDirty.toString(16)}, button 1 ${m.btn.a}, $19 after the launch ${idx0} (index 0: 5)` };
 });
-probe('M81', 'A Pause held through the launch is not a press: with Start = Pause on, a Start pressed again during the BIOS\'s last clears and held through the launch raises no Pause; released and pressed again, it does, as in the Pocket core (Technical Reference section 20)', () => {
+probe('M81', 'A Start pressed again during the BIOS\'s last clears and held delays the launch until it is released, so the game does not start with it held; with Start = Pause on, a Start first pressed after the launch write and held through the launch raises no Pause; released and pressed again, it does, as in the Pocket core (Technical Reference section 20)', () => {
   const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.ael.startpause = true; m.powerOn();
   let n = 0; const f = m.cpu.nmi.bind(m.cpu); m.cpu.nmi = () => { n++; f(); };
   let k = 0;
-  for (; k < 60 && m.mode === 'ss'; k++) { m.btn.start = (k < 2 || k >= 6) ? 1 : 0; m.runFrame(); }
-  const launchedAt = k, mode = m.mode;
-  m.runFrame(); m.runFrame(); const held = n;                   // Start still held
-  m.btn.start = 0; m.runFrame(); m.btn.start = 1; m.runFrame(); const pressed = n - held;
+  for (; k < 60 && m.mode === 'ss'; k++) { m.btn.start = (k < 2 || (k >= 6 && k < 20)) ? 1 : 0; m.runFrame(); }  // the clears run in frames 1-7
+  const launchedAt = k, mode = m.mode, atLaunch = n;
+  m.runFrame(); m.btn.start = 1; m.runFrame(); const pressed = n - atLaunch;
   // Start first pressed after the launch write, in the frame before the launch, and held
   const m2 = new X.Machine(); m2.cart = biosRom(0x8000, { 0x7FF0: 4 }); m2.ael.startpause = true; m2.powerOn();
   let n2 = 0; const f2 = m2.cpu.nmi.bind(m2.cpu); m2.cpu.nmi = () => { n2++; f2(); };
   for (let k = 0; k < 60 && !m2.boot.launch; k++) { m2.btn.start = k < 2 ? 1 : 0; m2.runFrame(); }
-  m2.btn.start = 1; m2.runFrame(); m2.runFrame(); const late = n2;
-  return { ok: mode === 'sms' && launchedAt > 6 && held === 0 && pressed === 1 && m2.mode === 'sms' && late === 0,
-           note: `launched as ${mode} in frame ${launchedAt} with Start held; NMIs while held ${held} (want 0), on the next press ${pressed} (want 1); Start pressed after the launch write and held: ${late} (want 0)` };
+  m2.btn.start = 1; m2.runFrame(); m2.runFrame(); m2.runFrame(); const late = n2;
+  m2.btn.start = 0; m2.runFrame(); m2.btn.start = 1; m2.runFrame(); const again = n2 - late;
+  return { ok: mode === 'sms' && launchedAt > 20 && atLaunch === 0 && pressed === 1 && m2.mode === 'sms' && late === 0 && again === 1,
+           note: `pressed again in frame 6 and held to frame 19: launched as ${mode} after frame ${launchedAt} (want after 20), NMIs ${atLaunch} (want 0), on the next press ${pressed} (want 1); Start pressed after the launch write and held: ${late} (want 0), released and pressed again ${again} (want 1)` };
 });
 // dirty what the BIOS promises to clear (VRAM $0000-$3FFF, CRAM entries 0-31, work RAM
 // bank 0) and say whether it is all zero

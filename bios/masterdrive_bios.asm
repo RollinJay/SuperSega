@@ -96,7 +96,6 @@ v_mask:		equ 0xC00E	; index 21: the machines the platform runs
 v_tbuf:		equ 0xC00F	; 0 or 4: the text name table on screen is at VR_TXTNT + v_tbuf * 256
 v_boost:	equ 0xC010	; 9 bytes
 v_bi:		equ 0xC019	; the boost being drawn
-v_rel:		equ 0xC01A	; the buttons the launch waits to see released
 v_test:		equ 0xC01B	; 1: the controller test is running
 v_tptr:		equ 0xC01C	; 2 bytes: where tout writes in the text shadow
 v_dlo:		equ 0xC01E	; the first and last text rows changed since the last flush
@@ -530,7 +529,8 @@ read_pad:
 ; ================================================================ launch
 ; Launch only once the button that asked for it reads released in two frames running, so
 ; the game does not begin with it held (with Start = Pause on, a held Start would pause
-; it). Other buttons may stay held: a game can still read a combination held at power-on.
+; it). The check comes after the clears, so a press during them also delays the launch.
+; Other buttons may stay held: a game can still read a combination held at power-on.
 play_skip:
 	ld a,PAD_SKIP
 	jr pl_go
@@ -538,17 +538,8 @@ play:
 	ld a,PAD_MENU
 pl_go:	di
 	ld sp,0xDFF0		; the same stack from the menu (inside a call) and the skip path
-	ld (v_rel),a
-pl_rel:	call wait_frame
-	call read_pad
-	ld hl,v_rel
-	and (hl)
-	jr nz,pl_rel
-	call wait_frame
-	call read_pad
-	ld hl,v_rel
-	and (hl)
-	jr nz,pl_rel
+	ld i,a			; the buttons to see released, kept in I: the RAM clear leaves it
+				; alone and the launch's CPU reset clears it
 	call machine		; index 0: the machine (the boosts were written as they changed)
 	ld b,a
 	xor a
@@ -590,13 +581,43 @@ pl_cram:
 	ld de,0
 	ld hl,0
 	exx
-	ld hl,0xC000		; work RAM bank 0, last: nothing may use the stack after this
-	ld de,0xC001
-	ld bc,0x1FFF
+	ld hl,0xC000		; work RAM bank 0, last: nothing may use the stack after this,
+	ld de,0xC001		; so the release check below reads the pad and the V counter
+	ld bc,0x1FFF		; itself (as read_pad and wait_frame do)
 	ld (hl),0
 	ldir
+pl_rel:	ld d,2			; frames to see released in a row
+pl_fr0:	in a,(VDP_VCOUNT)	; line 0...
+	or a
+	jr nz,pl_fr0
+pl_fr1:	in a,(VDP_VCOUNT)	; ...and past it
+	or a
+	jr z,pl_fr1
+	ld a,0xFD		; TH high: up down left right B C
+	out (IO_CTRL),a
+	in a,(PAD_A)
+	cpl
+	and 0x3F
+	ld b,a
+	ld a,0xDD		; TH low: up down 0 0 A Start
+	out (IO_CTRL),a
+	in a,(PAD_A)
+	cpl
+	and 0x30
+	rlca
+	rlca
+	or b
+	ld b,a
+	ld a,0xFF		; every pin an input again
+	out (IO_CTRL),a
+	ld a,i
+	and b
+	jr nz,pl_rel		; held: start the count again
+	dec d
+	jr nz,pl_fr0
+	ld bc,0
+	ld de,0
 	ld hl,0
-	ld de,0			; (LDIR left BC zero)
 	ld a,0xA5
 	out (BOOT_LAUNCH),a
 pl_wait:
