@@ -29,7 +29,8 @@ pocket-core/sim/ref/gstrace
 pocket-core/sim/ref/*.o
 
 # Game and system ROMs, saves and audio captures. Only the generated test ROMs
-# in pocket-core/roms/ are tracked.
+# in pocket-core/roms/ and the project's own BIOS image (bios/make_bios.py) are
+# tracked.
 *.sms
 *.gg
 *.sg
@@ -42,3 +43,4 @@ pocket-core/sim/ref/*.o
 !pocket-core/roms/*.sms
 !pocket-core/roms/*.sg
 !pocket-core/roms/*.sav
+!bios/masterdrive_bios.rom

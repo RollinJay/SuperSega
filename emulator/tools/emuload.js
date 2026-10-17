@@ -75,7 +75,7 @@ function loadEmu(htmlPath, opts) {
   // script in the same context can see them and copy them out.
   vm.runInContext(`globalThis.__X = {
     Z80, VDP, PSG, FM, Machine, parseSegaHeader, makeKeyboard, makePointer,
-    makeFpga, makeFDC, makeDebugUnit, makeSF7000, CYC,
+    makeFpga, makeFDC, makeDebugUnit, makeSF7000, CYC, MD_BIOS, MCODE,
     m: (typeof m!=='undefined')?m:null };`, ctx);
   const X = ctx.__X;
   // Run extra code in the page's scope (sees its top-level declarations).
@@ -96,6 +96,8 @@ function loadEmu(htmlPath, opts) {
   return X;
 }
 
+// A machine started directly in the given mode, as if the BIOS had launched it
+// (emulator tooling: the game starts at reset(), with no BIOS frames before it).
 function newMachine(X, mode, romBytes) {
   const m = new X.Machine();
   m.mode = mode;

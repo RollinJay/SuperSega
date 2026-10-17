@@ -820,6 +820,92 @@ probe('M70', 'A turbo step change takes effect at once for the line timing: afte
            note: `V counter $${up.toString(16)} after a step to 200 % (want $7a), $${down.toString(16)} after a step to 100 % (want $b5); carry ${g.lineCarry} T (want 50)` };
 });
 
+// ---------------------------------------------------------------- the BIOS
+probe('M71', 'A CPU reset sets AF\' to $FFFF as well as AF, as the Pocket core\'s Z80 (tv80) does, so the game starts with the same registers in both (Technical Reference §1, hand-over state)', () => {
+  const { c } = flatCpu([0x08, 0xF5, 0x76]);              // EX AF,AF' ; PUSH AF ; HALT
+  c.reset(); c.SP = 0xF000; steps(c, 2);
+  const m = sms('sms'), af2 = (m.cpu.S[7] << 8) | m.cpu.S[6];
+  return { ok: c.AF === 0xFFFF && af2 === 0xFFFF, note: `AF' $${af2.toString(16)}, swapped in $${c.AF.toString(16)} (want ffff)` };
+});
+// a cartridge: JR $ at $0000 and, if asked, TMR SEGA headers {offset: region nibble}
+function biosRom(size, headers) {
+  const r = new Uint8Array(size).fill(0xFF); r[0] = 0x18; r[1] = 0xFE;
+  for (const [o, reg] of Object.entries(headers || {})) {
+    r.set([...'TMR SEGA'].map(ch => ch.charCodeAt(0)), +o); r[+o + 15] = (reg << 4) | 0x0C; }
+  return r;
+}
+// power on, hold Start for two frames (the BIOS's skip path), run until it launches
+function bootSkip(rom, platform) {
+  const m = new X.Machine(); m.cart = rom; m.platformMode = platform || 'auto'; m.powerOn();
+  let f = 0;
+  for (; f < 60 && m.mode === 'ss' && m.memCtl !== 0xA8; f++) { m.btn.start = f < 2 ? 1 : 0; m.runFrame(); }
+  return { m, f };
+}
+probe('M72', 'A cold reset starts the machine in MasterDrive mode with $3E = $E0: the 8 KB BIOS ROM at $0000-$BFFF (repeated) before the cartridge, its ports $18/$19 answering; $3E bit 3 set maps the cartridge and returns $18-$1F to the $3E/$3F mirrors (Technical Reference §2)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000); m.powerOn();
+  const b0 = m.rd(0x0000), b8 = m.rd(0x2000), bB = m.rd(0xBFFF);
+  m.out(0x18, 21); const mask = m.inp(0x19);
+  m.out(0x3E, 0xA8); const c0 = m.rd(0x0000); m.out(0x18, 21); const mir = m.inp(0x19);
+  const ok = m.mode === 'ss' && b0 === X.MD_BIOS[0] && b8 === X.MD_BIOS[0] && bB === X.MD_BIOS[0x1FFF] && mask === 0x2F && c0 === 0x18 && mir === 0xFF;
+  return { ok, note: `mode ${m.mode}, $0000 $${b0.toString(16)}, $2000 $${b8.toString(16)}, index 21 $${mask.toString(16)}; cartridge on: $0000 $${c0.toString(16)}, $19 $${mir.toString(16)}` };
+});
+probe('M73', 'The BIOS\'s settings: index 0 takes only a machine the platform runs, index 4 (turbo) only 0-4, indices 1-9 otherwise bit 0, the read-only ones nothing; the index steps after each access (Technical Reference §2)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000); m.powerOn();
+  m.out(0x18, 0); m.out(0x19, 4);                          // the SF-7000: this platform does not run it
+  m.out(0x18, 0); const sf = m.inp(0x19);
+  m.out(0x18, 0); m.out(0x19, 5); m.out(0x19, 3);          // MasterDrive, then index 1 = 3
+  m.out(0x18, 4); m.out(0x19, 7); m.out(0x18, 4); const t7 = m.inp(0x19);
+  m.out(0x18, 4); m.out(0x19, 3);
+  m.out(0x18, 16); m.out(0x19, 2); m.out(0x18, 16); const ro = m.inp(0x19);
+  m.out(0x18, 0); const got = [0, 1, 2, 3, 4].map(() => m.inp(0x19));
+  const ok = sf === 0 && t7 === m.boostGet(4) && ro === 0xFF && got[0] === 5 && got[1] === 1 && got[4] === 3;
+  return { ok, note: `SF-7000 refused (index 0 = ${sf}), turbo 7 refused, index 16 stays $${ro.toString(16)}; indices 0-4 read ${got.join(',')}` };
+});
+probe('M74', 'The launch ($A5 to $1F): the CPU runs no further instruction; at the frame wrap every block resets into the machine in index 0 with $3E = $A8 and the boosts\' next values current, cartridge RAM kept (Technical Reference §2)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.powerOn();
+  m.ram[0x2000] = 0x5A;                                     // battery-backed cartridge RAM
+  m.out(0x18, 0); m.out(0x19, 1); m.out(0x18, 4); m.out(0x19, 2);   // Game Gear, turbo step 2
+  [0x3E, 0xA5, 0xD3, 0x1F, 0x3C, 0x18, 0xFD].forEach((v, i) => m.wr(0xC000 + i, v));   // LD A,$A5 ; OUT ($1F),A ; INC A ; JR -3
+  m.cpu.PC = 0xC000; m.runFrame();
+  const held = m.cpu.R[7] === 0xA5 && m.mode === 'ss';
+  let at = null; m.onLaunch = () => { const c = m.cpu; at = { PC: c.PC, SP: c.SP, AF: c.AF, mode: m.mode, mem: m.memCtl }; };
+  m.runFrame();
+  const ok = held && at && at.mode === 'gg' && at.mem === 0xA8 && at.PC === 0 && at.SP === 0xDFF0 && at.AF === 0xFFFF && m.ael.turbo === 1.5 && m.ram[0x2000] === 0x5A;
+  return { ok, note: `held ${held}; at the wrap ${at ? at.mode + ', $3E $' + at.mem.toString(16) + ', PC ' + at.PC + ', SP $' + at.SP.toString(16) : 'no launch'}; turbo ${m.ael.turbo * 100} %; cartridge RAM $${m.ram[0x2000].toString(16)}` };
+});
+probe('M75', 'The boosts: a change in the platform\'s menu sets the current and the next value at once; a BIOS write sets only the next; the launch makes the next current, so the last change wins (Technical Reference §15)', () => {
+  const m = new X.Machine(); m.cart = biosRom(0x8000, { 0x7FF0: 4 }); m.ael.sprlimit = false; m.ael.ovf = false; m.powerOn();
+  m.ael.sprlimit = true; m.boostChanged('sprlimit');       // the platform: sprite limit on
+  m.out(0x18, 1); const seen = m.inp(0x19);
+  m.out(0x18, 1); m.out(0x19, 0);                          // then the BIOS: off
+  const before = m.ael.sprlimit;
+  m.out(0x18, 2); m.out(0x19, 1);                          // the BIOS: overflow flag on
+  m.ael.ovf = false; m.boostChanged('ovf');                // then the platform: off
+  m.boot.launch = true; m.runFrame();
+  const ok = seen === 1 && before === true && m.ael.sprlimit === false && m.ael.ovf === false;
+  return { ok, note: `index 1 read ${seen} after the platform's change; current kept ${before} until the launch; after it sprite limit ${m.ael.sprlimit}, overflow flag ${m.ael.ovf} (want false, false)` };
+});
+probe('M76', 'The BIOS identifies the cartridge: TMR SEGA at $7FF0, $3FF0 then $1FF0; region 3/4 Master System, 5-7 Game Gear, 8 MasterDrive, others Master System; no header: SG-1000 if 64 KB or less (size rounded up to a power of two), else Master System; the platform\'s own choice first (Technical Reference §14)', () => {
+  const cases = [
+    ['header $7FF0 region 4', biosRom(0x8000, { 0x7FF0: 4 }), 'auto', 'sms'],
+    ['region 3', biosRom(0x8000, { 0x7FF0: 3 }), 'auto', 'sms'],
+    ['region 6', biosRom(0x8000, { 0x7FF0: 6 }), 'auto', 'gg'],
+    ['region 8', biosRom(0x8000, { 0x7FF0: 8 }), 'auto', 'ss'],
+    ['region $B', biosRom(0x8000, { 0x7FF0: 11 }), 'auto', 'sms'],
+    ['$3FF0 region 5', biosRom(0x4000, { 0x3FF0: 5 }), 'auto', 'gg'],
+    ['$1FF0 region 7', biosRom(0x2000, { 0x1FF0: 7 }), 'auto', 'gg'],
+    ['$7FF0 before $3FF0', biosRom(0x8000, { 0x7FF0: 8, 0x3FF0: 6 }), 'auto', 'ss'],
+    ['no header, 32 KB', biosRom(0x8000), 'auto', 'sg'],
+    ['no header, 64 KB', biosRom(0x10000), 'auto', 'sg'],
+    ['no header, 80 KB', biosRom(0x14000), 'auto', 'sms'],
+    ['no header, 128 KB', biosRom(0x20000), 'auto', 'sms'],
+    ['platform Game Gear, region 4', biosRom(0x8000, { 0x7FF0: 4 }), 'gg', 'gg'],
+  ];
+  const bad = [];
+  for (const [name, rom, plat, want] of cases) { const { m } = bootSkip(rom, plat); if (m.mode !== want) bad.push(`${name}: ${m.mode}`); }
+  return { ok: bad.length === 0, note: bad.length ? bad.join('; ') : `${cases.length} cartridges, each launched as expected` };
+});
+
 let pass = 0;
 for (const r of results) { if (r.ok) pass++; console.log((r.ok ? 'PASS ' : 'FAIL ') + r.id.padEnd(5) + ' ' + r.note.padEnd(46) + ' | ' + r.what); }
 console.log(`${pass} of ${results.length} pass`);

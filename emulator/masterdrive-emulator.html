@@ -82,12 +82,13 @@ canvas#scope{width:100%;height:90px;background:var(--panel2)}
   <h1>MasterDrive</h1>
   <span class="tag" id="modetag">no ROM</span>
   <div class="row" style="margin-left:auto">
-    <select id="mode" title="Machine mode">
+    <select id="mode" title="The machine the BIOS offers first (Auto: from the cartridge's header); its menu can pick another. Changing it restarts the machine">
+      <option value="auto" selected>Auto</option>
       <option value="sms">Master System</option>
       <option value="sg">SG-1000</option>
       <option value="sc">SC-3000</option>
       <option value="gg">Game Gear</option>
-      <option value="ss" selected>MasterDrive</option>
+      <option value="ss">MasterDrive</option>
       <option value="msx">MSX2 (analysis)</option>
     </select>
     <select id="tv" title="Video standard: PAL runs the machine on the PAL clock (3.546893 MHz, 313 lines, 49.70 frames a second); changing it restarts the machine">
@@ -736,6 +737,7 @@ class Z80{
     this.PC=0; this.SP=0xDFF0; this.I=0; this.Rr=0;
     this.IFF1=0; this.IFF2=0; this.IM=0; this.halt=0; this.tc=0;   // IM 0 as after a Z80 reset; software sets IM 1
     this.R[7]=0xFF; this.R[6]=0xFF; this.eiPend=0;
+    this.S[7]=0xFF; this.S[6]=0xFF;       // AF' = $FFFF too, as the Pocket core's tv80 resets it (M71)
   }
   // 16-bit pair helpers
   get BC(){return (this.R[0]<<8)|this.R[1]} set BC(v){this.R[0]=v>>8;this.R[1]=v&255}
@@ -1603,6 +1605,10 @@ const MACHINE_ID=0xA7;
    mapper's 8-bit bank registers (Q2). A bigger image still loads, but nothing
    past 4 MB can be reached. */
 const CART_MAX=0x400000;
+/* The BIOS's machine codes (its setting 0) and the boosts by its setting index 1-9,
+   in Technical Reference section 15's order. */
+const MCODE=['sms','gg','sg','sc','sf','ss'];
+const BOOSTKEY=[null,'sprlimit','ovf','startpause','turbo','vramboost','autofire','stereo','ggwide','tmscol'];
 /* ---------------- Machine ---------------- */
 class Machine{
   constructor(){
@@ -1616,6 +1622,8 @@ class Machine{
     this.dbg=this.dbg||makeDebugUnit();         // FPGA-side debug, survives reset
     this.ptr.owner=this;            // which side of the hybrid does what
     this.header=this.header||{found:false};
+    this.platformMode='auto';                   // the page's machine choice, the BIOS's setting 16
+    this.boot={idx:0,set:new Uint8Array(10),launch:false};
     this.vdp=new VDP(this);
     this.psg=new PSG(); this.fm=new FM();
     this.cpu=new Z80(this);
@@ -1687,6 +1695,65 @@ class Machine{
     if(d.length%1024===512) d=d.slice(512);
     this.card=d; log('card loaded: '+d.length+' bytes'); }
 
+  /* ---- the MasterDrive BIOS (Technical Reference section 2) ----
+     powerOn() is a cold reset: the machine starts in MasterDrive mode with $3E = $E0,
+     so the 8 KB BIOS ROM is at $0000-$BFFF and its ports $18, $19 and $1F answer. The
+     BIOS launches the game with $A5 at $1F: the CPU is held, and at the frame wrap
+     launch() resets every block into the chosen machine with $3E = $A8. reset() alone
+     is that reset, and the direct start the tools use. Cartridge RAM has a battery:
+     neither clears it. */
+  powerOn(){
+    const keep=this.ram.slice(0x2000,0xA000), choice=this.platformChoice();
+    this.mode='ss'; this.reset(); this.ram.set(keep,0x2000); this.memCtl=0xE0;
+    const b=this.boot={idx:0,set:new Uint8Array(10),launch:false};
+    b.set[0]=(choice===0xFF)?0:choice;
+    for(let k=1;k<=9;k++) b.set[k]=this.boostGet(k);
+  }
+  launch(){
+    const b=this.boot, keep=this.ram.slice(0x2000,0xA000);
+    for(let k=1;k<=9;k++) this.boostSet(k,b.set[k]);    // the next values become current
+    this.mode=MCODE[b.set[0]]; b.launch=false;
+    this.reset(); this.ram.set(keep,0x2000);
+    if(this.onLaunch) this.onLaunch();
+  }
+  biosOn(){ return !(this.memCtl&8)&&(this.mode==='sms'||this.mode==='gg'||this.mode==='ss'); }
+  platformChoice(){ const i=MCODE.indexOf(this.platformMode); return i<0?0xFF:i; }
+  machinesRun(){ return 0x2F|((this.sf&&this.sf.rom)?0x10:0); }   // the SF-7000 needs its IPL
+  boostGet(k){ const a=this.ael, key=BOOSTKEY[k];
+    return key==='turbo'?Math.round(((a.turbo||1)-1)*4):(a[key]?1:0); }
+  boostSet(k,v){ const a=this.ael, key=BOOSTKEY[k];
+    if(key==='turbo') a.turbo=1+v/4; else a[key]=!!v; }
+  /* A change in the page's own boost controls takes effect at once and is also the
+     value for the next launch: the last change wins (Technical Reference section 15). */
+  boostChanged(key){ const k=BOOSTKEY.indexOf(key); if(k>0) this.boot.set[k]=this.boostGet(k); }
+  bootIn(p){
+    if(p!==0x19) return 0xFF;
+    const b=this.boot, i=b.idx; b.idx=(b.idx+1)&0xFF;
+    if(i<=9) return b.set[i];
+    const c=this.cart&&this.cart.length?this.cart.length:0;
+    switch(i){
+      case 16: return this.platformChoice();
+      case 17: return (c?1:0)|(this.card?2:0)|(this.pal?8:0)|0x10;   // no USB; the page has its own menu
+      case 18: return c?Math.ceil(Math.log2(c)):0;
+      case 19: return {sega:0,codemasters:1,korean:2,msx:3}[this.mapper]??0xFF;
+      case 20: return this.jpRegion?1:0;
+      case 21: return this.machinesRun();
+    }
+    return 0xFF;
+  }
+  bootOut(p,v){
+    const b=this.boot;
+    if(p===0x18){ b.idx=v; return; }
+    if(p===0x19){ const i=b.idx; b.idx=(b.idx+1)&0xFF;
+      if(i===0){ if(v<=5&&((this.machinesRun()>>v)&1)) b.set[0]=v; }
+      else if(i===4){ if(v<=4) b.set[4]=v; }
+      else if(i<=9) b.set[i]=v&1;
+      return; }
+    if(p===0x1F&&v===0xA5) b.launch=true;
+  }
+  /* Pause (NMI): not while the CPU is held for a launch, nor on the Game Gear */
+  pause(){ if(this.mode!=='gg'&&!this.boot.launch) this.cpu.nmi(); }
+
   romByte8(rom,bank,off){ if(!rom||!rom.length) return 0xFF;
     return rom[(bank*0x2000+off)%rom.length]; }
   romByte(rom,bank,off){ if(!rom||!rom.length) return 0xFF;
@@ -1697,6 +1764,9 @@ class Machine{
     return (this.slotSel>>(frame-1))&1;              // frames 1,2
   }
   rd(a){
+    /* $3E bit 3 clear: the BIOS ROM, its 8 KB repeated through $0000-$BFFF, before the
+       cartridge and the card; it is not a cartridge, so it takes no wait state */
+    if(a<0xC000&&this.biosOn()) return MD_BIOS[a&0x1FFF];
     /* the cartridge and card slots: one wait state per read at 200 % (Q12); in
        SF-7000 mode $0000-$BFFF is the disk system's RAM and IPL, not a cartridge */
     if(this.ws && a<0xC000 && this.mode!=='sf'){ this.waitPenalty+=this.ws; this.cpu.tc+=this.ws;
@@ -1800,6 +1870,7 @@ class Machine{
   /* ---- I/O ---- */
   inp(port){
     const p=port&0xFF;
+    if((p&0xF8)===0x18&&this.mode==='ss'&&this.biosOn()) return this.bootIn(p);   /* the BIOS's ports */
     /* Game Gear low ports. MasterDrive adopts the GG scheme, so a GG title retagged
        to MasterDrive still reads Start at $00. Port $00: bit 7 Start (0 = pressed),
        bit 6 region (1 = export), bits 5-0 read 0 (bit 5 = NTSC). In MasterDrive
@@ -1981,6 +2052,7 @@ class Machine{
   soundOn(){ const c=this.fmPresent?(this.fmReg&3):0; return {psg:c===0||c===3, fm:(c&1)===1}; }
   out(port,v){
     const p=port&0xFF;
+    if((p&0xF8)===0x18&&this.mode==='ss'&&this.biosOn()){ this.bootOut(p,v); return; }   /* the BIOS's ports */
     /* The FPGA debug unit is present regardless of which machine is being
        emulated: its purpose is inspecting stock software, so gating it behind
        MasterDrive mode would defeat it. Ports $FB-$FE sit outside the $00-$3F
@@ -2407,6 +2479,7 @@ class Machine{
     return fb;
   }
   runFrame(){
+    if(this.boot.launch) this.launch();              /* the BIOS launched in the last frame */
     this.ws=this.romWaitStates(); this.waitPenalty=0; this.syncWait=0;
     if(this.fpga){ this.fpga.did('clockGen'); this.fpga.did('composite');
       this.fpga.did('asicBg'); this.fpga.did('asicInt'); this.fpga.did('shadowVdp'); }
@@ -2446,6 +2519,7 @@ class Machine{
          dropping it gave every line up to ~20 extra CPU cycles. */
       let t=this.lineCarry||0;
       while(t<per){
+        if(this.boot.launch){ this.frameCycles+=per-t; t=per; break; }   /* held until the frame ends */
         this.lineT=t;
         if(C.halt && !b.halted){ b.halted=true; b.workEnd=this.frameCycles; b.synced=true; }
         let c=C.step();
@@ -2606,7 +2680,8 @@ function saveState(m){
     slotSel:m.slotSel, cardBank:m.cardBank, wramBank:m.wramBank, turbo:m.turbo, fmReg:m.fmReg,
     ggReg:Array.from(m.ggReg), dma:Array.from(m.dma), mathRes:m.mathRes,
     wram:b64(m.wram), eiPend:C.eiPend, lineCarry:m.lineCarry||0,
-    hsLatch:V.hsLatch, vsLatch:V.vsLatch};
+    hsLatch:V.hsLatch, vsLatch:V.vsLatch,
+    boot:{idx:m.boot.idx,set:Array.from(m.boot.set),launch:m.boot.launch}};
 }
 function loadState(m,st){
   if(!st||st.v!==1) throw new Error('bad state');
@@ -2636,6 +2711,9 @@ function loadState(m,st){
   C.eiPend=st.eiPend||0; m.lineCarry=st.lineCarry||0;
   if(st.hsLatch!==undefined){ V.hsLatch=st.hsLatch; V.vsLatch=st.vsLatch; }
   else { V.hsLatch=V.reg[8]; V.vsLatch=V.reg[9]; }
+  /* the BIOS's settings; states saved before the BIOS have none (and $3E = $A8: it is off) */
+  m.boot=st.boot?{idx:st.boot.idx,set:Uint8Array.from(st.boot.set),launch:!!st.boot.launch}
+                :{idx:0,set:new Uint8Array(10),launch:false};
 }
 
 
@@ -3445,7 +3523,7 @@ function dbgOverlayLines(m){
   const V=m.vdp, D=m.dbg;
   const L=[];
   L.push('MASTERDRIVE DEBUG');
-  L.push((BOOTMACH[m.mode]||m.mode).toUpperCase()+'  '+(V.vmode?V.vmode():'?')+
+  L.push((MACHNAME[m.mode]||m.mode).toUpperCase()+'  '+(V.vmode?V.vmode():'?')+
          '  '+V.height()+' LINES  '+Math.round(m.cpuMult()*100)+'PCT');
   L.push('DISP '+((V.reg[1]&0x40)?'ON ':'OFF')+
          '  NAME '+hex(((V.reg[2]>>1)&7)*0x800,4)+
@@ -3477,7 +3555,7 @@ function dbgOverlayDraw(fb,lines,W,H){
     const text=String(lines[r]||'').toUpperCase();
     const colour=(r===0)?hi:ink;
     for(let ci=0;ci<text.length&&ci*6+6<W;ci++){
-      const g=BOOTFONT[text[ci]]||BOOTFONT[' '];
+      const g=OVERLAYFONT[text[ci]]||OVERLAYFONT[' '];
       if(!g) continue;
       for(let gy=0;gy<8;gy++){
         const bits=parseInt(g.substr(gy*2,2),16);
@@ -4693,11 +4771,110 @@ function labLiveEngineMatch(mA,mB){
 }
 
 
-/* ================= boot ROM menu =================
-   Drawn with the machine's own video: an 8x8 font and panel tiles written into
-   VRAM, composed through the real Mode 4 render path. What appears here is what
-   the hardware would show. Navigation is the part that needs a person. */
-const BOOTFONT={
+/* ================= MasterDrive BIOS =================
+   The console's own start-up program: the 8 KB BIOS ROM that $3E bit 3 maps
+   (Technical Reference section 2). Its source is bios/ at the top of the
+   repository; bios/make_bios.py assembles it and writes the image between the
+   two markers below (CI checks that it matches the source). */
+/* BIOS_BEGIN: generated by bios/make_bios.py from bios/; do not edit */
+const MD_BIOS_B64=
+'8+1Ww5MA///////////////////////////////////////////////////////////////////12786AMA8MgDA8fvtTf//////////////////////////'+
+'////////////////7UX///////////////////////////////9NQVNURVJEUklWRQBCSU9TIDEAMfDfIQDAEQHAAf8ANgDtsM0aAs3yAjICwPXNWQLxy38o'+
+'CDoKwMtHwg8DzdIDzcEHPmAGgc2VA/t2zUsCIUDAERDABgkaviAGIxMQ+BgSIUDAERDAAQkA7bA6BMC3zBwJzfICMgHARzoCwKgoCDoEwP4DzPcJOgHARzoC'+
+'wC+gMgPAeDICwDobwLcoEnjmwP7AwssArzIbwM0cCcPLADoDwLfKywDLfygKOgrAy0fCEwMYhstXKAg6BMA95gMYCstfKBM6BMA85gMyBMCvMgXAzcEHw8sA'+
+'OgTAt8yNAToEwP4DwssAOgPAy2fKywA+ATIbwCFoD808CcPLADoDwMtHKAg6BcC3yD0YDstPKBA6DcBHOgXAPLjQMgXAw9ALy28oA68Y88tnyDoKwMtHyDoF'+
+'wLfKEwM9IAbN/gHDHAk9R83oAv4FeCACPghfFgAhEMAZBgH+AyACBgR+PLg4AygBr3d7PNMYftMZwxwJOgjAPP4GMA5HTzoOwAQPEP15MO8YAj7/MgjAyT4Q'+
+'0xjbGTIJwDIIwNsZMgrA2xkyC8DbGdsZMgzA2xkyDsDNSwIhQMAREMABCQDtsMk+AdMYIUDABgkOGe2yyT4AMgfAOgrAy0fIIdcCEQDBAREA7bAhtAIGA8Ve'+
+'I1Yj5c3CAuHBKBAQ8ToLwLfI/hHQPgIyB8DJPgEyBsA6L8APDw8P5g8GAf4FOAj+CDgGBgUoAgYAeDIHwMnwf/A/8B9UTVIgU0VHQfPrzQDBISDAEboCBgga'+
+'vsAjExD5yT6o0z4RIMABEADtsD7g0z7JOgjA/v/AOgfAyT790z/b3C/mP0c+3dM/29wv5jAHB7BHPv/TP3jJPoAYAj6Q8zIawM2FA83yAiEawKYg9M2FA83y'+
+'AiEawKYg6M3oAkev0xh40xmv078+gdO/zagD86/Tvz7A078GIK/NkgMQ+90hAAD9IQAA2QEAABEAACEAANkhAMARAcAB/x82AO2wIQAAIu7fEQAAPqXTH3YY'+
+'/dt+/sAg+tt+/sAo+snTvsnz079407/7yfN907989kDTv/vJIQAAzZ0DDr6vFggGAO15AO15AO15AO15AO15AO15AO15AO15EOcVIOLJIUMEBiYOv+2zzagD'+
+'IQAEzZ0DIckEEfgCfs2SA6/NkgPNkgPNkgMjG3qzIOwhIADNnQMhiQQGQA6+7bMhACnNnQMhyQQR+AJ+zZIDIxt6syD2IQA/zZ0DPtDNkgPNkgM+ANO/PsDT'+
+'vyFpBAYgDr7ts8kEgACB/4L/g/+E/4X7hgCHAIgAif+KII8wkCiYAZkElwGNA44kjxA/Kg8AAAAAAAAAAAAAAAAQDz8AAAAAAAAAAAAAAAAAAAAAAGAAAAB4'+
+'AAAAfgAAAHgAAABgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAICAgICAAIABQUFAAAAAAAFBQ+FD4UFAAIHig'+
+'cCjwIADAyBAgQJgYAGCQoECokGgAICBAAAAAAAAQIEBAQCAQAEAgEBAQIEAAACCocKggAAAAICD4ICAAAAAAAAAAICBAAAAA+AAAAAAAAAAAAGBgAAAIECBA'+
+'gAAAcIiYqMiIcAAgYCAgICBwAHCICBAgQPgA+BAgEAiIcAAQMFCQ+BAQAPiA8AgIiHAAMECA8IiIcAD4CBAgQEBAAHCIiHCIiHAAcIiIeAgQYAAAYGAAYGAA'+
+'AABgYABgYEAAECBAgEAgEAAAAPgA+AAAAEAgEAgQIEAAcIgIECAAIABwiAhoqKhwAHCIiPiIiIgA8IiI8IiI8ABwiICAgIhwAOCQiIiIkOAA+ICA8ICA+AD4'+
+'gIDwgICAAHCIgLiIiHgAiIiI+IiIiABwICAgICBwADgQEBAQkGAAiJCgwKCQiACAgICAgID4AIjYqKiIiIgAiIjIqJiIiABwiIiIiIhwAPCIiPCAgIAAcIiI'+
+'iKiQaADwiIjwoJCIAHiAgHAICPAA+CAgICAgIACIiIiIiIhwAIiIiIiIUCAAiIiIqKioUACIiFAgUIiIAIiIUCAgICAA+AgQIECA+ABwQEBAQEBwAACAQCAQ'+
+'CAAAcBAQEBAQcAAgUIgAAAAAAAAAAAAAAPgAQCAQAAAAAAAAAHAIeIh4AICAsMiIiPAAAABwgICIcAAICGiYiIh4AAAAcIj4gHAAMEhA4EBAQAAAAHiIiHgI'+
+'cICAsMiIiIgAIABgICAgcAAQADAQEBCQYICAkKDAoJAAYCAgICAgcAAAANCoqIiIAAAAsMiIiIgAAABwiIiIcAAAAPCIiPCAgAAAeIiIeAgIAACwyICAgAAA'+
+'AHiAcAjwAEBA4EBASDAAAACIiIiYaAAAAIiIiFAgAAAAiIioqFAAAACIUCBQiAAAAIiIiHgIcAAA+BAgQPgAECAgQCAgEAAgICAgICAgAEAgIBAgIEAAAABA'+
+'qBAAAADNxwfDHAkhADjNnQM+IM1XCCGAAA4AzV8IBg0+IMXNVwjBEPchjAAOAM1fCD4gzVcIIUA4zZ0DBgAhOgjFPiAOAM1XCDoEwLgOACACDgjNXwjBBHj+'+
+'BCDkBgM+IMUOAM1XCMEQ9SGAOM2dAwYgPgLNkgOvzZIDEPXJW0NBUlRdAFtDQVJEXQBbVVNCXQBbU1lTVEVNXQDNkgN5zZIDyX4jt8jNVwgY9+VqJgApKSlE'+
+'TSkpCUsGAAkBADAJzZ0D4cl+I7fIzZIDGPfNaAjDgQghADDNnQMBSAM+IM2SAwt4sSD2yfUPDw8Pza0I8eYPxjD+OjgCxgfNkgPJBmQOAM0ECQYKzQQJxjDN'+
+'kgPJDgARECfN7ggR6APN7ggRZADN7ggRCgDN7gh9xjDNkgPJPi88t+1SMPoZ/jAgA8tByM2SAw4ByRYvFJAw/IBfev4wIATLQSgFzZIDDgF7yc2QCCEAP82d'+
+'Az7QzZIDOgTAt8pFCj3KRAk9yl0Jw3YJFhQeAc2KCMk6CsDLTyHoDSADIc4NEQEBzYoIISEPwzwJOgrAy1chIg4gAyEEDhEBAc2KCCEyD8M8CREBASE8Ds2K'+
+'CD6kBo/NlQPbF/U+JAaPzZUDEQECIU8OzYoIPiTNkgPxzaQIEQEDIVsOzYoIOgrAy18hYg4oAyFuDs2BCBEBBCF5Ds2KCDoMwLchgQ4oAyGIDs2BCBEBBiGO'+
+'Ds2KCBEBCSGnDs2KCBEBCiHODs2KCM33CSFCD8M8CREDB81oCDoBwE8hJgoGCMV55gEgDH4jtygKPiDNkgMY9M2BCD4gzZIDwcs5EOHJVVAARE9XTgBMRUZU'+
+'AFJJR0hUAEIAQwBBAFNUQVJUADoKwMtHIBMRAQEhwA3NigivMg3AIQgPwzwJEQEBzWgIOgbAtyARIRMNzYEIOgfAzQIMzYEIGGU6B8DNAgzNgQghCQ3NgQgR'+
+'AQIhLg3Nigg6LsAPDw8P5g8oA82tCDotwM2kCDoswM2kCCE3Dc2BCDouwOYPza0IIUINzYEIOi/ADw8PD82tCBEBAyFMDc2KCDorwM2kCDoqwM2kCDoLwLco'+
+'NhEBBCFXDc2KCDoLwNYKOCZHIQEAKAMpEP18/gQ4D8s/yz/NuwghYQ3NgQgYCc3NCCFdDc2BCBECBiFlDc2KCBECByFqDc2KCDoIwP7/IAghfw3NgQgYBs0C'+
+'DM2BCM3oAv4FIBsRAgohhA3NiggRAgshow3Nigg+AzINwD4IGAY+CzINwK8yGcBfFgDdIRDA3RkhTAzNBQwWCNUeAs2KCOU6GcD+AyAV3X4AXxYAIcsLGX7N'+
+'uwg+Jc2SAxgP3X4AtyG8DSgDIbkNzYEI4dHdIxQ6GcA8MhnA/gkgviHmDs08CcPQC2R9lq/IOgTAt8A6DcC3yCEAP82dAzoFwMYJh4eHPc2SAz7QzZIDIYA/'+
+'zZ0DPgzNkgM+Ac2SA8khEAy3yEd+I7cg+xD5yU1hc3RlciBTeXN0ZW0AR2FtZSBHZWFyAFNHLTEwMDAAU0MtMzAwMABTRi03MDAwAE1hc3RlckRyaXZlAFNw'+
+'cml0ZSBsaW1pdCAxNiAgICAgAFN0b2NrIG92ZXJmbG93IGZsYWcgAFN0YXJ0ID0gUGF1c2UgICAgICAgAFR1cmJvICAgICAgICAgICAgICAgAFZSQU0gc3Bl'+
+'ZWQtdXAgICAgICAgAEF1dG8tZmlyZSAgICAgICAgICAgAFBzZXVkby1zdGVyZW8gICAgICAgAEdhbWUgR2VhciB1bmNyb3AgICAgAFRydWUgVE1TIGNvbG91'+
+'cnMgICAgACBzb2Z0d2FyZQBObyBoZWFkZXIgZm91bmQ6IHBsYXlzIGFzIABQcm9kdWN0IAAgIHZlcnNpb24gACAgcmVnaW9uIABDaGVja3N1bSAkAFNpemUg'+
+'ACBLQgAgTUIAUExBWQBNYWNoaW5lICAgICAgICAgICAgIABBdXRvAFRoZSBvdGhlciBib29zdHMgZG8gbm90IGFjdCBvbgBNYXN0ZXJEcml2ZSBzb2Z0d2Fy'+
+'ZS4AT24AT2ZmAE5vIGNhcnRyaWRnZS4ATm8gY2FyZCBpbiB0aGUgY2FyZCBzbG90LgBBIGNhcmQgaXMgaW4gdGhlIGNhcmQgc2xvdC4AVGhpcyBtYWNoaW5l'+
+'IGhhcyBubyBVU0IgcG9ydC4AVVNCOiBub3RoaW5nIHRvIHNob3cgeWV0LgBNYXN0ZXJEcml2ZSBCSU9TIDEATWFjaGluZSBJRCAAVmlkZW8gAE5UU0MsIDYw'+
+'IEh6AFBBTCwgNTAgSHoAUmVnaW9uIABleHBvcnQASmFwYW4AQ29udHJvbGxlciB0ZXN0OiBwcmVzcyBCAEhvbGQgU3RhcnQgd2hpbGUgc3dpdGNoaW5nIG9u'+
+'IHRvIHN0YXJ0AHRoZSBnYW1lIHN0cmFpZ2h0IGF3YXkuAENBUlQgIFNUQVJUIHBsYXkgIEIgY2hhbmdlICBDIHRvcABDQVJUICBpbnNlcnQgYSBjYXJ0cmlk'+
+'Z2UAQ0FSRCAgPD4gZGV2aWNlcwBVU0IgIDw+IGRldmljZXMAU1lTVEVNICBCIGNvbnRyb2xsZXIgdGVzdCAgPD4gZGV2aWNlcwBURVNUICBldmVyeSBidXR0'+
+'b24gc2hvd3M7IFN0YXJ0K0E6IGVuZAD/////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////'+
+'//8=';
+/* BIOS_END */
+const MD_BIOS=unb64(MD_BIOS_B64);
+
+/* The 8x8 font of the debug overlay (drawn over the picture, not through the VDP). */
+const OVERLAYFONT={
  ' ':'0000000000000000','A':'386c6cc6fec6c600','B':'fc666c7c6666fc00','C':'3c66c0c0c0663c00',
  'D':'f86c6666666cf800','E':'fe6268786862fe00','F':'fe62687868606000','G':'3c66c0cec6663e00',
  'H':'c6c6c6fec6c6c600','I':'7e18181818187e00','J':'1e0c0c0c0ccc7800','K':'c6c66c786c66c600',
@@ -4715,130 +4892,11 @@ const BOOTFONT={
  '#':'6cfe6c6cfe6c0000','!':'1818181818001800','?':'7cc60c1818001800',"'":'1818000000000000',
  '"':'6c6c000000000000','k':'0c1c1c38387c7c00'
 };
-const BOOTMACH={sms:'Master System',gg:'Game Gear',ss:'MasterDrive',
+const MACHNAME={sms:'Master System',gg:'Game Gear',ss:'MasterDrive',
   sg:'SG-1000',sc:'SC-3000',msx:'MSX2'};
-const BOOT={
- TILE_BLANK:0, TILE_FONT:1,        /* font starts at tile 1 */
- TILE_UI:0x60,                     /* panel tiles start here */
- screen:'main', sel:0, dev:0, log:[]
-};
-/* install the font and panel tiles, and a two-palette scheme */
-function bootInstall(m){
-  const V=m.vdp;
-  V.vram.fill(0,0,0x4000);
-  const glyphs=Object.keys(BOOTFONT);
-  BOOT.map=Object.create(null);
-  glyphs.forEach((ch,i)=>{
-    const t=BOOT.TILE_FONT+i; BOOT.map[ch]=t;
-    const rows=BOOTFONT[ch];
-    for(let r=0;r<8;r++){
-      const bits=parseInt(rows.substr(r*2,2),16);
-      const o=t*32+r*4;
-      V.vram[o]=bits; V.vram[o+1]=0; V.vram[o+2]=0; V.vram[o+3]=0;   // colour 1
-    }
-  });
-  /* panel tiles: 0 = solid fill, 1 = top rule, 2 = bottom rule */
-  const ui=BOOT.TILE_UI;
-  for(let r=0;r<8;r++){ V.vram[ui*32+r*4+1]=0xFF; }                  // colour 2 fill
-  for(let r=0;r<8;r++){ V.vram[(ui+1)*32+r*4+1]=(r===7)?0xFF:0; }
-  for(let r=0;r<8;r++){ V.vram[(ui+2)*32+r*4+1]=(r===0)?0xFF:0; }
-  /* highlight bar: colour 3 */
-  for(let r=0;r<8;r++){ V.vram[(ui+3)*32+r*4]=0xFF; V.vram[(ui+3)*32+r*4+1]=0xFF; }
-  /* palette: 0 background, 1 text, 2 rule, 3 highlight */
-  const pal=[[1,2,4],[13,14,15],[5,7,10],[3,6,12]];
-  pal.forEach((c,i)=>{ V.cram[i*2]=(c[1]<<4)|c[0]; V.cram[i*2+1]=c[2]; });
-  V.reg[0]=0x04; V.reg[1]=0x60; V.reg[2]=0x0E; V.reg[6]=0xFF; V.reg[7]=0x00;
-  V.vram[0x3F00]=0xD0;                                               // no sprites
-}
-function bootPut(m,col,row,text,colour){
-  const V=m.vdp, nt=0x3800+(row*32+col)*2;
-  for(let i=0;i<text.length&&col+i<32;i++){
-    const ch=text[i].toUpperCase();
-    const t=(BOOT.map[ch]!==undefined)?BOOT.map[ch]:BOOT.map[' '];
-    V.vram[nt+i*2]=t&0xFF;
-    V.vram[nt+i*2+1]=((t>>8)&1)|((colour||0)<<1);
-  }
-}
-function bootBar(m,row,tile,colour){
-  const V=m.vdp, nt=0x3800+row*32*2;
-  for(let c=0;c<32;c++){ V.vram[nt+c*2]=tile&0xFF; V.vram[nt+c*2+1]=((tile>>8)&1)|((colour||0)<<1); }
-}
-/* the screens */
-function bootItems(m){
-  const cart=m.cart&&m.cart.length?((m.romName||'CARTRIDGE').replace(/\.[^.]+$/,'').toUpperCase().slice(0,18)):'NO CARTRIDGE';
-  let saves=0, free=112;
-  try{ const c=cardGet(m); saves=cardList(c).length; free=cardFreePages(c).length; }catch(e){}
-  return {
-    main:[{t:'PLAY',d:cart,go:'play'},
-          {t:'SAVES',d:saves+' FILES  '+((112-free)*256>>10)+'K USED',go:'saves'},
-          {t:'COMPUTER',d:'SC-3000 AND WORKSTATION',go:'computer'},
-          {t:'SETTINGS',d:'VIDEO  AUDIO  INPUT',go:'settings'},
-          {t:'SYSTEM',d:'DIAGNOSTICS AND FIRMWARE',go:'system'}],
-    play:[{t:'START',d:cart},{t:'REGION',d:m.pal?'PAL':'NTSC'},
-          {t:'ENHANCEMENTS',d:m.ael&&m.ael.sprlimit?'SPRITE LIMIT RAISED':'OFF'},
-          {t:'TURBO',d:Math.round(m.cpuMult()*100)+'%'},
-          {t:'ROM ACCESS',d:m.romMode==='cart'?('CART '+m.romNs+'NS'):'IN RAM'},
-          {t:'BACK',d:'',go:'main'}],
-    saves:[{t:'BROWSE CARD',d:saves+' OF 16 SLOTS'},
-           {t:'FREE PAGES',d:free+' OF 112'},
-           {t:'EXPORT TO USB',d:''},{t:'BACK',d:'',go:'main'}],
-    computer:[{t:'SC-3000 BASIC',d:'INSERT A BASIC CARTRIDGE'},
-              {t:'MUSIC EDITOR',d:'INSERT THE CARTRIDGE'},
-              {t:'WORKSTATION',d:'NOT YET IMPLEMENTED'},
-              {t:'BACK',d:'',go:'main'}],
-    settings:[{t:'VIDEO OUT',d:'HDMI AND S-VIDEO'},
-              {t:'SCANLINES',d:'NOT YET IMPLEMENTED'},
-              {t:'WORK RAM',d:(m.wram?(m.wram.length>>10):0)+'K  16 BANKS'},
-              {t:'CART RAM',d:(m.scRam||16)+'K'},
-              {t:'BACK',d:'',go:'main'}],
-    system:[{t:'MACHINE',d:(BOOTMACH[m.mode]||m.mode).toUpperCase()},
-            {t:'WORK RAM',d:(m.wram?(m.wram.length>>10):0)+'K'},
-            {t:'VRAM',d:(m.vdp.vram.length>>10)+'K'},
-            {t:'CRAM',d:(m.vdp.cram.length>>1)+' ENTRIES'},
-            {t:'BACK',d:'',go:'main'}]
-  };
-}
-function bootDraw(m){
-  const V=m.vdp;
-  for(let i=0x3800;i<0x3F00;i+=2){ V.vram[i]=BOOT.TILE_UI; V.vram[i+1]=0; }
-  bootPut(m,1,1,'MASTERDRIVE',1);
-  bootPut(m,22,1,'BOOT ROM',2);
-  bootBar(m,2,BOOT.TILE_UI+1,2);
-  const items=bootItems(m)[BOOT.screen]||[];
-  if(BOOT.sel>=items.length) BOOT.sel=0;
-  items.forEach((it,i)=>{
-    const row=4+i*2;
-    if(i===BOOT.sel){
-      const nt=0x3800+row*32*2;
-      for(let c=1;c<31;c++){ V.vram[nt+c*2]=BOOT.TILE_UI+3; V.vram[nt+c*2+1]=(3<<1); }
-      bootPut(m,2,row,'>'+it.t,3);
-    } else bootPut(m,3,row,it.t,1);
-    if(it.d) bootPut(m,3,row+1,it.d,2);
-  });
-  bootBar(m,21,BOOT.TILE_UI+2,2);
-  bootPut(m,1,22,BOOT.screen.toUpperCase()+'  '+(BOOT.sel+1)+'/'+items.length,2);
-  bootPut(m,20,22,'ARROWS  ENTER',2);
-}
-function bootKey(m,key){
-  const items=bootItems(m)[BOOT.screen]||[];
-  if(key==='up')   BOOT.sel=(BOOT.sel-1+items.length)%items.length;
-  if(key==='down') BOOT.sel=(BOOT.sel+1)%items.length;
-  if(key==='enter'){
-    const it=items[BOOT.sel];
-    if(it&&it.go){ BOOT.screen=it.go; BOOT.sel=0; return 'nav:'+it.go; }
-    return 'act:'+(it?it.t:'');
-  }
-  if(key==='back'&&BOOT.screen!=='main'){ BOOT.screen='main'; BOOT.sel=0; return 'nav:main'; }
-  return null;
-}
-function bootRender(m){ bootDraw(m);
-  const out=new Uint32Array(256*192);
-  for(let y=0;y<192;y++){ m.vdp.line=y; m.vdp.renderLine(y); out.set(m.vdp.fb.subarray(0,256), y*256); }
-  return out;
-}
 
 /* ---------------- UI ---------------- */
-const MODEN={sms:'Master System',gg:'Game Gear',ss:'MasterDrive',sg:'SG-1000',sc:'SC-3000',msx:'MSX2'};
+const MODEN={sms:'Master System',gg:'Game Gear',ss:'MasterDrive',sg:'SG-1000',sc:'SC-3000',sf:'SF-7000',msx:'MSX2'};
 const m=new Machine();
 m.lab=makeLab(m);
 m.psg.onChange=ch=>{ if(!m.layerBusy) m.chUse.psg[ch]=m.frameNo;
@@ -4920,29 +4978,38 @@ function start(){ if(running)return; running=true; fpsT=performance.now(); frame
   document.getElementById('run').textContent='Pause'; }
 function stop(){ running=false; cancelAnimationFrame(raf); document.getElementById('run').textContent='Run'; }
 
-document.getElementById('run').onclick=()=>{ if(!m.cart){log('load a cartridge first');return;} running?stop():start(); };
-document.getElementById('reset').onclick=()=>{ m.reset(); draw(); refresh(); log('reset'); };
+document.getElementById('run').onclick=()=>{
+  if(!m.cart&&!running&&!m.biosOn()){ m.powerOn(); log('no cartridge: the BIOS menu starts'); }
+  running?stop():start(); };
+document.getElementById('reset').onclick=()=>{ m.powerOn(); draw(); refresh(); log('reset: the BIOS starts'); };
 document.getElementById('snd').onclick=()=>{ initAudio(m); };
-document.getElementById('mode').onchange=e=>{ m.mode=e.target.value; m.reset();
+document.getElementById('mode').onchange=e=>{ const v=e.target.value;
+  if(v==='msx'){ m.mode='msx'; m.reset(); }          /* the MSX2 analysis machine: no BIOS */
+  else { m.platformMode=v; m.powerOn(); }
   document.getElementById('modetag').textContent=MODEN[m.mode];
   draw(); refresh(); };
-document.getElementById('turbo').onchange=e=>{ const was=m.cpuMult(); m.ael.turbo=parseFloat(e.target.value); m.rebaseSync(was);
+/* the BIOS has started the game: show the machine it chose */
+m.onLaunch=()=>{ document.getElementById('modetag').textContent=MODEN[m.mode]+(m.romName?' · '+m.romName:''); };
+document.getElementById('turbo').onchange=e=>{ const was=m.cpuMult(); m.ael.turbo=parseFloat(e.target.value); m.boostChanged('turbo'); m.rebaseSync(was);
   document.getElementById('bt').textContent=Math.round(m.cpuMult()*100)+'%'; };
 document.getElementById('scale').onchange=e=>{ cv.style.maxWidth=(256*parseInt(e.target.value))+'px'; };
 cv.style.maxWidth='768px';
 
 document.getElementById('cart').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
+  /* The file's extension gives the machine the BIOS offers first; a .sms file is left
+     to the BIOS, which reads the header (region 8 is MasterDrive software). */
   const ext=(f.name.split('.').pop()||'').toLowerCase();
-  const auto={sg:'sg',sc:'sg',gg:'gg',sms:'sms'}[ext];
-  if(auto && auto!==m.mode){ m.mode=auto; document.getElementById('mode').value=auto;
-    log('auto-detected '+MODEN[auto]+' from .'+ext); }
+  const auto={sg:'sg',sc:'sg',gg:'gg',sms:'auto'}[ext];
+  if(auto && auto!==m.platformMode){ m.platformMode=auto; document.getElementById('mode').value=auto;
+    if(auto!=='auto') log(MODEN[auto]+' offered first, from .'+ext); }
   f.arrayBuffer().then(b=>{ m.loadCart(b); m.romName=f.name;
     const r=romLoaded(m);
+    m.powerOn();
     if(r.moved) log(r.moved+' stored item'+(r.moved>1?'s':'')+' carried over from the old ROM id '+m.romIdSampled);
     if(r.had) log('per-game settings restored for '+m.romId);
     if(r.bat) log('battery save restored');
     draw(); refresh();
-    document.getElementById('modetag').textContent=MODEN[m.mode]+' · '+f.name; }); };
+    document.getElementById('modetag').textContent='BIOS · '+f.name; }); };
 document.getElementById('card').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   f.arrayBuffer().then(b=>{ m.loadCard(b); refresh(); }); };
 
@@ -4960,7 +5027,7 @@ addEventListener('keydown',e=>{
   if(bindWait){ BIND[bindWait]=e.key; bindWait=null; rebuildRev();
     store.set('binds',JSON.stringify(BIND)); refresh(); e.preventDefault(); return; }
   const k=REV[e.key]||REV[e.key.toLowerCase()];
-  if(k==='pause'){ if(m.mode!=='gg') m.cpu.nmi(); e.preventDefault(); return; }   // the Game Gear has no Pause button
+  if(k==='pause'){ m.pause(); e.preventDefault(); return; }   // (not on the Game Gear: it has no Pause button)
   if(k){ KEYS[k]=1; mergeInput(); e.preventDefault(); }
 });
 addEventListener('keyup',e=>{ const k=REV[e.key]||REV[e.key.toLowerCase()];
@@ -4987,7 +5054,7 @@ function pollPad(){
   for(const k of ['a','b','c','start','up','down','left','right']) PADIN[k]=on(k)?1:0;
   if(ax[1]<-0.4) PADIN.up=1;   if(ax[1]>0.4) PADIN.down=1;
   if(ax[0]<-0.4) PADIN.left=1; if(ax[0]>0.4) PADIN.right=1;
-  if(m.mode!=='gg'&&on('pause')&&!PADBIND.pause.some(i=>padPrev[i])) m.cpu.nmi();
+  if(on('pause')&&!PADBIND.pause.some(i=>padPrev[i])) m.pause();
   padPrev=now; mergeInput();
 }
 /* While waiting for a pad button the emulation may be paused, so poll on our own. */
@@ -5002,7 +5069,7 @@ document.querySelectorAll('.touch button').forEach(b=>{
 
 document.addEventListener('click',e=>{
   const b=e.target.closest('button[data-ael]'); if(!b)return;
-  const k=b.dataset.ael; m.ael[k]=!m.ael[k];
+  const k=b.dataset.ael; m.ael[k]=!m.ael[k]; m.boostChanged(k);
   if(k==='stereo') m.psg.pstereo=m.ael.stereo&&m.mode!=='ss';
   log('AEL '+k+' '+(m.ael[k]?'enabled':'disabled'));
   draw(); refresh();
@@ -5234,7 +5301,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
       const isB=String.fromCharCode(sig[0],sig[1],sig[2],sig[3])==='BPS1';
       const r=isB?applyBPS(base,buf):applyIPS(base,buf);
       m.cart=r.data; setRomIds(m); romMigrate(m);
-      m.reset(); draw(); refresh();
+      m.powerOn(); draw(); refresh();
       log(r.fmt+' patch applied ('+r.recs+' '+(isB?'bytes':'records')+') -> '+m.cart.length+' bytes');
     }catch(err){ log('patch failed: '+err.message); }
   }); };
@@ -5428,15 +5495,19 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
     chk('Audio','FM clean at reset',()=>{
       const f=new FM(); let nz=0; for(let i=0;i<64;i++) if(f.reg[i]) nz++;
       return {ok:nz===0,note:nz+' non-zero registers, must be 0'}; });
-    chk('Tooling','boot menu renders',()=>{
-      const m=M('ss'); bootInstall(m); const fb=bootRender(m);
-      let n=0; for(let i=0;i<fb.length;i++) if((fb[i]&0xFFFFFF)!==0) n++;
-      return {ok:n>3000,note:n.toLocaleString()+' pixels lit'}; });
-    chk('Tooling','boot menu navigation',()=>{
-      const m=M('ss'); bootInstall(m); BOOT.screen='main'; BOOT.sel=0;
-      const into=bootKey(m,'enter')==='nav:play';
-      bootKey(m,'back'); const back=BOOT.screen==='main';
-      return {ok:into&&back,note:'enter '+into+', back '+back}; });
+    /* a 32 KB Master System cartridge that loops at $0000, with a TMR SEGA header */
+    const hdrRom=()=>{ const r=new Uint8Array(0x8000); r.set([0xF3,0x18,0xFE]);
+      r.set([...'TMR SEGA'].map(c=>c.charCodeAt(0)),0x7FF0); r[0x7FFF]=0x4C; return r; };
+    chk('Tooling','BIOS menu renders',()=>{
+      const m=new Machine(); m.cart=hdrRom(); m.powerOn();
+      for(let i=0;i<12;i++) m.runFrame();
+      let n=0; for(let i=0;i<m.vdp.fb.length;i++) if((m.vdp.fb[i]&0xFFFFFF)===0xFFFFFF) n++;
+      return {ok:n>1500&&m.mode==='ss'&&m.memCtl===0xE0,note:n.toLocaleString()+' text pixels, $3E $'+m.memCtl.toString(16)}; });
+    chk('Tooling','BIOS launches the cartridge',()=>{
+      const m=new Machine(); m.cart=hdrRom(); m.powerOn(); let f=0;
+      for(;f<60&&m.mode==='ss';f++){ m.btn.start=f<2?1:0; m.runFrame(); }
+      return {ok:m.mode==='sms'&&m.memCtl===0xA8&&m.cpu.PC<4,
+        note:'Start held: '+MODEN[m.mode]+' after '+f+' frames, $3E $'+m.memCtl.toString(16)}; });
     chk('Tooling','FPGA counters attribute',()=>{
       const m=M('ss'); const rom=new Uint8Array(0x8000); rom[1]=0x18; rom[2]=0xFD;
       m.cart=rom; m.romMode='shadow'; m.runFrame();
@@ -5568,7 +5639,7 @@ $('patch').onchange=e=>{ const f=e.target.files[0]; if(!f)return;
                  sprPat:(V.reg[6]&4)?0x2000:0};
     const hex=(v,n)=>'$'+(v>>>0).toString(16).toUpperCase().padStart(n||2,'0');
     const rows=[
-      ['Machine',(BOOTMACH[m.mode]||m.mode)],
+      ['Machine',(MACHNAME[m.mode]||m.mode)],
       ['Display',(V.reg[1]&0x40)?'on':'OFF - nothing will draw'],
       ['Video mode',(V.vmode?V.vmode():'?')+', '+V.height()+' lines'],
       ['Turbo',Math.round(m.cpuMult()*100)+'%'],
@@ -5973,7 +6044,7 @@ $('romns').onchange=e=>{ m.romNs=+e.target.value; store.set('romns',String(m.rom
    line count and the clock change together. */
 function setTv(pal){ m.pal=!!pal; $('tv').value=m.pal?'pal':'ntsc'; }
 $('tv').onchange=e=>{ const was=m.pal; setTv(e.target.value==='pal'); store.set('tv',e.target.value);
-  if(m.pal!==was){ m.reset(); pace.acc=0; pace.t=null; draw(); refresh(); romNote();
+  if(m.pal!==was){ m.powerOn(); pace.acc=0; pace.t=null; draw(); refresh(); romNote();
     log((m.pal?'PAL 50 Hz':'NTSC 60 Hz')+': machine restarted'); } };
 (function(){ const v=store.get('tv'); if(v) setTv(v==='pal'); })();
 

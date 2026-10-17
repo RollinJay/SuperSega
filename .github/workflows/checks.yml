@@ -36,6 +36,13 @@ jobs:
         run: python3 wiring_audit.py ../masterdrive-emulator.html
       - name: ROM identity and stored-data migration
         run: node romid_test.js ../masterdrive-emulator.html ../../pocket-core/roms
+      - name: BIOS image, hex file and page block match the BIOS source
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends z80asm
+          python3 ../../bios/make_bios.py --check
+      - name: The BIOS hands over as a direct start
+        run: node bios_test.js ../masterdrive-emulator.html ../../pocket-core/roms
       - name: Install Playwright and Chromium
         run: |
           npm install --no-save playwright@1.56.1
